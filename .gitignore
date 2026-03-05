@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OSRM Data (Large binary artifacts)
+data/*
+!data/.gitkeep
+# If you want to keep the small .pbf file in git, uncomment the line below:
+# !data/costa-rica-latest.osm.pbf
+
+# Docker
+.docker/
+*.log
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment Secrets
+.env
+.env.local

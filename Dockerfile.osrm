@@ -1,0 +1,3 @@
+FROM ghcr.io/project-osrm/osrm-backend
+COPY ./data /data
+WORKDIR /data

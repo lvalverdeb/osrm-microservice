@@ -1,0 +1,32 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Documentation and Meta
+.agent/
+.gemini/
+.idea/
+.vscode/
+CHANGELOG.md
+plan.md
+README.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large source files not needed in final bundle
+# Note: DO NOT ignore the 'data/' folder itself, as Dockerfile.osrm needs it.
+# We only ignore the raw OSM file if it's already processed.
+# data/*.osm.pbf
