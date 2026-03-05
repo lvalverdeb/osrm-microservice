@@ -1,5 +1,7 @@
 # OSRM Backend Microservice
 
+[English](README.md) | [Español](README.es.md) | [Français](README.fr.md)
+
 High-performance routing and map-matching microservice for Costa Rica.
 
 ## Setup Instructions
@@ -38,10 +40,16 @@ docker compose up -d --build
 
 ## API Documentation
 
-Once running, interactive documentation is available at:
+Interactive documentation is available once the service is running:
 
 - Swagger UI: `http://localhost:8000/docs`
 - Redoc: `http://localhost:8000/redoc`
+
+For a detailed developer guide, see:
+
+- [API Reference (English)](docs/API_REFERENCE.md)
+- [Referencia de la API (Español)](docs/API_REFERENCE.es.md)
+- [Référence API (Français)](docs/API_REFERENCE.fr.md)
 
 ## Components
 
