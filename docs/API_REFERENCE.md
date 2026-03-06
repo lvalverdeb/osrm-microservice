@@ -42,6 +42,28 @@ Represents a single point in a GPS trace for map matching.
 | `origin` | `Coordinate` | Starting point of the route. |
 | `destination` | `Coordinate` | Final destination point. |
 | `waypoints` | `List[Coordinate]` | Optional intermediate points to pass through. |
+| `alternatives` | `bool or int` | Whether to return alternates (boolean) or a specific number (integer). (Default: `false`). |
+
+### `TripRequest`
+
+Used for solving the Traveling Salesperson Problem (TSP).
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `coordinates` | `List[Coordinate]` | List of points to optimize. |
+| `roundtrip` | `bool` | Whether the trip returns to the start (Default: `true`). |
+| `source` | `str` | Start point requirement (e.g., `first`, `any`). (Default: `first`). |
+| `destination` | `str` | End point requirement (e.g., `last`, `any`). (Default: `last`). |
+
+### `VrpRequest`
+
+Used for multi-vehicle Vehicle Routing Problem (VRP).
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `depots` | `List[Coordinate]` | List of warehouse/depot locations. |
+| `stops` | `List[Coordinate]` | List of delivery points. |
+| `vehicle_count` | `Optional[int]` | Total vehicles available. |
 
 ### `MatchRequest`
 
@@ -65,7 +87,7 @@ Represents a single point in a GPS trace for map matching.
 
 #### `POST /route`
 
-Calculates the fastest driving route between an origin and destination, with optional intermediate waypoints.
+Calculates the fastest driving route between an origin and destination, with optional intermediate waypoints and alternate routes.
 
 **Request Body (`RouteRequest`):**
 
@@ -73,7 +95,8 @@ Calculates the fastest driving route between an origin and destination, with opt
 {
   "origin": {"longitude": -84.09, "latitude": 9.93},
   "destination": {"longitude": -84.15, "latitude": 9.97},
-  "waypoints": []
+  "waypoints": [],
+  "alternatives": true
 }
 ```
 
@@ -223,7 +246,90 @@ Snaps noisy GPS traces to the road network. Handles trace splitting if signal is
 
 ---
 
-### 4. System
+### 4. Optimization (TSP)
+
+#### `POST /trip`
+
+Solves the Traveling Salesperson Problem to find the most efficient sequence for visiting multiple coordinates.
+
+**Request Body (`TripRequest`):**
+
+```json
+{
+  "coordinates": [
+    {"longitude": -84.09, "latitude": 9.93},
+    {"longitude": -84.05, "latitude": 9.93},
+    {"longitude": -84.07, "latitude": 9.91}
+  ],
+  "roundtrip": true,
+  "source": "first",
+  "destination": "any"
+}
+```
+
+**Example Response:**
+
+Returns a GeoJSON geometry and the optimized sequence in `waypoints[].waypoint_index`.
+
+```json
+{
+  "code": "Ok",
+  "trips": [
+    {
+      "geometry": { "type": "LineString", "coordinates": [...] },
+      "distance": 8500.2,
+      "duration": 620.5
+    }
+  ],
+  "waypoints": [
+    { "waypoint_index": 0, "location": [-84.09, 9.93], "name": "Start" },
+    { "waypoint_index": 2, "location": [-84.05, 9.93], "name": "Stop 2" },
+    { "waypoint_index": 1, "location": [-84.07, 9.91], "name": "Stop 1" }
+  ]
+}
+```
+
+---
+
+#### `POST /vrp`
+
+Solves the multi-vehicle Vehicle Routing Problem using Location-Allocation based on OSRM road durations.
+
+**Request Body (`VrpRequest`):**
+
+```json
+{
+  "depots": [{"longitude": -84.09, "latitude": 9.93}],
+  "stops": [
+    {"longitude": -84.10, "latitude": 9.94},
+    {"longitude": -84.08, "latitude": 9.92}
+  ]
+}
+```
+
+**Example Response:**
+
+```json
+{
+  "code": "Ok",
+  "routes": [
+    {
+      "vehicle_id": 0,
+      "depot_index": 0,
+      "stops_indices": [0, 1],
+      "route_geometry": { "type": "LineString", "coordinates": [...] },
+      "distance_meters": 5400.5,
+      "duration_seconds": 420.2
+    }
+  ],
+  "total_distance": 5400.5,
+  "total_duration": 420.2
+}
+```
+
+---
+
+### 5. System
 
 #### `GET /health`
 

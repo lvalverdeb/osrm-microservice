@@ -41,7 +41,19 @@ Représente un point unique dans une trace GPS pour le map matching.
 | :--- | :--- | :--- |
 | `origin` | `Coordinate` | Point de départ de l'itinéraire. |
 | `destination` | `Coordinate` | Point de destination final. |
-| `waypoints` | `List[Coordinate]` | Points intermédiaires optionnels par lesquels passer. |
+| `waypoints` | `List[Coordinate]` | Points intermédiaires facultatifs à traverser. |
+| `alternatives` | `bool ou int` | S'il faut retourner des itinéraires alternatifs (booléen) ou un nombre spécifique (entier). (Par défaut : `false`). |
+
+### `TripRequest`
+
+Utilisé pour résoudre le Problème du Voyageur de Commerce (TSP).
+
+| Champ | Type | Description |
+| :--- | :--- | :--- |
+| `coordinates` | `List[Coordinate]` | Liste de points à optimiser. |
+| `roundtrip` | `bool` | Si le voyage retourne au départ (Par défaut : `true`). |
+| `source` | `str` | Exigence du point de départ (ex: `first`, `any`). (Par défaut : `first`). |
+| `destination` | `str` | Exigence du point d'arrivée (ex: `last`, `any`). (Par défaut : `last`). |
 
 ### `MatchRequest`
 
@@ -65,7 +77,7 @@ Représente un point unique dans une trace GPS pour le map matching.
 
 #### `POST /route`
 
-Calcule l'itinéraire routier le plus rapide entre un point d'origine et de destination, avec des points intermédiaires optionnels.
+Calcule l'itinéraire routier le plus rapide entre un point d'origine et de destination, avec des points intermédiaires optionnels et des itinéraires alternatifs.
 
 **Exemple de Requête :**
 
@@ -73,7 +85,8 @@ Calcule l'itinéraire routier le plus rapide entre un point d'origine et de dest
 {
   "origin": {"longitude": -84.09, "latitude": 9.93},
   "destination": {"longitude": -84.15, "latitude": 9.97},
-  "waypoints": []
+  "waypoints": [],
+  "alternatives": true
 }
 ```
 
@@ -217,7 +230,52 @@ Aligne les traces GPS bruitées sur le réseau routier. Gère automatiquement la
 
 ---
 
-### 4. Système
+### 4. Optimisation (TSP)
+
+#### `POST /trip`
+
+Résout le Problème du Voyageur de Commerce pour trouver la séquence la plus efficace pour visiter plusieurs coordonnées.
+
+**Corps de la Requête (`TripRequest`) :**
+
+```json
+{
+  "coordinates": [
+    {"longitude": -84.09, "latitude": 9.93},
+    {"longitude": -84.05, "latitude": 9.93},
+    {"longitude": -84.07, "latitude": 9.91}
+  ],
+  "roundtrip": true,
+  "source": "first",
+  "destination": "any"
+}
+```
+
+**Exemple de Réponse :**
+
+Renvoie une géométrie GeoJSON et la séquence optimisée dans `waypoints[].waypoint_index`.
+
+```json
+{
+  "code": "Ok",
+  "trips": [
+    {
+      "geometry": { "type": "LineString", "coordinates": [...] },
+      "distance": 8500.2,
+      "duration": 620.5
+    }
+  ],
+  "waypoints": [
+    { "waypoint_index": 0, "location": [-84.09, 9.93], "name": "Départ" },
+    { "waypoint_index": 2, "location": [-84.05, 9.93], "name": "Arrêt 2" },
+    { "waypoint_index": 1, "location": [-84.07, 9.91], "name": "Arrêt 1" }
+  ]
+}
+```
+
+---
+
+### 5. Système
 
 #### `GET /health`
 

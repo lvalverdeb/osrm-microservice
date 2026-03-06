@@ -13,5 +13,12 @@
 - Pydantic V2 models for robust request validation and type safety.
 - Local agent skills for `fastapi-pro`, `docker-expert`, `uv-package-manager`, and more.
 - Hybrid **Local Build & Bundled Transfer** workflow to support remote Docker hosts.
-- Multi-stage `Dockerfile.builder` for processing OSRM data without host volumes.
-- Optimized `Dockerfile.osrm` for bundling processed data into production images.
+- Multi-stage `Dockerfile.builder` with `ARG PROFILE` support for `car`, `bicycle`, and `foot`.
+- Parameterized `Makefile` for profile-specific OSRM data processing.
+- Optimized `Dockerfile.osrm` using multi-stage copying for reliable data transfer.
+- Support for OSRM Trip service (TSP optimization) via `/trip` endpoint.
+- Support for Vehicle Routing Problem (VRP) using **Location-Allocation** via `/vrp` endpoint.
+- Support for integer `alternatives` in the `/route` endpoint.
+- Interactive visualization tool `visualize_routes.py` for route comparison.
+- Comparison tool `compare_tsp.py` for evaluating actual vs optimized round-trips.
+- New `visualize_vrp.py` tool for multi-vehicle fleet routing visualization.

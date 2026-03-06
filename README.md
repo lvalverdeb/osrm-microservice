@@ -16,19 +16,20 @@ This project uses a **Local Build & Bundled Transfer** workflow to support deplo
 
 ### 2. Data Acquisition & Local Processing
 
-Extract and process the Costa Rica OSM data locally. This process bundles the data into your local `./data` folder using a Docker-based "No-Mount" builder to bypass macOS filesystem restrictions.
+Extract and process the Costa Rica OSM data locally. This process bundles the data into your local `./data` folder using a Docker-based "No-Mount" builder.
 
 ```bash
 # Download the latest Costa Rica map data
 make download-data
 
-# Process the data locally (No volumes used)
-make process-osrm
+# Process the data locally for a specific profile (car, bicycle, foot)
+# Defaults to car if PROFILE is omitted
+make process-osrm PROFILE=car
 ```
 
 ### 3. Remote Deployment
 
-Deploy the API and the OSRM engine to the remote host. The processed data is bundled into the OSRM image during the build process and transferred via the Docker build context.
+Deploy the API and the OSRM engine to the remote host. The processed data is bundled directly from the builder image into the OSRM runtime image via a multi-stage `Dockerfile.osrm`.
 
 ```bash
 # Target the remote host
@@ -37,6 +38,22 @@ export DOCKER_HOST=tcp://10.211.55.28:2375
 # Build and start services
 docker compose up -d --build
 ```
+
+## Visualization Tools
+
+The project includes Python tools to visualize and compare routes:
+
+- **`visualize_routes.py`**: Fetches and plots primary and alternate routes for a trip.
+- **`compare_tsp.py`**: Compares a provided sequence of stops (Actual) against a TSP-optimized round-trip (Optimized).
+
+**Usage**:
+
+```bash
+# Generate a comparison map for a round-trip
+uv run compare_tsp.py
+```
+
+Maps are saved as interactive HTML files (`map.html`, `comparison_map.html`).
 
 ## API Documentation
 

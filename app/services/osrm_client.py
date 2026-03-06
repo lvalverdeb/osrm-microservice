@@ -1,8 +1,8 @@
 import httpx
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 from app.config import settings
-from app.models.schemas import MatchRequest, MatrixRequest
+from app.models.schemas import MatchRequest, MatrixRequest, TripRequest
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +24,22 @@ class OSRMClient:
                 logger.error(f"OSRM API error at {url}: {e}")
                 raise
 
-    async def get_route(self, coordinates: List[Dict[str, float]]) -> Dict[str, Any]:
+    async def get_route(self, coordinates: List[Dict[str, float]], alternatives: Union[bool, int] = False) -> Dict[str, Any]:
         """Fetch a driving route passing through multiple points."""
         coords_str = ";".join([f"{c['longitude']},{c['latitude']}" for c in coordinates])
         # By default all points are waypoints in /route, but we explicit it
         waypoints_indices = ";".join([str(i) for i in range(len(coordinates))])
+        
+        # OSRM accepts true/false or a number for alternatives
+        alt_param = "true" if alternatives is True else "false" if alternatives is False else str(alternatives)
+        
         return await self._get(f"/route/v1/driving/{coords_str}", params={
             "overview": "full",
             "geometries": "geojson",
             "steps": "true",
             "annotations": "distance,duration",
-            "waypoints": waypoints_indices
+            "waypoints": waypoints_indices,
+            "alternatives": alt_param
         })
 
     async def get_matrix(self, request: MatrixRequest) -> Dict[str, Any]:
@@ -58,4 +63,17 @@ class OSRMClient:
             "radiuses": radiuses,
             "overview": "full",
             "geometries": "geojson"
+        })
+
+    async def get_trip(self, request: TripRequest) -> Dict[str, Any]:
+        """Solve TSP for an optimized sequence of coordinates."""
+        coords = ";".join([f"{c.longitude},{c.latitude}" for c in request.coordinates])
+        return await self._get(f"/trip/v1/driving/{coords}", params={
+            "source": request.source,
+            "destination": request.destination,
+            "roundtrip": "true" if request.roundtrip else "false",
+            "overview": "full",
+            "geometries": "geojson",
+            "steps": "true",
+            "annotations": "distance,duration"
         })

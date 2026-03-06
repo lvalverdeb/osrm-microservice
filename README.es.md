@@ -14,19 +14,20 @@ Este proyecto utiliza un flujo de trabajo de **Construcción Local y Transferenc
 
 ### 2. Adquisición de Datos y Procesamiento Local
 
-Extraiga y procese los datos OSM de Costa Rica localmente. Este proceso agrupa los datos en su carpeta local `./data` utilizando un constructor basado en Docker "Sin Montaje" para omitir las restricciones del sistema de archivos de macOS.
+Extraiga y procese los datos OSM de Costa Rica localmente. Este proceso agrupa los datos en su carpeta local `./data` utilizando un constructor basado en Docker "Sin Montaje".
 
 ```bash
 # Descargar los últimos datos del mapa de Costa Rica
 make download-data
 
-# Procesar los datos localmente (sin usar volúmenes)
-make process-osrm
+# Procesar los datos localmente para un perfil específico (car, bicycle, foot)
+# Por defecto es car si se omite PROFILE
+make process-osrm PROFILE=car
 ```
 
 ### 3. Despliegue Remoto
 
-Despliegue la API y el motor OSRM en el host remoto. Los datos procesados se agrupan en la imagen OSRM durante el proceso de construcción y se transfieren a través del contexto de construcción de Docker.
+Despliegue la API y el motor OSRM en el host remoto. Los datos procesados se agrupan directamente desde la imagen del constructor a la imagen de tiempo de ejecución OSRM a través de un `Dockerfile.osrm` de múltiples etapas.
 
 ```bash
 # Apuntar al host remoto
@@ -35,6 +36,22 @@ export DOCKER_HOST=tcp://10.211.55.28:2375
 # Construir e iniciar los servicios
 docker compose up -d --build
 ```
+
+## Herramientas de Visualización
+
+El proyecto incluye herramientas de Python para visualizar y comparar rutas:
+
+- **`visualize_routes.py`**: Obtiene y traza rutas principales y alternativas para un viaje.
+- **`compare_tsp.py`**: Compara una secuencia de paradas proporcionada (Real) con un viaje de ida y vuelta optimizado por TSP (Optimizado).
+
+**Uso**:
+
+```bash
+# Generar un mapa de comparación para un viaje de ida y vuelta
+uv run compare_tsp.py
+```
+
+Los mapas se guardan como archivos HTML interactivos (`map.html`, `comparison_map.html`).
 
 ## Documentación de la API
 

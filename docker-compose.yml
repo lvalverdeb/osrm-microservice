@@ -3,10 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.osrm
+      args:
+        - PROFILE=car
     container_name: osrm-backend
     ports:
       - "5000:5000"
-    command: osrm-routed --algorithm mld /data/costa-rica-latest.osrm
+    command: sh -c "osrm-routed --algorithm mld /data/car/costa-rica-latest.osrm"
     restart: always
 
   api:

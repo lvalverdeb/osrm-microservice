@@ -41,7 +41,19 @@ Representa un único punto en un rastro de GPS para el emparejamiento de mapas (
 | :--- | :--- | :--- |
 | `origin` | `Coordinate` | Punto de inicio de la ruta. |
 | `destination` | `Coordinate` | Punto de destino final. |
-| `waypoints` | `List[Coordinate]` | Puntos intermedios opcionales por los que pasar. |
+| `waypoints` | `List[Coordinate]` | Puntos intermedios opcionales para pasar. |
+| `alternatives` | `bool o int` | Si se deben devolver rutas alternativas (booleano) o un número específico (entero). (Por defecto: `false`). |
+
+### `TripRequest`
+
+Utilizado para resolver el Problema del Viajante (TSP).
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `coordinates` | `List[Coordinate]` | Lista de puntos a optimizar. |
+| `roundtrip` | `bool` | Si el viaje regresa al inicio (Por defecto: `true`). |
+| `source` | `str` | Requisito de punto de inicio (ej. `first`, `any`). (Por defecto: `first`). |
+| `destination` | `str` | Requisito de punto final (ej. `last`, `any`). (Por defecto: `last`). |
 
 ### `MatchRequest`
 
@@ -65,7 +77,7 @@ Representa un único punto en un rastro de GPS para el emparejamiento de mapas (
 
 #### `POST /route`
 
-Calcula la ruta de conducción más rápida entre un origen y un destino, con puntos intermedios opcionales.
+Calcula la ruta de conducción más rápida entre un origen y un destino, con puntos intermedios opcionales y rutas alternativas.
 
 **Ejemplo de Solicitud:**
 
@@ -73,7 +85,8 @@ Calcula la ruta de conducción más rápida entre un origen y un destino, con pu
 {
   "origin": {"longitude": -84.09, "latitude": 9.93},
   "destination": {"longitude": -84.15, "latitude": 9.97},
-  "waypoints": []
+  "waypoints": [],
+  "alternatives": true
 }
 ```
 
@@ -217,7 +230,52 @@ Ajusta rastros de GPS con ruido a la red de carreteras. Maneja la división de r
 
 ---
 
-### 4. Sistema
+### 4. Optimización (TSP)
+
+#### `POST /trip`
+
+Resuelve el Problema del Viajante para encontrar la secuencia más eficiente para visitar múltiples coordenadas.
+
+**Cuerpo de la Solicitud (`TripRequest`):**
+
+```json
+{
+  "coordinates": [
+    {"longitude": -84.09, "latitude": 9.93},
+    {"longitude": -84.05, "latitude": 9.93},
+    {"longitude": -84.07, "latitude": 9.91}
+  ],
+  "roundtrip": true,
+  "source": "first",
+  "destination": "any"
+}
+```
+
+**Ejemplo de Respuesta:**
+
+Devuelve una geometría GeoJSON y la secuencia optimizada en `waypoints[].waypoint_index`.
+
+```json
+{
+  "code": "Ok",
+  "trips": [
+    {
+      "geometry": { "type": "LineString", "coordinates": [...] },
+      "distance": 8500.2,
+      "duration": 620.5
+    }
+  ],
+  "waypoints": [
+    { "waypoint_index": 0, "location": [-84.09, 9.93], "name": "Inicio" },
+    { "waypoint_index": 2, "location": [-84.05, 9.93], "name": "Parada 2" },
+    { "waypoint_index": 1, "location": [-84.07, 9.91], "name": "Parada 1" }
+  ]
+}
+```
+
+---
+
+### 5. Sistema
 
 #### `GET /health`
 

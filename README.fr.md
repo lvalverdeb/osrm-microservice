@@ -14,19 +14,20 @@ Ce projet utilise un flux de travail de **Construction Locale et Transfert Group
 
 ### 2. Acquisition de Données et Traitement Local
 
-Extrayez et traitez les données OSM du Costa Rica localement. Ce processus regroupe les données dans votre dossier local `./data` en utilisant un constructeur basé sur Docker "Sans Montage" pour contourner les restrictions du système de fichiers macOS.
+Extrayez et traitez les données OSM du Costa Rica localement. Ce processus regroupe les données dans votre dossier local `./data` en utilisant un constructeur basé sur Docker "Sans Montage".
 
 ```bash
 # Télécharger les dernières données cartographiques du Costa Rica
 make download-data
 
-# Traiter les données localement (sans utiliser de volumes)
-make process-osrm
+# Traiter les données localement pour un profil spécifique (car, bicycle, foot)
+# Par défaut sur car si PROFILE est omis
+make process-osrm PROFILE=car
 ```
 
 ### 3. Déploiement Distant
 
-Déployez l'API et le moteur OSRM sur l'hôte distant. Les données traitées sont regroupées dans l'image OSRM pendant le processus de construction et transférées via le contexte de construction Docker.
+Déployez l'API et le moteur OSRM sur l'hôte distant. Les données traitées sont regroupées directement de l'image du constructeur vers l'image d'exécution OSRM via un `Dockerfile.osrm` à plusieurs étapes.
 
 ```bash
 # Cibler l'hôte distant
@@ -35,6 +36,22 @@ export DOCKER_HOST=tcp://10.211.55.28:2375
 # Construire et démarrer les services
 docker compose up -d --build
 ```
+
+## Outils de Visualisation
+
+Le projet comprend des outils Python pour visualiser et comparer les itinéraires :
+
+- **`visualize_routes.py`** : Récupère et trace les itinéraires principaux et alternatifs pour un voyage.
+- **`compare_tsp.py`** : Compare une séquence d'arrêts fournie (Réel) à un voyage aller-retour optimisé par TSP (Optimisé).
+
+**Utilisation** :
+
+```bash
+# Générer une carte de comparaison pour un voyage aller-retour
+uv run compare_tsp.py
+```
+
+Les cartes sont enregistrées sous forme de fichiers HTML interactifs (`map.html`, `comparison_map.html`).
 
 ## Documentation API
 
