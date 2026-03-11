@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+import httpx
 from typing import Any, Dict
 from app.models.schemas import (
     RouteRequest, MatchRequest, MatrixRequest, MatrixGraphResponse, TripRequest,
@@ -29,6 +30,8 @@ async def get_route(request: RouteRequest):
         points.append(request.destination.model_dump())
         
         return await osrm_client.get_route(points, alternatives=request.alternatives)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"OSRM Error: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -37,6 +40,8 @@ async def get_matrix(request: MatrixRequest):
     """Fetch raw distance/duration matrix."""
     try:
         return await osrm_client.get_matrix(request)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"OSRM Error: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -46,6 +51,8 @@ async def get_matrix_graph(request: MatrixRequest):
     try:
         matrix_data = await osrm_client.get_matrix(request)
         return GraphBuilder.build_from_matrix(matrix_data, request)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"OSRM Error: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -59,6 +66,8 @@ async def match_trace(request: MatchRequest):
         # The OSRM /match response naturally contains 'matchings' as a list.
         # If signal is lost, OSRM returns multiple separate matching objects.
         return await osrm_client.match_trace(request)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"OSRM Error: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -70,6 +79,8 @@ async def get_trip(request: TripRequest):
     """
     try:
         return await osrm_client.get_trip(request)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"OSRM Error: {e.response.text}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -8,7 +8,7 @@ services:
     container_name: osrm-backend
     ports:
       - "5000:5000"
-    command: sh -c "osrm-routed --algorithm mld /data/car/costa-rica-latest.osrm"
+    command: sh -c "osrm-routed --algorithm mld --max-trip-size 200 /data/car/costa-rica-latest.osrm"
     restart: always
 
   api:

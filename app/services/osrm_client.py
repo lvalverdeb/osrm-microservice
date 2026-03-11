@@ -18,10 +18,17 @@ class OSRMClient:
             url = f"{self.base_url}{endpoint}"
             try:
                 response = await client.get(url, params=params)
+                if response.is_error:
+                    logger.error(f"OSRM API error at {url}: {response.status_code} - {response.text}")
                 response.raise_for_status()
                 return response.json()
+            except httpx.HTTPStatusError as e:
+                # Propagate the error with the OSRM response detail if available
+                error_detail = response.text if response else str(e)
+                logger.error(f"HTTPStatusError at {url}: {error_detail}")
+                raise
             except httpx.HTTPError as e:
-                logger.error(f"OSRM API error at {url}: {e}")
+                logger.error(f"OSRM API connection error at {url}: {e}")
                 raise
 
     async def get_route(self, coordinates: List[Dict[str, float]], alternatives: Union[bool, int] = False) -> Dict[str, Any]:

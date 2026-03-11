@@ -41,14 +41,14 @@ docker compose up -d --build
 
 El proyecto incluye herramientas de Python para visualizar y comparar rutas:
 
-- **`visualize_routes.py`**: Obtiene y traza rutas principales y alternativas para un viaje.
-- **`compare_tsp.py`**: Compara una secuencia de paradas proporcionada (Real) con un viaje de ida y vuelta optimizado por TSP (Optimizado).
+- **`examples/routing/visualize_routes.py`**: Obtiene y traza rutas principales y alternativas para un viaje.
+- **`examples/benchmarking/compare_tsp.py`**: Compara una secuencia de paradas proporcionada (Real) con un viaje de ida y vuelta optimizado por TSP (Optimizado).
 
 **Uso**:
 
 ```bash
 # Generar un mapa de comparación para un viaje de ida y vuelta
-uv run compare_tsp.py
+uv run examples/benchmarking/compare_tsp.py
 ```
 
 Los mapas se guardan como archivos HTML interactivos (`map.html`, `comparison_map.html`).
