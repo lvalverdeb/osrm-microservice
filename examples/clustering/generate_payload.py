@@ -14,12 +14,16 @@ def generate_example_payload():
     
     # Generate 50 stops near these warehouses
     stops = []
-    for _ in range(50):
+    for i in range(50):
         base = random.choice(depots)
         # Random offset within approx ~10km (0.1 decimal degrees is roughly 11km)
         lat = base["latitude"] + random.uniform(-0.05, 0.05)
         lon = base["longitude"] + random.uniform(-0.05, 0.05)
-        stops.append({"latitude": lat, "longitude": lon})
+        stops.append({
+            "id": f"S-{1000 + i}",
+            "latitude": lat,
+            "longitude": lon
+        })
         
     payload = {
         "depots": depots,

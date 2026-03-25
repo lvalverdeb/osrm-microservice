@@ -1,4 +1,5 @@
-from typing import List, Dict, Any, Tuple
+from __future__ import annotations
+from typing import List, Dict, Any, Tuple, Union
 import logging
 import numpy as np
 from app.models.schemas import VrpRequest, VrpResponse, VehicleRoute, TripRequest, Coordinate
@@ -21,31 +22,60 @@ class VrpService:
         1. Allocation: Assign stops to depots based on OSRM travel durations.
         2. Optimization: Solve a TSP (/trip) for each assigned set.
         """
-        # 1. Reuse the allocation logic
-        allocation_data = await self.allocate_products(request)
-        depot_assignments = allocation_data.allocations
+        # 1. Reuse the internal allocation logic (always returns indices)
+        allocation_result = await self._get_allocation_data(request)
+        depot_assignments = allocation_result["allocations"]
         
         # 2. Solve TSP for each depot's cluster
         vehicle_routes = []
         total_dist = 0
         total_dur = 0
+        vehicle_counter = 0
         
         for depot_idx, stop_indices in depot_assignments.items():
             if not stop_indices:
                 continue
                 
             current_depot = request.depots[depot_idx]
+            depot_id = getattr(current_depot, "id", None)
             
             # 2.1 Sub-partition if stops > 100 (OSRM /trip limit) or request.capacity
             CHUNK_SIZE = min(80, request.capacity)
+            num_chunks = (len(stop_indices) + CHUNK_SIZE - 1) // CHUNK_SIZE
+            
             for i in range(0, len(stop_indices), CHUNK_SIZE):
                 chunk = stop_indices[i:i + CHUNK_SIZE]
-                current_stops = [request.stops[idx] for idx in chunk]
                 
-                route = await self._solve_tsp_chunk(int(depot_idx), current_depot, current_stops, chunk)
+                # Determine vehicle_id for this route
+                if depot_id is not None:
+                    # If there's more than one vehicle from this depot, add a suffix
+                    vehicle_label = f"{depot_id}-{i // CHUNK_SIZE + 1}" if num_chunks > 1 else depot_id
+                else:
+                    vehicle_label = vehicle_counter
+                
+                # Ensure we pass simplified Coordinates to the TSP solver
+                current_stops = [
+                    Coordinate(latitude=request.stops[idx].latitude, longitude=request.stops[idx].longitude) 
+                    for idx in chunk
+                ]
+                
+                # Extract IDs for this chunk if they exist
+                chunk_ids = [request.stops[idx].id for idx in chunk]
+                has_ids = any(cid is not None for cid in chunk_ids)
+                
+                route = await self._solve_tsp_chunk(
+                    int(depot_idx), 
+                    current_depot, 
+                    current_stops, 
+                    chunk,
+                    stop_ids=chunk_ids if has_ids else None,
+                    vehicle_id=vehicle_label,
+                    roundtrip=request.roundtrip
+                )
                 vehicle_routes.append(route)
                 total_dist += route.distance_meters
                 total_dur += route.duration_seconds
+                vehicle_counter += 1
                 
         return VrpResponse(
             routes=vehicle_routes,
@@ -55,11 +85,47 @@ class VrpService:
 
     async def allocate_products(self, request: VrpRequest) -> "VrpAllocationResponse":
         """
-        Stand-alone Allocation phase.
-        Assigns each product to its logistically best warehouse based on road distance.
+        Stand-alone Allocation phase with ID propagation.
+        Assigns each product to its logistically best warehouse and returns ID-mapped results.
         """
         from app.models.schemas import VrpAllocationResponse
         
+        # 1. Get raw allocation (indices)
+        allocation_result = await self._get_allocation_data(request)
+        
+        # 2. Map indices back to provided IDs if they exist
+        stop_ids = [s.id for s in request.stops]
+        has_any_id = any(sid is not None for sid in stop_ids)
+        
+        if has_any_id:
+            # Map allocations: depot_index -> list of stop identifiers
+            raw_allocations = allocation_result["allocations"]
+            id_allocations = {}
+            for d_idx, s_indices in raw_allocations.items():
+                id_allocations[int(d_idx)] = [
+                    stop_ids[idx] if stop_ids[idx] is not None else idx 
+                    for idx in s_indices
+                ]
+            
+            # Map unreachable stops
+            id_unreachable = [
+                stop_ids[idx] if stop_ids[idx] is not None else idx 
+                for idx in allocation_result["unreachable_stops"]
+            ]
+            
+            return VrpAllocationResponse(
+                allocations=id_allocations,
+                unreachable_stops=id_unreachable
+            )
+        
+        # Default fallback to indices
+        return VrpAllocationResponse(
+            allocations=allocation_result["allocations"],
+            unreachable_stops=allocation_result["unreachable_stops"]
+        )
+
+    async def _get_allocation_data(self, request: VrpRequest) -> Dict[str, Any]:
+        """Internal helper to get raw allocation indices for both allocate and solve phases."""
         # 1. Measure durations AND distances from all depots to all stops
         matrix_data = await self._get_depot_to_stop_matrix(request.depots, request.stops)
         durations = matrix_data["durations"]
@@ -69,7 +135,7 @@ class VrpService:
         max_radius_m = request.max_radius_km * 1000 if request.max_radius_km else None
         
         # 3. Assign stops based on Road Distance with Radial Fallback and Hysteresis
-        allocation_result = self._allocate_stops(
+        return self._allocate_stops(
             durations, 
             distances,
             request.depots,
@@ -78,17 +144,21 @@ class VrpService:
             mode=request.clustering_mode,
             hysteresis_m=request.hysteresis_m
         )
-        
-        return VrpAllocationResponse(
-            allocations=allocation_result["allocations"],
-            unreachable_stops=allocation_result["unreachable_stops"]
-        )
 
-    async def _solve_tsp_chunk(self, depot_idx: int, depot: Coordinate, stops: List[Coordinate], original_indices: List[int]) -> VehicleRoute:
+    async def _solve_tsp_chunk(
+        self, 
+        depot_idx: int, 
+        depot: Coordinate, 
+        stops: List[Coordinate], 
+        original_indices: List[int],
+        stop_ids: List[Union[str, int]] = None,
+        vehicle_id: Union[str, int] = 0,
+        roundtrip: bool = True
+    ) -> VehicleRoute:
         """Helper to solve TSP for a small cluster of stops."""
         trip_req = TripRequest(
             coordinates=[depot] + stops,
-            roundtrip=True,
+            roundtrip=roundtrip,
             source="first",
             destination="any"
         )
@@ -97,10 +167,31 @@ class VrpService:
         
         if trip_result.get("code") == "Ok":
             best_trip = trip_result["trips"][0]
+            waypoints = trip_result.get("waypoints", [])
+            
+            # Reorder indices based on TSP optimization
+            # sorted_input_indices will be [0, opt_idx1, opt_idx2, ...] where 0 is the depot
+            sorted_input_indices = sorted(
+                range(len(waypoints)),
+                key=lambda i: (waypoints[i].get("trips_index", 0), waypoints[i].get("waypoint_index", 0))
+            )
+            
+            # Filter out the depot (index 0) and map back to original indices/IDs
+            optimized_stop_input_indices = [idx for idx in sorted_input_indices if idx > 0]
+            
+            optimized_indices = [original_indices[idx-1] for idx in optimized_stop_input_indices]
+            optimized_ids = None
+            if stop_ids:
+                optimized_ids = [stop_ids[idx-1] for idx in optimized_stop_input_indices]
+            
+            optimized_coords = [stops[idx-1] for idx in optimized_stop_input_indices]
+            
             return VehicleRoute(
-                vehicle_id=0, # Placeholder, will be updated by caller
+                vehicle_id=vehicle_id,
                 depot_index=depot_idx,
-                stops_indices=original_indices,
+                stops_indices=optimized_indices,
+                stop_ids=optimized_ids,
+                stop_coordinates=optimized_coords,
                 route_geometry=best_trip["geometry"],
                 distance_meters=best_trip["distance"],
                 duration_seconds=best_trip["duration"]

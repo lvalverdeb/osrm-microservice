@@ -119,8 +119,9 @@ def generate_payload(total_stops=6500):
         lat = hub["latitude"] + random.uniform(-0.01, 0.01)
         lon = hub["longitude"] + random.uniform(-0.01, 0.01)
         if is_in_costa_rica(lat, lon):
-            stops.append({"latitude": lat, "longitude": lon})
-            metadata.append({"province": hub["province"], "district": hub["name"], "zone": "Valle Central"})
+            stop_id = f"VC-{len(stops):04d}"
+            stops.append({"id": stop_id, "latitude": lat, "longitude": lon})
+            metadata.append({"id": stop_id, "province": hub["province"], "district": hub["name"], "zone": "Valle Central"})
         
     print(f"Generating {rest_target} stops for Rest of Country districts...")
     while len(stops) < total_stops:
@@ -129,8 +130,9 @@ def generate_payload(total_stops=6500):
         lat = hub["latitude"] + random.uniform(-0.02, 0.02)
         lon = hub["longitude"] + random.uniform(-0.02, 0.02)
         if is_in_costa_rica(lat, lon):
-            stops.append({"latitude": lat, "longitude": lon})
-            metadata.append({"province": hub["province"], "district": hub["name"], "zone": "Rest of Country"})
+            stop_id = f"RC-{len(stops):04d}"
+            stops.append({"id": stop_id, "latitude": lat, "longitude": lon})
+            metadata.append({"id": stop_id, "province": hub["province"], "district": hub["name"], "zone": "Rest of Country"})
         
     payload = {
         "depots": depots,
@@ -175,13 +177,20 @@ def visualize_results(payload, results, output_file):
             icon=folium.Icon(color='black', icon='home')
         ).add_to(m)
         
+    # Create lookup for stops by ID or original index
+    stop_lookup = {s.get("id", i): s for i, s in enumerate(payload["stops"])}
+    
     allocations = results.get("allocations", {})
-    for d_idx_str, stop_indices in allocations.items():
+    for d_idx_str, stop_ids in allocations.items():
         d_idx = int(d_idx_str)
         depot_coords = [payload["depots"][d_idx]["latitude"], payload["depots"][d_idx]["longitude"]]
         color = colors[d_idx % len(colors)]
-        for s_idx in stop_indices:
-            stop = payload["stops"][s_idx]
+        for s_id in stop_ids:
+            # Handle both string IDs and fallback integer indices
+            stop = stop_lookup.get(s_id)
+            if not stop:
+                continue
+            
             stop_coords = [stop["latitude"], stop["longitude"]]
             folium.PolyLine([depot_coords, stop_coords], color=color, weight=1, opacity=0.3).add_to(m)
             folium.CircleMarker(stop_coords, radius=1, color=color, fill=True, opacity=0.5).add_to(m)

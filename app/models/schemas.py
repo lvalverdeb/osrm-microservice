@@ -6,6 +6,10 @@ class Coordinate(BaseModel):
     longitude: float = Field(..., description="Longitude of the point")
     latitude: float = Field(..., description="Latitude of the point")
 
+class Stop(Coordinate):
+    """Specific delivery stop with an optional ID."""
+    id: Optional[Union[str, int]] = Field(None, description="Unique identifier for the stop used for tracking")
+
 class RouteRequest(BaseModel):
     """Request model for routing between points."""
     origin: Coordinate
@@ -44,19 +48,22 @@ class TripRequest(BaseModel):
 
 class VrpRequest(BaseModel):
     """Request model for Vehicle Routing Problem (VRP)."""
-    depots: List[Coordinate] = Field(..., description="List of warehouse/depot locations")
-    stops: List[Coordinate] = Field(..., description="List of delivery points")
+    depots: List[Stop] = Field(..., description="List of warehouse/depot locations")
+    stops: List[Stop] = Field(..., description="List of delivery points")
     vehicle_count: Optional[int] = Field(None, description="Total vehicles available. Defaults to one per depot.")
     capacity: int = Field(35, description="Maximum packages a single vehicle can carry")
     max_radius_km: Optional[float] = Field(None, description="Optional maximum road distance from depot (km)")
     clustering_mode: Optional[str] = Field("travel_time", description="Clustering preference: 'distance', 'travel_time', or 'radial'")
     hysteresis_m: float = Field(2000.0, description="Buffer distance to prevent assignment flipping (meters)")
+    roundtrip: bool = Field(True, description="Whether each vehicle should return to the depot at the end of its route")
 
 class VehicleRoute(BaseModel):
     """Response model for a single vehicle's optimized route."""
-    vehicle_id: int
+    vehicle_id: Union[str, int]
     depot_index: int
     stops_indices: List[int]
+    stop_ids: Optional[List[Union[str, int]]] = None
+    stop_coordinates: Optional[List[Coordinate]] = None
     route_geometry: Dict[str, Any]
     distance_meters: float
     duration_seconds: float
@@ -64,9 +71,9 @@ class VehicleRoute(BaseModel):
 class VrpAllocationResponse(BaseModel):
     """Response model for the Location-Allocation (Clustering) phase."""
     code: str = "Ok"
-    # depot_index -> list of stop_indices
-    allocations: Dict[int, List[int]]
-    unreachable_stops: List[int]
+    # depot_index -> list of stop identifiers (IDs or Indices)
+    allocations: Dict[int, List[Union[str, int]]]
+    unreachable_stops: List[Union[str, int]]
     # Optionally return the distance matrix if needed for downstream
     # distances: Optional[List[List[float]]] = None
 
