@@ -43,11 +43,15 @@ Le projet comprend des outils Python pour visualiser et comparer les itinéraire
 
 - **`visualize_routes.py`** : Récupère et trace les itinéraires principaux et alternatifs pour un voyage.
 - **`compare_tsp.py`** : Compare une séquence d'arrêts fournie (Réel) à un voyage aller-retour optimisé par TSP (Optimisé).
+- **`examples/clustering/simple_id_example.py`** : Un démonstrateur VRP complet qui simule 10 véhicules sur plusieurs dépôts et génère une carte Folium interactive.
 
 **Utilisation** :
 
 ```bash
-# Générer une carte de comparaison pour un voyage aller-retour
+# Exécuter la simulation VRP de 10 véhicules
+uv run examples/clustering/simple_id_example.py
+
+# Comparer les séquences réelles vs optimisées
 uv run compare_tsp.py
 ```
 
@@ -69,5 +73,6 @@ Pour un guide détaillé pour les développeurs, voir :
 ## Composants
 
 - **Moteur OSRM** : Moteur de routage C++ utilisant l'algorithme MLD.
-- **FastAPI Gateway** : API Python asynchrone fournissant des points de terminaison spécialisés pour l'appariement de cartes et la génération de graphes.
+- **FastAPI Gateway** : API Python asynchrone fournissant des points de terminaison spécialisés pour l'appariement de cartes, la génération de graphes et Problèmes de Tournées de Véhicules (VRP).
+- **Résolveur VRP** : Moteur de Localisation-Attribution pour le regroupement multi-véhicules avec prise en charge des identifiants personnalisés et division d'itinéraires basée sur la capacité.
 - **Intégration NetworkX** : Convertit de manière transparente les sorties de matrice en graphes sérialisables.

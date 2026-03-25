@@ -24,6 +24,16 @@ Representación estándar de un punto geográfico.
 | `longitude` | `float` | Longitud del punto en grados decimales. |
 | `latitude` | `float` | Latitud del punto en grados decimales. |
 
+### `Stop` (Hereda de `Coordinate`)
+
+Representa una ubicación de entrega o un depósito con un identificador opcional.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `longitude` | `float` | Longitud del punto en grados decimales. |
+| `latitude` | `float` | Latitud del punto en grados decimales. |
+| `id` | `Union[str, int]` | Identificador único opcional utilizado para el seguimiento en todo el proceso. |
+
 ### `GPSBreadcrumb`
 
 Representa un único punto en un rastro de GPS para el emparejamiento de mapas (map matching).
@@ -54,6 +64,20 @@ Utilizado para resolver el Problema del Viajante (TSP).
 | `roundtrip` | `bool` | Si el viaje regresa al inicio (Por defecto: `true`). |
 | `source` | `str` | Requisito de punto de inicio (ej. `first`, `any`). (Por defecto: `first`). |
 | `destination` | `str` | Requisito de punto final (ej. `last`, `any`). (Por defecto: `last`). |
+
+### `VrpRequest`
+
+Utilizado para el Problema de Enrutamiento de Vehículos (VRP) multivehículo.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `depots` | `List[Stop]` | Lista de ubicaciones de almacenes/depósitos. Puede incluir un `id` para nombrar vehículos. |
+| `stops` | `List[Stop]` | Lista de puntos de entrega. |
+| `vehicle_count` | `Optional[int]` | Total de vehículos disponibles. |
+| `capacity` | `int` | Volumen máximo (paradas) por vehículo. (Por defecto: 35). |
+| `max_radius_km` | `float` | Distancia máxima por carretera que una parada puede estar del depósito. |
+| `clustering_mode` | `str` | Preferencia de agrupación: `travel_time` (por defecto), `distance`, o `radial`. |
+| `roundtrip` | `bool` | Si los vehículos deben regresar al depósito. (Por defecto: `true`). |
 
 ### `MatchRequest`
 
@@ -275,7 +299,72 @@ Devuelve una geometría GeoJSON y la secuencia optimizada en `waypoints[].waypoi
 
 ---
 
-### 5. Sistema
+### 5. Logística y VRP
+
+#### `POST /vrp`
+
+Resuelve el Problema de Enrutamiento de Vehículos multivehículo utilizando Localización-Asignación basada en duraciones de carretera OSRM.
+
+**Cuerpo de la Solicitud (`VrpRequest`):**
+
+```json
+{
+  "depots": [{"id": "CENTRO_A", "longitude": -84.09, "latitude": 9.93}],
+  "stops": [
+    {"id": "ORD-1", "longitude": -84.10, "latitude": 9.94},
+    {"id": "ORD-2", "longitude": -84.08, "latitude": 9.92}
+  ],
+  "capacity": 35,
+  "roundtrip": true
+}
+```
+
+**Ejemplo de Respuesta:**
+
+```json
+{
+  "code": "Ok",
+  "routes": [
+    {
+      "vehicle_id": "CENTRO_A",
+      "depot_index": 0,
+      "stops_indices": [0, 1],
+      "stop_ids": ["ORD-1", "ORD-2"],
+      "stop_coordinates": [
+        {"longitude": -84.10, "latitude": 9.94},
+        {"longitude": -84.08, "latitude": 9.92}
+      ],
+      "route_geometry": { "type": "LineString", "coordinates": [...] },
+      "distance_meters": 5400.5,
+      "duration_seconds": 420.2
+    }
+  ],
+  "total_distance": 5400.5,
+  "total_duration": 420.2
+}
+```
+
+#### `POST /vrp/allocate`
+
+Realiza solo la fase de agrupación (clustering) sin optimizar la secuencia de la ruta. Útil para pre-asignar cargas a camiones.
+
+**Cuerpo de la Solicitud:** Igual que `POST /vrp`.
+
+**Ejemplo de Respuesta:**
+
+```json
+{
+  "code": "Ok",
+  "allocations": {
+    "0": ["ORD-1", "ORD-2"]
+  },
+  "unreachable_stops": []
+}
+```
+
+---
+
+### 6. Sistema
 
 #### `GET /health`
 

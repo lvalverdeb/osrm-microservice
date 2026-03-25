@@ -24,6 +24,16 @@ Standard representation of a geographic point.
 | `longitude` | `float` | Longitude of the point in decimal degrees. |
 | `latitude` | `float` | Latitude of the point in decimal degrees. |
 
+### `Stop` (Inherits from `Coordinate`)
+
+Represents a delivery location or a depot with an optional identifier.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `longitude` | `float` | Longitude of the point in decimal degrees. |
+| `latitude` | `float` | Latitude of the point in decimal degrees. |
+| `id` | `Union[str, int]` | Optional unique identifier used for tracking throughout the process. |
+
 ### `GPSBreadcrumb`
 
 Represents a single point in a GPS trace for map matching.
@@ -61,9 +71,13 @@ Used for multi-vehicle Vehicle Routing Problem (VRP).
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `depots` | `List[Coordinate]` | List of warehouse/depot locations. |
-| `stops` | `List[Coordinate]` | List of delivery points. |
+| `depots` | `List[Stop]` | List of warehouse/depot locations. Can include an `id` for naming vehicles. |
+| `stops` | `List[Stop]` | List of delivery points. |
 | `vehicle_count` | `Optional[int]` | Total vehicles available. |
+| `capacity` | `int` | Maximum volume (stops) per vehicle. (Default: 35). |
+| `max_radius_km` | `float` | Max road distance a stop can be from the depot. |
+| `clustering_mode` | `str` | Clustering preference: `travel_time` (default), `distance`, or `radial`. |
+| `roundtrip` | `bool` | Whether vehicles must return to the depot. (Default: `true`). |
 
 ### `MatchRequest`
 
@@ -299,11 +313,13 @@ Solves the multi-vehicle Vehicle Routing Problem using Location-Allocation based
 
 ```json
 {
-  "depots": [{"longitude": -84.09, "latitude": 9.93}],
+  "depots": [{"id": "HUB_A", "longitude": -84.09, "latitude": 9.93}],
   "stops": [
-    {"longitude": -84.10, "latitude": 9.94},
-    {"longitude": -84.08, "latitude": 9.92}
-  ]
+    {"id": "ORD-1", "longitude": -84.10, "latitude": 9.94},
+    {"id": "ORD-2", "longitude": -84.08, "latitude": 9.92}
+  ],
+  "capacity": 35,
+  "roundtrip": true
 }
 ```
 
@@ -314,9 +330,14 @@ Solves the multi-vehicle Vehicle Routing Problem using Location-Allocation based
   "code": "Ok",
   "routes": [
     {
-      "vehicle_id": 0,
+      "vehicle_id": "HUB_A",
       "depot_index": 0,
       "stops_indices": [0, 1],
+      "stop_ids": ["ORD-1", "ORD-2"],
+      "stop_coordinates": [
+        {"longitude": -84.10, "latitude": 9.94},
+        {"longitude": -84.08, "latitude": 9.92}
+      ],
       "route_geometry": { "type": "LineString", "coordinates": [...] },
       "distance_meters": 5400.5,
       "duration_seconds": 420.2

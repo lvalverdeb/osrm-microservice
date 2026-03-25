@@ -45,11 +45,15 @@ The project includes Python tools to visualize and compare routes:
 
 - **`visualize_routes.py`**: Fetches and plots primary and alternate routes for a trip.
 - **`compare_tsp.py`**: Compares a provided sequence of stops (Actual) against a TSP-optimized round-trip (Optimized).
+- **`simple_id_example.py`**: A comprehensive VRP demonstrator that simulates 10 vehicles across multiple depots and generates an interactive Folium map.
 
 **Usage**:
 
 ```bash
-# Generate a comparison map for a round-trip
+# Run the 10-vehicle VRP simulation
+uv run examples/clustering/simple_id_example.py
+
+# Compare actual vs optimized sequences
 uv run compare_tsp.py
 ```
 
@@ -71,5 +75,6 @@ For a detailed developer guide, see:
 ## Components
 
 - **OSRM Engine**: C++ routing powerhouse running the MLD algorithm.
-- **FastAPI Gateway**: Asynchronous Python API providing specialized endpoints for map matching and graph generation.
+- **FastAPI Gateway**: Asynchronous Python API providing specialized endpoints for map matching, graph generation, and Vehicle Routing Problems (VRP).
+- **VRP Solver**: Location-Allocation engine for multi-vehicle clustering with support for custom IDs and capacity-based route splitting.
 - **NetworkX Integration**: Transparently converts matrix outputs into serializable graphs.
