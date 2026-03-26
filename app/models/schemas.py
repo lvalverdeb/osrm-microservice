@@ -71,8 +71,8 @@ class VehicleRoute(BaseModel):
 class VrpAllocationResponse(BaseModel):
     """Response model for the Location-Allocation (Clustering) phase."""
     code: str = "Ok"
-    # depot_index -> list of stop identifiers (IDs or Indices)
-    allocations: Dict[int, List[Union[str, int]]]
+    # depot_id/index -> list of stop identifiers (IDs or Indices)
+    allocations: Dict[Union[str, int], List[Union[str, int]]]
     unreachable_stops: List[Union[str, int]]
     # Optionally return the distance matrix if needed for downstream
     # distances: Optional[List[List[float]]] = None

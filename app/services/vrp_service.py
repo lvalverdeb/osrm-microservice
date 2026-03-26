@@ -93,16 +93,21 @@ class VrpService:
         # 1. Get raw allocation (indices)
         allocation_result = await self._get_allocation_data(request)
         
-        # 2. Map indices back to provided IDs if they exist
+        # 2. Map indices back to provided IDs (for both depots and stops)
+        depot_ids = [d.id for d in request.depots]
         stop_ids = [s.id for s in request.stops]
-        has_any_id = any(sid is not None for sid in stop_ids)
         
-        if has_any_id:
-            # Map allocations: depot_index -> list of stop identifiers
+        has_any_stop_id = any(sid is not None for sid in stop_ids)
+        has_any_depot_id = any(did is not None for did in depot_ids)
+        
+        if has_any_stop_id or has_any_depot_id:
             raw_allocations = allocation_result["allocations"]
             id_allocations = {}
             for d_idx, s_indices in raw_allocations.items():
-                id_allocations[int(d_idx)] = [
+                # Determine depot identifier (ID or index)
+                d_key = depot_ids[int(d_idx)] if depot_ids[int(d_idx)] is not None else int(d_idx)
+                
+                id_allocations[d_key] = [
                     stop_ids[idx] if stop_ids[idx] is not None else idx 
                     for idx in s_indices
                 ]
