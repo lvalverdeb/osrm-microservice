@@ -346,7 +346,7 @@ Resuelve el Problema de Enrutamiento de Vehículos multivehículo utilizando Loc
 
 #### `POST /vrp/allocate`
 
-Realiza solo la fase de agrupación (clustering) sin optimizar la secuencia de la ruta. Útil para pre-asignar cargas a camiones.
+Realiza solo la fase de agrupación (clustering) sin optimizar la secuencia de la ruta. Útil para pre-asignar cargas a camiones. La respuesta ahora soporta y propaga los IDs de depósito personalizados como claves.
 
 **Cuerpo de la Solicitud:** Igual que `POST /vrp`.
 
@@ -356,7 +356,7 @@ Realiza solo la fase de agrupación (clustering) sin optimizar la secuencia de l
 {
   "code": "Ok",
   "allocations": {
-    "0": ["ORD-1", "ORD-2"]
+    "CENTRO_A": ["ORD-1", "ORD-2"]
   },
   "unreachable_stops": []
 }

@@ -305,6 +305,8 @@ Returns a GeoJSON geometry and the optimized sequence in `waypoints[].waypoint_i
 
 ---
 
+### 5. Logistics & VRP
+
 #### `POST /vrp`
 
 Solves the multi-vehicle Vehicle Routing Problem using Location-Allocation based on OSRM road durations.
@@ -347,6 +349,26 @@ Solves the multi-vehicle Vehicle Routing Problem using Location-Allocation based
   "total_duration": 420.2
 }
 ```
+
+#### `POST /vrp/allocate`
+
+Performs only the clustering phase without optimizing the route sequence. Useful for pre-allocating loads to trucks. The response now supports and propagates custom Depot IDs as keys.
+
+**Request Body:** Same as `POST /vrp`.
+
+**Example Response:**
+
+```json
+{
+  "code": "Ok",
+  "allocations": {
+    "HUB_A": ["ORD-1", "ORD-2"]
+  },
+  "unreachable_stops": []
+}
+```
+
+---
 
 ---
 

@@ -346,7 +346,7 @@ Résout le Problème de Tournées de Véhicules multi-véhicules en utilisant la
 
 #### `POST /vrp/allocate`
 
-Effectue uniquement la phase de regroupement (clustering) sans optimiser l'ordre de la tournée. Utile pour pré-allouer des charges aux camions.
+Effectue uniquement la phase de regroupement (clustering) sans optimiser l'ordre de la tournée. Utile pour pré-allouer des charges aux camiones. La réponse prend désormais en charge et propage les identifiants de dépôt personnalisés en tant que clés.
 
 **Corps de la Requête :** Identique à `POST /vrp`.
 
@@ -356,7 +356,7 @@ Effectue uniquement la phase de regroupement (clustering) sans optimiser l'ordre
 {
   "code": "Ok",
   "allocations": {
-    "0": ["ORD-1", "ORD-2"]
+    "CENTRO_A": ["ORD-1", "ORD-2"]
   },
   "unreachable_stops": []
 }

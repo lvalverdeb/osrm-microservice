@@ -45,11 +45,15 @@ The project includes Python tools to visualize and compare routes:
 
 - **`visualize_routes.py`**: Fetches and plots primary and alternate routes for a trip.
 - **`compare_tsp.py`**: Compares a provided sequence of stops (Actual) against a TSP-optimized round-trip (Optimized).
+- **`matrix_example.py`**: Demonstrates how to generate a distance and duration table (matrix) between multiple origins and destinations.
 - **`simple_id_example.py`**: A comprehensive VRP demonstrator that simulates 10 vehicles across multiple depots and generates an interactive Folium map.
 
 **Usage**:
 
 ```bash
+# Run the distance/duration matrix example
+uv run examples/routing/matrix_example.py
+
 # Run the 10-vehicle VRP simulation
 uv run examples/clustering/simple_id_example.py
 

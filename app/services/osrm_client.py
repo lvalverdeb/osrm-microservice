@@ -6,40 +6,49 @@ from app.models.schemas import MatchRequest, MatrixRequest, TripRequest
 
 logger = logging.getLogger(__name__)
 
+
 class OSRMClient:
-    """Async client for interacting with the OSRM API."""
+    """Async client for interacting with the OSRM API with connection pooling."""
 
     def __init__(self):
         self.base_url = settings.OSRM_BASE_URL
+        # Initialize the client once so it maintains a connection pool
+        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+
+    async def close(self):
+        """Gracefully close the underlying httpx client."""
+        await self._client.aclose()
 
     async def _get(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Internal helper for GET requests."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            url = f"{self.base_url}{endpoint}"
-            try:
-                response = await client.get(url, params=params)
-                if response.is_error:
-                    logger.error(f"OSRM API error at {url}: {response.status_code} - {response.text}")
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                # Propagate the error with the OSRM response detail if available
-                error_detail = response.text if response else str(e)
-                logger.error(f"HTTPStatusError at {url}: {error_detail}")
-                raise
-            except httpx.HTTPError as e:
-                logger.error(f"OSRM API connection error at {url}: {e}")
-                raise
+        """Internal helper for GET requests using the shared client pool."""
+        try:
+            # We no longer instantiate the client here. We reuse the instance client.
+            # Notice we drop self.base_url from the get() call because we set it in __init__
+            response = await self._client.get(endpoint, params=params)
 
-    async def get_route(self, coordinates: List[Dict[str, float]], alternatives: Union[bool, int] = False) -> Dict[str, Any]:
+            if response.is_error:
+                logger.error(f"OSRM API error at {response.url}: {response.status_code} - {response.text}")
+            response.raise_for_status()
+
+            return response.json()
+
+        except httpx.HTTPStatusError as e:
+            error_detail = response.text if 'response' in locals() and response else str(e)
+            logger.error(f"HTTPStatusError at {e.request.url}: {error_detail}")
+            raise
+        except httpx.HTTPError as e:
+            # Using getattr to safely pull the URL if the request object exists
+            url = getattr(e, 'request', getattr(e, 'url', endpoint))
+            logger.error(f"OSRM API connection error at {url}: {e}")
+            raise
+
+    async def get_route(self, coordinates: List[Dict[str, float]], alternatives: Union[bool, int] = False) -> Dict[
+        str, Any]:
         """Fetch a driving route passing through multiple points."""
         coords_str = ";".join([f"{c['longitude']},{c['latitude']}" for c in coordinates])
-        # By default all points are waypoints in /route, but we explicit it
         waypoints_indices = ";".join([str(i) for i in range(len(coordinates))])
-        
-        # OSRM accepts true/false or a number for alternatives
         alt_param = "true" if alternatives is True else "false" if alternatives is False else str(alternatives)
-        
+
         return await self._get(f"/route/v1/driving/{coords_str}", params={
             "overview": "full",
             "geometries": "geojson",
@@ -64,7 +73,7 @@ class OSRMClient:
         coords = ";".join([f"{b.longitude},{b.latitude}" for b in request.breadcrumbs])
         timestamps = ";".join([str(b.timestamp) for b in request.breadcrumbs])
         radiuses = ";".join([str(b.accuracy_meters) for b in request.breadcrumbs])
-        
+
         return await self._get(f"/match/v1/driving/{coords}", params={
             "timestamps": timestamps,
             "radiuses": radiuses,
