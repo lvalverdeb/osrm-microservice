@@ -39,6 +39,22 @@ export DOCKER_HOST=tcp://10.211.55.28:2375
 docker compose up -d --build
 ```
 
+## Core Services
+
+The application encapsulates complex routing logic into several key services located in `app/services/`:
+
+### 1. OSRM Client (`osrm_client.py`)
+An asynchronous HTTP client that interacts directly with the C++ OSRM backend. It formats queries and standardizes responses.
+**Example Use Case**: Fetching the exact geometry and driving instructions for a trip between a warehouse and multiple delivery points.
+
+### 2. Graph Builder (`graph_builder.py`)
+Transforms raw OSRM distance and duration matrices into directed `NetworkX` graphs.
+**Example Use Case**: Generating a mathematical representation of the road network to feed into advanced optimization algorithms (like custom TSP solvers) or to identify isolated nodes in the delivery network.
+
+### 3. VRP Service (`vrp_service.py`)
+A comprehensive Vehicle Routing Problem (VRP) solver. It implements a Location-Allocation strategy, assigning delivery stops to the nearest available warehouse (depot) and generating optimized delivery sequences.
+**Example Use Case**: A logistics company wants to distribute 500 daily packages across 5 drivers starting from 2 different warehouses, ensuring each driver takes the most optimal cluster of stops.
+
 ## Visualization Tools
 
 The project includes Python tools to visualize and compare routes:
