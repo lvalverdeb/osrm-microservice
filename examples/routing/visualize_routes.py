@@ -12,7 +12,7 @@ import json
 import os
 
 # Configuration
-API_URL = "http://10.211.55.28:8080/route"
+API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000") + "/route"
 # Use coordinates in San Jose that are likely to have multiple paths
 ORIGIN = {"longitude": -84.078, "latitude": 9.932}
 DESTINATION = {"longitude": -84.150, "latitude": 9.940}

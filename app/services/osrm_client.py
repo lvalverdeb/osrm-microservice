@@ -21,25 +21,22 @@ class OSRMClient:
 
     async def _get(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Internal helper for GET requests using the shared client pool."""
+        response = None
         try:
-            # We no longer instantiate the client here. We reuse the instance client.
-            # Notice we drop self.base_url from the get() call because we set it in __init__
             response = await self._client.get(endpoint, params=params)
 
             if response.is_error:
-                logger.error(f"OSRM API error at {response.url}: {response.status_code} - {response.text}")
+                logger.error("OSRM API error at %s: status=%s", response.url, response.status_code)
             response.raise_for_status()
 
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            error_detail = response.text if 'response' in locals() and response else str(e)
-            logger.error(f"HTTPStatusError at {e.request.url}: {error_detail}")
+            logger.error("HTTPStatusError at %s: status=%s", e.request.url, e.response.status_code)
             raise
         except httpx.HTTPError as e:
-            # Using getattr to safely pull the URL if the request object exists
-            url = getattr(e, 'request', getattr(e, 'url', endpoint))
-            logger.error(f"OSRM API connection error at {url}: {e}")
+            url = getattr(getattr(e, 'request', None), 'url', endpoint)
+            logger.error("OSRM API connection error at %s: %s", url, type(e).__name__)
             raise
 
     async def get_route(self, coordinates: List[Dict[str, float]], alternatives: Union[bool, int] = False) -> Dict[

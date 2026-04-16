@@ -1,5 +1,5 @@
 # Builder image to process OSRM data without host mounts
-FROM ghcr.io/project-osrm/osrm-backend as builder
+FROM ghcr.io/project-osrm/osrm-backend AS builder
 
 # Argument to select the profile (car, bicycle, foot)
 ARG PROFILE=car
@@ -17,4 +17,4 @@ RUN mkdir -p /data/${PROFILE} && \
 # Final stage just to hold the processed data
 FROM alpine
 COPY --from=builder /data /data
-CMD ["tar", "cv -C /data ."]
+CMD ["tar", "cvf", "-", "-C", "/data", "."]

@@ -6,7 +6,7 @@ import json
 import os
 
 # Configuration
-API_URL = "http://10.211.55.28:8080"
+API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 OUTPUT_DIR = "examples/clustering"
 MAP_FILE = f"{OUTPUT_DIR}/clustering_results_map.html"
 PAYLOAD_FILE = f"{OUTPUT_DIR}/clustering_payload.json"
@@ -147,7 +147,7 @@ def generate_payload(total_stops=6500):
 
 def run_clustering(payload, mode="road", hysteresis=2000.0):
     """Send request to the /vrp/allocate endpoint."""
-    url = f"http://10.211.55.28:8080/vrp/allocate"
+    url = f"{API_URL}/vrp/allocate"
     print(f"Calling {url} [MODE: {mode}, HYST: {hysteresis}m] with {len(payload['stops'])} stops...")
     
     payload_with_mode = payload.copy()

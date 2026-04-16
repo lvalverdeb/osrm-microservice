@@ -1,10 +1,11 @@
+import os
 import requests
 import folium
 import random
 import sys
 
 # Configuration
-API_URL = "http://10.211.55.28:8080"
+API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
 def get_random_color():
     """Generate a random hex color for each vehicle."""

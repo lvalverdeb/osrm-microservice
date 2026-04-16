@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Create non-root user
+RUN useradd -m -u 1000 appuser
+
 # Set working directory to root to support the 'app' package structure
 WORKDIR /
 
@@ -20,8 +23,17 @@ RUN uv pip install --system -r /app/pyproject.toml
 # Copy application code
 COPY . /app/
 
+# Transfer ownership to non-root user
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
 # Expose port
 EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

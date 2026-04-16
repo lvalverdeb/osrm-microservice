@@ -104,19 +104,24 @@ class VrpService:
             raw_allocations = allocation_result["allocations"]
             id_allocations = {}
             for d_idx, s_indices in raw_allocations.items():
-                # Determine depot identifier (ID or index)
-                d_key = depot_ids[int(d_idx)] if depot_ids[int(d_idx)] is not None else int(d_idx)
-                
-                id_allocations[d_key] = [
-                    stop_ids[idx] if stop_ids[idx] is not None else idx 
-                    for idx in s_indices
-                ]
-            
+                d_int = int(d_idx)
+                if d_int < 0 or d_int >= len(depot_ids):
+                    raise ValueError(f"Allocation depot index {d_int} out of range for {len(depot_ids)} depots")
+                d_key = depot_ids[d_int] if depot_ids[d_int] is not None else d_int
+
+                mapped_stops = []
+                for idx in s_indices:
+                    if idx < 0 or idx >= len(stop_ids):
+                        raise ValueError(f"Allocation stop index {idx} out of range for {len(stop_ids)} stops")
+                    mapped_stops.append(stop_ids[idx] if stop_ids[idx] is not None else idx)
+                id_allocations[d_key] = mapped_stops
+
             # Map unreachable stops
-            id_unreachable = [
-                stop_ids[idx] if stop_ids[idx] is not None else idx 
-                for idx in allocation_result["unreachable_stops"]
-            ]
+            id_unreachable = []
+            for idx in allocation_result["unreachable_stops"]:
+                if idx < 0 or idx >= len(stop_ids):
+                    raise ValueError(f"Unreachable stop index {idx} out of range for {len(stop_ids)} stops")
+                id_unreachable.append(stop_ids[idx] if stop_ids[idx] is not None else idx)
             
             return VrpAllocationResponse(
                 allocations=id_allocations,
@@ -183,13 +188,22 @@ class VrpService:
             
             # Filter out the depot (index 0) and map back to original indices/IDs
             optimized_stop_input_indices = [idx for idx in sorted_input_indices if idx > 0]
-            
-            optimized_indices = [original_indices[idx-1] for idx in optimized_stop_input_indices]
-            optimized_ids = None
-            if stop_ids:
-                optimized_ids = [stop_ids[idx-1] for idx in optimized_stop_input_indices]
-            
-            optimized_coords = [stops[idx-1] for idx in optimized_stop_input_indices]
+
+            optimized_indices = []
+            optimized_ids = [] if stop_ids else None
+            optimized_coords = []
+            for idx in optimized_stop_input_indices:
+                mapped = idx - 1
+                if mapped < 0 or mapped >= len(original_indices):
+                    raise ValueError(f"OSRM returned waypoint index {idx} out of range for {len(original_indices)} stops")
+                optimized_indices.append(original_indices[mapped])
+                if stop_ids is not None:
+                    if mapped >= len(stop_ids):
+                        raise ValueError(f"OSRM returned waypoint index {idx} out of range for {len(stop_ids)} stop IDs")
+                    optimized_ids.append(stop_ids[mapped])
+                if mapped >= len(stops):
+                    raise ValueError(f"OSRM returned waypoint index {idx} out of range for {len(stops)} coordinates")
+                optimized_coords.append(stops[mapped])
             
             return VehicleRoute(
                 vehicle_id=vehicle_id,
@@ -202,7 +216,8 @@ class VrpService:
                 duration_seconds=best_trip["duration"]
             )
         else:
-            raise Exception(f"Failed to optimize TSP chunk: {trip_result.get('message')}")
+            logger.error("TSP chunk failed: code=%s message=%s", trip_result.get("code"), trip_result.get("message"))
+            raise RuntimeError("Failed to optimize TSP chunk")
 
     async def _get_depot_to_stop_matrix(self, depots: List[Coordinate], stops: List[Coordinate]) -> Dict[str, Any]:
         """Fetch the duration and distance matrix from OSRM with batching support."""

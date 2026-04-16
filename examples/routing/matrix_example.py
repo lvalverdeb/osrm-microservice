@@ -1,9 +1,10 @@
+import os
 import requests
 import json
 from typing import List, Dict, Any
 
 # --- Configuration ---
-API_BASE_URL = "http://10.211.55.28:8080"
+API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 MATRIX_URL = f"{API_BASE_URL}/matrix"
 
 def get_distance_duration_matrix(locations: List[Dict[str, float]], sources: List[int] = None, destinations: List[int] = None) -> Dict[str, Any]:
