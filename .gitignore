@@ -12,6 +12,7 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
+.agent/
 
 # OSRM Data (Large binary artifacts)
 data/*
