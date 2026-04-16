@@ -53,6 +53,56 @@ Transforme les matrices de distance et de durée brutes d'OSRM en graphes orient
 Un solveur complet de Problèmes de Tournées de Véhicules (VRP). Il implémente une stratégie de Localisation-Attribution, affectant les arrêts de livraison à l'entrepôt (dépôt) disponible le plus proche et générant des séquences de livraison optimisées.
 **Exemple de Cas d'Utilisation** : Une entreprise de logistique souhaite distribuer 500 colis par jour entre 5 chauffeurs partant de 2 entrepôts différents, en s'assurant que chaque chauffeur prenne le groupe d'arrêts le plus optimal.
 
+## Exemples d'Utilisation pour les Applications Clientes
+
+Voici des exemples montrant comment une application cliente peut interagir avec le microservice FastAPI en utilisant la bibliothèque `requests` de Python :
+
+```python
+import requests
+
+BASE_URL = "http://localhost:8000"
+
+# 1. Tracé d'Itinéraire (Route Plotting)
+route_payload = {
+    "origin": {"lat": 9.9281, "lon": -84.0907},
+    "destination": {"lat": 9.9333, "lon": -84.0833},
+    "alternatives": True
+}
+route_res = requests.post(f"{BASE_URL}/route", json=route_payload)
+
+# 2. Problème du Voyageur de Commerce (TSP)
+tsp_payload = {
+    "locations": [
+        {"lat": 9.9281, "lon": -84.0907},
+        {"lat": 9.9333, "lon": -84.0833},
+        {"lat": 9.9981, "lon": -84.1107}
+    ]
+}
+tsp_res = requests.post(f"{BASE_URL}/trip", json=tsp_payload)
+
+# 3. Regroupement (Clustering / Allocation)
+cluster_payload = {
+    "depots": [{"id": "D1", "lat": 9.9281, "lon": -84.0907}],
+    "locations": [
+        {"id": "L1", "lat": 9.9333, "lon": -84.0833},
+        {"id": "L2", "lat": 9.9981, "lon": -84.1107}
+    ],
+    "num_vehicles": 2
+}
+cluster_res = requests.post(f"{BASE_URL}/vrp/allocate", json=cluster_payload)
+
+# 4. Problème de Tournées de Véhicules (VRP)
+vrp_payload = {
+    "depots": [{"id": "D1", "lat": 9.9281, "lon": -84.0907}],
+    "locations": [
+        {"id": "L1", "lat": 9.9333, "lon": -84.0833},
+        {"id": "L2", "lat": 9.9981, "lon": -84.1107}
+    ],
+    "num_vehicles": 2
+}
+vrp_res = requests.post(f"{BASE_URL}/vrp", json=vrp_payload)
+```
+
 ## Outils de Visualisation
 
 Le projet comprend des outils Python pour visualiser et comparer les itinéraires :
