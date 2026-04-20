@@ -1,6 +1,7 @@
 # Use the builder image as a data source
 # Note: osrm-data-builder must be available in the local registry
-FROM osrm-data-builder AS data
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM osrm-data-builder AS data
 
 FROM ghcr.io/project-osrm/osrm-backend
 

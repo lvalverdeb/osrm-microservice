@@ -11,8 +11,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Create non-root user
 RUN useradd -m -u 1000 appuser
 
-# Set working directory to root to support the 'app' package structure
-WORKDIR /
+# Set working directory for dependency install and app source
+WORKDIR /app
 
 # Copy dependency files
 COPY pyproject.toml /app/
@@ -20,8 +20,8 @@ COPY pyproject.toml /app/
 # Install dependencies using uv
 RUN uv pip install --system -r /app/pyproject.toml
 
-# Copy application code
-COPY . /app/
+# Copy only the application package from the repository root context
+COPY app /app/app
 
 # Transfer ownership to non-root user
 RUN chown -R appuser:appuser /app

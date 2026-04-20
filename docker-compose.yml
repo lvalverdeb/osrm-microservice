@@ -1,5 +1,6 @@
 services:
   osrm:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.osrm
@@ -13,8 +14,8 @@ services:
 
   api:
     build:
-      context: ./app
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: app/Dockerfile
     container_name: osrm-api-gateway
     ports:
       - "8080:8000"

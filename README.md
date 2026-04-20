@@ -1,6 +1,6 @@
 # OSRM Backend Microservice
 
-[English](README.md) | [Español](README.es.md) | [Français](README.fr.md)
+[English](https://github.com/lvalverde/osrm-microservice/blob/main/README.md) | [Español](https://github.com/lvalverde/osrm-microservice/blob/main/README.es.md) | [Français](https://github.com/lvalverde/osrm-microservice/blob/main/README.fr.md)
 
 High-performance routing and map-matching microservice for Costa Rica.
 
@@ -31,13 +31,26 @@ make process-osrm PROFILE=car
 
 Deploy the API and the OSRM engine to the remote host. The processed data is bundled directly from the builder image into the OSRM runtime image via a multi-stage `Dockerfile.osrm`.
 
+`ghcr.io/project-osrm/osrm-backend` is currently `amd64` only. Confirm your active Docker daemon architecture before starting services.
+
 ```bash
 # Target the remote host
 export DOCKER_HOST=tcp://10.211.55.28:2375
 
-# Build and start services
-docker compose up -d --build
+# Check Docker target and architecture
+make compose-doctor
+
+# Build and start services with safe sequencing + health checks
+make compose-up
+
+# Tail service logs
+make compose-logs
+
+# Stop services
+make compose-down
 ```
+
+Avoid running `docker compose down & docker compose up --build`; `&` backgrounds the first command and can trigger race conditions.
 
 ## Core Services
 
