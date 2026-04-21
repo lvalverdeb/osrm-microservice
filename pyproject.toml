@@ -1,6 +1,6 @@
 [project]
 name = "osrm-api-gateway"
-version = "0.2.1"
+version = "0.2.2"
 description = "FastAPI gateway for OSRM routing engine"
 readme = "README.md"
 requires-python = ">=3.12"
