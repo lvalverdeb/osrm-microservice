@@ -19,7 +19,7 @@ help:
 	@echo "  download-data  - Download Costa Rica OSM data from Geofabrik"
 	@echo "  process-osrm   - Extract, partition, and customize OSRM data (PROFILE=$(PROFILE))"
 	@echo "  compose-doctor - Show active Docker host and daemon architecture"
-	@echo "  compose-up     - Build and start OSRM + API with safe sequencing"
+	@echo "  compose-up     - Auto-build OSRM data image, then start OSRM + API with safe sequencing"
 	@echo "  compose-down   - Stop and remove running compose services"
 	@echo "  compose-logs   - Tail API and OSRM logs"
 	@echo "  compose-health - Quick runtime checks for API and OSRM services"
@@ -47,6 +47,7 @@ compose-doctor:
 
 compose-up:
 	$(MAKE) compose-doctor
+	$(COMPOSE) build osrm-data-builder
 	$(COMPOSE) up -d --build osrm
 	$(COMPOSE) up -d --build api
 	$(MAKE) compose-health
@@ -59,8 +60,16 @@ compose-logs:
 
 compose-health:
 	$(COMPOSE) ps
-	$(COMPOSE) exec -T api curl -fsS http://localhost:8000/health >/dev/null
-	$(COMPOSE) exec -T api curl -fsS "http://osrm-backend:5000/route/v1/driving/-84.0907,9.9281;-84.0833,9.9333?overview=false" >/dev/null
+	@i=0; until $(COMPOSE) exec -T api curl -fsS http://localhost:8000/health >/dev/null; do \
+		i=$$((i+1)); \
+		if [ $$i -ge 30 ]; then echo "API health check failed after 30 attempts"; exit 1; fi; \
+		sleep 1; \
+	done
+	@i=0; until $(COMPOSE) exec -T api curl -fsS "http://osrm-backend:5000/route/v1/driving/-84.0907,9.9281;-84.0833,9.9333?overview=false" >/dev/null; do \
+		i=$$((i+1)); \
+		if [ $$i -ge 30 ]; then echo "OSRM route check failed after 30 attempts"; exit 1; fi; \
+		sleep 1; \
+	done
 	@echo "Compose health checks passed."
 
 build-pkg:

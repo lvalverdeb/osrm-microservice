@@ -1,11 +1,22 @@
 services:
+  osrm-data-builder:
+    image: osrm-data-builder:latest
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.builder
+      args:
+        - PROFILE=${PROFILE:-car}
+    profiles:
+      - build
+
   osrm:
     platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.osrm
       args:
-        - PROFILE=car
+        - PROFILE=${PROFILE:-car}
     container_name: osrm-backend
     ports:
       - "5000:5000"

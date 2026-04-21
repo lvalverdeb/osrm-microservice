@@ -41,6 +41,7 @@ export DOCKER_HOST=tcp://10.211.55.28:2375
 make compose-doctor
 
 # Build and start services with safe sequencing + health checks
+# (this command auto-builds `osrm-data-builder` first)
 make compose-up
 
 # Tail service logs
