@@ -6,7 +6,7 @@ import json
 import os
 
 # Configuration
-API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
 OUTPUT_DIR = "examples/clustering"
 MAP_FILE = f"{OUTPUT_DIR}/clustering_results_map.html"
 PAYLOAD_FILE = f"{OUTPUT_DIR}/clustering_payload.json"
@@ -137,7 +137,7 @@ def generate_payload(total_stops=6500):
     payload = {
         "depots": depots,
         "stops": stops,
-        "capacity": 35
+        #"capacity": 35
     }
     
     with open(PAYLOAD_FILE, "w") as f:
