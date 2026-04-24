@@ -3,7 +3,7 @@
 ARG BUILDPLATFORM
 FROM --platform=$BUILDPLATFORM osrm-data-builder AS data
 
-FROM ghcr.io/project-osrm/osrm-backend
+FROM --platform=linux/amd64 ghcr.io/project-osrm/osrm-backend:latest
 
 # Argument to select the profile for runtime
 ARG PROFILE=car

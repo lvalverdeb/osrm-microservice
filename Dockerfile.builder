@@ -1,5 +1,5 @@
 # Builder image to process OSRM data without host mounts
-FROM --platform=linux/amd64 ghcr.io/project-osrm/osrm-backend AS builder
+FROM --platform=linux/amd64 ghcr.io/project-osrm/osrm-backend:latest AS builder
 
 # Argument to select the profile (car, bicycle, foot)
 ARG PROFILE=car

@@ -24,74 +24,51 @@ Représentation standard d'un point géographique.
 | `longitude` | `float` | Longitude du point en degrés décimaux. |
 | `latitude` | `float` | Latitude du point en degrés décimaux. |
 
-### `Stop` (Hérite de `Coordinate`)
+### `CommonRoutingOptions`
 
-Représente un lieu de livraison ou un dépôt avec un identifiant facultatif.
-
-| Champ | Type | Description |
-| :--- | :--- | :--- |
-| `longitude` | `float` | Longitude du point en degrés décimaux. |
-| `latitude` | `float` | Latitude du point en degrés décimaux. |
-| `id` | `Union[str, int]` | Identifiant unique optionnel utilisé pour le suivi tout au long du processus. |
-
-### `GPSBreadcrumb`
-
-Représente un point unique dans une trace GPS pour le map matching.
+Options générales OSRM facultatives applicables aux services Route, Table, Match et Trip.
 
 | Champ | Type | Description |
 | :--- | :--- | :--- |
-| `longitude` | `float` | Longitude en degrés décimaux. |
-| `latitude` | `float` | Latitude en degrés décimaux. |
-| `timestamp` | `int` | Horodatage Unix (secondes entières). |
-| `accuracy_meters` | `float` | Précision en mètres (Par défaut : 5.0). |
+| `bearings` | `List[str]` | Contraintes d'orientation par coordonnée (ex: '90,30'). |
+| `radiuses` | `List[float]` | Rayon d'ajustement par coordonnée en mètres. Utilisez `null` pour illimité. |
+| `hints` | `List[str]` | Chaînes d'indices provenant d'une réponse OSRM précédente. |
+| `approaches` | `List[str]` | Côté d'approche par coordonnée : `unrestricted` ou `curb`. |
+| `exclude` | `List[str]` | Classes de routes à exclure globalement (ex: `['motorway', 'toll']`). |
+| `snapping` | `str` | Sélection des segments : `default` ou `any`. |
+| `skip_waypoints` | `bool` | Supprimer le tableau des waypoints dans la réponse. |
 
-### `RouteRequest`
+### `RouteRequest` (Hérite de `CommonRoutingOptions`)
 
 | Champ | Type | Description |
 | :--- | :--- | :--- |
 | `origin` | `Coordinate` | Point de départ de l'itinéraire. |
 | `destination` | `Coordinate` | Point de destination final. |
-| `waypoints` | `List[Coordinate]` | Points intermédiaires facultatifs à traverser. |
-| `alternatives` | `bool ou int` | S'il faut retourner des itinéraires alternatifs (booléen) ou un nombre spécifique (entier). (Par défaut : `false`). |
+| `waypoints` | `List[Coordinate]` | Points intermédiaires facultatifs. |
+| `profile` | `str` | Profil de routage : `driving` (par défaut), `cycling`, `walking`. |
+| `alternatives` | `bool ou int` | Retourner des alternatives (booléen) ou un nombre spécifique (entier). |
+| `overview` | `str` | Résolution de la géométrie : `simplified` (par défaut), `full`, `false`. |
+| `geometries` | `str` | Format de la géométrie : `polyline` (par défaut), `polyline6`, `geojson`. |
+| `steps` | `bool` | Retourner les instructions de virage (Par défaut : `true`). |
+| `annotations` | `str` | Métadonnées par segment (ex: `distance,duration`). |
 
-### `TripRequest`
-
-Utilisé pour résoudre le Problème du Voyageur de Commerce (TSP).
-
-| Champ | Type | Description |
-| :--- | :--- | :--- |
-| `coordinates` | `List[Coordinate]` | Liste de points à optimiser. |
-| `roundtrip` | `bool` | Si le voyage retourne au départ (Par défaut : `true`). |
-| `source` | `str` | Exigence du point de départ (ex: `first`, `any`). (Par défaut : `first`). |
-| `destination` | `str` | Exigence du point d'arrivée (ex: `last`, `any`). (Par défaut : `last`). |
-
-### `VrpRequest`
-
-Utilisé pour le Problème de Tournées de Véhicules (VRP) multi-véhicules.
-
-| Champ | Type | Description |
-| :--- | :--- | :--- |
-| `depots` | `List[Stop]` | Liste des emplacements d'entrepôts/dépôts. Peut inclure un `id` pour nommer les véhicules. |
-| `stops` | `List[Stop]` | Liste des points de livraison. |
-| `vehicle_count` | `Optional[int]` | Nombre total de véhicules disponibles. |
-| `capacity` | `int` | Volume maximum (arrêts) par véhicule. (Par défaut : 35). |
-| `max_radius_km` | `float` | Distance routière maximale à laquelle un arrêt peut se trouver par rapport au dépôt. |
-| `clustering_mode` | `str` | Préférence de regroupement : `travel_time` (par défaut), `distance`, ou `radial`. |
-| `roundtrip` | `bool` | Si les véhicules doivent retourner au dépôt. (Par défaut : `true`). |
-
-### `MatchRequest`
-
-| Champ | Type | Description |
-| :--- | :--- | :--- |
-| `breadcrumbs` | `List[GPSBreadcrumb]` | Séquence de points à aligner sur le réseau routier. |
-
-### `MatrixRequest`
+### `MatrixRequest` (Hérite de `CommonRoutingOptions`)
 
 | Champ | Type | Description |
 | :--- | :--- | :--- |
 | `coordinates` | `List[Coordinate]` | Liste de points à inclure dans le calcul. |
+| `profile` | `str` | Profil de routage : `driving`, `cycling`, `walking`. |
 | `sources` | `List[int]` | Indices des points à utiliser comme origines. |
 | `destinations` | `List[int]` | Indices des points à utiliser comme destinations. |
+| `annotations` | `str` | `duration` (par défaut), `distance`, ou `duration,distance`. |
+
+### `NearestRequest` (Hérite de `CommonRoutingOptions`)
+
+| Champ | Type | Description |
+| :--- | :--- | :--- |
+| `coordinate` | `Coordinate` | Point à aligner sur le réseau. |
+| `number` | `int` | Nombre de segments les plus proches à retourner (Par défaut : 1). |
+| `profile` | `str` | Profil de routage : `driving`, `cycling`, `walking`. |
 
 ---
 
@@ -101,289 +78,56 @@ Utilisé pour le Problème de Tournées de Véhicules (VRP) multi-véhicules.
 
 #### `POST /route`
 
-Calcule l'itinéraire routier le plus rapide entre un point d'origine et de destination, avec des points intermédiaires optionnels et des itinéraires alternatifs.
+Calcule l'itinéraire le plus rapide entre deux points.
 
-**Exemple de Requête :**
+**Exemple de Requête (`RouteRequest`) :**
 
 ```json
 {
   "origin": {"longitude": -84.09, "latitude": 9.93},
   "destination": {"longitude": -84.15, "latitude": 9.97},
-  "waypoints": [],
-  "alternatives": true
-}
-```
-
-**Exemple de Réponse :**
-
-```json
-{
-  "code": "Ok",
-  "routes": [
-    {
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [[-84.09, 9.93], [-84.15, 9.97]]
-      },
-      "legs": [
-        {
-          "steps": [],
-          "distance": 12500.5,
-          "duration": 945.2,
-          "summary": "Résumé de l'itinéraire",
-          "weight": 945.2
-        }
-      ],
-      "distance": 12500.5,
-      "duration": 945.2,
-      "weight_name": "routability",
-      "weight": 945.2
-    }
-  ],
-  "waypoints": [
-    {"name": "Origine", "location": [-84.09, 9.93]},
-    {"name": "Destination", "location": [-84.15, 9.97]}
-  ]
+  "profile": "walking",
+  "steps": true
 }
 ```
 
 ---
 
-### 2. Matrice (Tables de Distance)
+### 5. Nearest (Alignement Routier)
 
-#### `POST /matrix`
+#### `POST /nearest`
 
-Génère un tableau des durées et distances entre toutes les coordonnées fournies.
+Trouve le ou les points du réseau routier les plus proches d'une coordonnée donnée.
 
-**Corps de la Requête (`MatrixRequest`) :**
-
-| Champ | Type | Description |
-| :--- | :--- | :--- |
-| `coordinates` | `List[Coordinate]` | Liste des points à inclure dans la matrice. |
-| `sources` | `Optional[List[int]]` | Indices dans la liste des coordonnées à utiliser comme origines. |
-| `destinations` | `Optional[List[int]]` | Indices dans la liste des coordonnées à utiliser comme destinations. |
-
-**Exemple :**
+**Exemple de Requête (`NearestRequest`) :**
 
 ```json
 {
-  "coordinates": [
-    {"longitude": -84.09, "latitude": 9.93},
-    {"longitude": -84.15, "latitude": 9.97}
-  ],
-  "sources": [0],
-  "destinations": [1]
-}
-```
-
-**Exemple de Réponse :**
-
-```json
-{
-  "code": "Ok",
-  "durations": [[0, 945.2], [940.1, 0]],
-  "distances": [[0, 12500.5], [12450.2, 0]],
-  "sources": [{"location": [-84.09, 9.93]}],
-  "destinations": [{"location": [-84.15, 9.97]}]
-}
-```
-
-#### `POST /matrix-graph`
-
-Génère une matrice de distance/durée et la convertit en un format de graphe sérialisable (Nœuds et Arêtes) compatible avec NetworkX et d'autres bibliothèques de graphes.
-
-**Corps de la Requête (`MatrixRequest`) :**
-Identique à `POST /matrix`.
-
-**Exemple de Réponse :**
-
-```json
-{
-  "nodes": [
-    {"id": 0, "longitude": -84.09, "latitude": 9.93},
-    {"id": 1, "longitude": -84.15, "latitude": 9.97}
-  ],
-  "edges": [
-    {"source": 0, "target": 1, "distance": 12500.5, "duration": 945.2},
-    {"source": 1, "target": 0, "distance": 12450.2, "duration": 940.1}
-  ]
+  "coordinate": {"longitude": -84.09, "latitude": 9.93},
+  "number": 3,
+  "profile": "cycling"
 }
 ```
 
 ---
 
-### 3. Appariement de Cartes (Map Matching)
+### 6. Tuiles (Mapbox Vector Tiles)
 
-#### `POST /match`
+#### `GET /tile/{profile}/{z}/{x}/{y}.mvt`
 
-Aligne les traces GPS bruitées sur le réseau routier. Gère automatiquement la division des traces en cas de perte de signal.
-
-**Exemple de Requête :**
-
-```json
-{
-  "breadcrumbs": [
-    {"longitude": -84.09, "latitude": 9.93, "timestamp": 1741185000},
-    {"longitude": -84.091, "latitude": 9.931, "timestamp": 1741185010}
-  ]
-}
-```
-
-**Exemple de Réponse :**
-
-```json
-{
-  "code": "Ok",
-  "matchings": [
-    {
-      "confidence": 0.95,
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [[-84.09, 9.93], [-84.091, 9.931]]
-      },
-      "distance": 150.2,
-      "duration": 12.5
-    }
-  ],
-  "tracepoints": [
-    {"matchings_index": 0, "waypoint_index": 0, "location": [-84.09, 9.93]},
-    {"matchings_index": 0, "waypoint_index": 1, "location": [-84.091, 9.931]}
-  ]
-}
-```
-
----
-
-### 4. Optimisation (TSP)
-
-#### `POST /trip`
-
-Résout le Problème du Voyageur de Commerce pour trouver la séquence la plus efficace pour visiter plusieurs coordonnées.
-
-**Corps de la Requête (`TripRequest`) :**
-
-```json
-{
-  "coordinates": [
-    {"longitude": -84.09, "latitude": 9.93},
-    {"longitude": -84.05, "latitude": 9.93},
-    {"longitude": -84.07, "latitude": 9.91}
-  ],
-  "roundtrip": true,
-  "source": "first",
-  "destination": "any"
-}
-```
-
-**Exemple de Réponse :**
-
-Renvoie une géométrie GeoJSON et la séquence optimisée dans `waypoints[].waypoint_index`.
-
-```json
-{
-  "code": "Ok",
-  "trips": [
-    {
-      "geometry": { "type": "LineString", "coordinates": [...] },
-      "distance": 8500.2,
-      "duration": 620.5
-    }
-  ],
-  "waypoints": [
-    { "waypoint_index": 0, "location": [-84.09, 9.93], "name": "Départ" },
-    { "waypoint_index": 2, "location": [-84.05, 9.93], "name": "Arrêt 2" },
-    { "waypoint_index": 1, "location": [-84.07, 9.91], "name": "Arrêt 1" }
-  ]
-}
-```
-
----
-
-### 5. Logistique et VRP
-
-#### `POST /vrp`
-
-Résout le Problème de Tournées de Véhicules multi-véhicules en utilisant la Localisation-Affectation basée sur les durées de route OSRM.
-
-**Corps de la Requête (`VrpRequest`) :**
-
-```json
-{
-  "depots": [{"id": "CENTRE_A", "longitude": -84.09, "latitude": 9.93}],
-  "stops": [
-    {"id": "ORD-1", "longitude": -84.10, "latitude": 9.94},
-    {"id": "ORD-2", "longitude": -84.08, "latitude": 9.92}
-  ],
-  "capacity": 35,
-  "roundtrip": true
-}
-```
-
-**Exemple de Réponse :**
-
-```json
-{
-  "code": "Ok",
-  "routes": [
-    {
-      "vehicle_id": "CENTRE_A",
-      "depot_index": 0,
-      "stops_indices": [0, 1],
-      "stop_ids": ["ORD-1", "ORD-2"],
-      "stop_coordinates": [
-        {"longitude": -84.10, "latitude": 9.94},
-        {"longitude": -84.08, "latitude": 9.92}
-      ],
-      "route_geometry": { "type": "LineString", "coordinates": [...] },
-      "distance_meters": 5400.5,
-      "duration_seconds": 420.2
-    }
-  ],
-  "total_distance": 5400.5,
-  "total_duration": 420.2
-}
-```
-
-#### `POST /vrp/allocate`
-
-Effectue uniquement la phase de regroupement (clustering) sans optimiser l'ordre de la tournée. Utile pour pré-allouer des charges aux camiones. La réponse prend désormais en charge et propage les identifiants de dépôt personnalisés en tant que clés.
-
-**Corps de la Requête :** Identique à `POST /vrp`.
-
-**Exemple de Réponse :**
-
-```json
-{
-  "code": "Ok",
-  "allocations": {
-    "CENTRO_A": ["ORD-1", "ORD-2"]
-  },
-  "unreachable_stops": []
-}
-```
-
----
-
-### 6. Système
-
-#### `GET /health`
-
-Renvoie l'état du service et les métadonnées.
-
-**Réponse :**
-
-```json
-{
-  "status": "healthy",
-  "service": "osrm-microservice"
-}
-```
+Proxy d'une tuile vectorielle Mapbox depuis OSRM. Niveau de zoom minimum : 12.
 
 ---
 
 ## Gestion des Erreurs
 
-Tous les endpoints renvoient des codes d'erreur HTTP standard :
+Le service renvoie des corps d'erreur structurés d'OSRM lorsqu'ils sont disponibles :
 
-- **422 Unprocessable Entity** : Schéma de requête invalide (validation Pydantic).
-- **500 Internal Server Error** : Échec de l'API OSRM en aval ou erreur de logique interne.
+```json
+{
+  "detail": {
+    "code": "NoRoute",
+    "message": "Could not find a route between coordinates"
+  }
+}
+```

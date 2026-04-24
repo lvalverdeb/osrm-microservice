@@ -33,20 +33,20 @@ download-data:
 	curl -L $(GEO_URL) -o $(DATA_DIR)/$(OSM_FILE)
 
 process-osrm:
+	@echo "Ensuring cross-platform emulation is available on Docker daemon..."
+	-docker run --privileged --rm tonistiigi/binfmt --install all
 	@echo "Building OSRM data builder for profile: $(PROFILE)..."
-	docker build -t osrm-data-builder --build-arg PROFILE=$(PROFILE) -f Dockerfile.builder .
+	docker build --pull -t osrm-data-builder --build-arg PROFILE=$(PROFILE) -f Dockerfile.builder .
 	@echo "Local OSRM builder image ready."
 
 compose-doctor:
 	@echo "DOCKER_HOST=$${DOCKER_HOST:-<not set>}"
 	@docker info --format 'Daemon: {{.OSType}}/{{.Architecture}}'
-	@arch="$$(docker info --format '{{.Architecture}}' 2>/dev/null)"; \
-	if [ "$$arch" != "amd64" ] && [ "$$arch" != "x86_64" ]; then \
-		echo "Warning: OSRM base image is amd64-only; use an amd64 daemon or enable emulation."; \
-	fi
 
 compose-up:
 	$(MAKE) compose-doctor
+	@echo "Ensuring cross-platform emulation is available on Docker daemon..."
+	-docker run --privileged --rm tonistiigi/binfmt --install all
 	$(COMPOSE) build osrm-data-builder
 	$(COMPOSE) up -d --build osrm
 	$(COMPOSE) up -d --build api

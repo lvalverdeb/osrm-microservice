@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 import httpx
 import logging
 from typing import Any, Dict
@@ -7,7 +7,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.models.schemas import (
     RouteRequest, MatchRequest, MatrixRequest, MatrixGraphResponse, TripRequest,
-    VrpRequest, VrpResponse, VrpAllocationResponse
+    NearestRequest, VrpRequest, VrpResponse, VrpAllocationResponse
 )
 from app.services.osrm_client import OSRMClient
 from app.services.vrp_service import VrpService
@@ -22,6 +22,13 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 osrm_client = OSRMClient()
 vrp_service = VrpService(osrm_client)
+def _parse_osrm_error(e: httpx.HTTPStatusError):
+    """Extract structured error detail from an OSRM error response."""
+    try:
+        body = e.response.json()
+        return {"code": body.get("code", "Error"), "message": body.get("message", "Routing service error")}
+    except Exception:
+        return "Routing service error"
 
 @app.get("/health", tags=["System"], summary="Health Check")
 async def health_check():
@@ -39,10 +46,10 @@ async def get_route(request: Request, payload: RouteRequest):
             points.extend([w.model_dump() for w in payload.waypoints])
         points.append(payload.destination.model_dump())
         
-        return await osrm_client.get_route(points, alternatives=payload.alternatives)
+        return await osrm_client.get_route(points, request=payload)
     except httpx.HTTPStatusError as e:
         logger.error("OSRM HTTP error on /route: status=%s", e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail="Routing service error")
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
     except Exception:
         logger.exception("Unexpected error on /route")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -55,7 +62,7 @@ async def get_matrix(request: Request, payload: MatrixRequest):
         return await osrm_client.get_matrix(payload)
     except httpx.HTTPStatusError as e:
         logger.error("OSRM HTTP error on /matrix: status=%s", e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail="Routing service error")
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
     except Exception:
         logger.exception("Unexpected error on /matrix")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -69,7 +76,7 @@ async def get_matrix_graph(request: Request, payload: MatrixRequest):
         return GraphBuilder.build_from_matrix(matrix_data, payload)
     except httpx.HTTPStatusError as e:
         logger.error("OSRM HTTP error on /matrix-graph: status=%s", e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail="Routing service error")
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
     except Exception:
         logger.exception("Unexpected error on /matrix-graph")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -87,7 +94,7 @@ async def match_trace(request: Request, payload: MatchRequest):
         return await osrm_client.match_trace(payload)
     except httpx.HTTPStatusError as e:
         logger.error("OSRM HTTP error on /match: status=%s", e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail="Routing service error")
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
     except Exception:
         logger.exception("Unexpected error on /match")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -103,9 +110,47 @@ async def get_trip(request: Request, payload: TripRequest):
         return await osrm_client.get_trip(payload)
     except httpx.HTTPStatusError as e:
         logger.error("OSRM HTTP error on /trip: status=%s", e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail="Routing service error")
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
     except Exception:
         logger.exception("Unexpected error on /trip")
+        raise HTTPException(status_code=500, detail="Internal server error")
+@app.post("/nearest", tags=["Routing"], summary="Snap Coordinate to Road Network")
+@limiter.limit(settings.RATE_LIMIT_NEAREST)
+async def get_nearest(request: Request, payload: NearestRequest):
+    """
+    Find the nearest road network node(s) to a given coordinate.
+    Useful for snapping raw GPS coordinates to the routable road graph.
+    """
+    try:
+        return await osrm_client.get_nearest(payload)
+    except httpx.HTTPStatusError as e:
+        logger.error("OSRM HTTP error on /nearest: status=%s", e.response.status_code)
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
+    except Exception:
+        logger.exception("Unexpected error on /nearest")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get(
+    "/tile/{profile}/{z}/{x}/{y}.mvt",
+    tags=["Tiles"],
+    summary="Proxy OSRM Vector Tile",
+    response_class=Response
+)
+@limiter.limit("600/minute")
+async def get_tile(request: Request, profile: str, z: int, x: int, y: int):
+    """
+    Proxy a Mapbox Vector Tile from the OSRM tile service.
+    Returns binary protobuf content (application/x-protobuf).
+    Minimum zoom level supported by OSRM is 12.
+    """
+    try:
+        tile_bytes = await osrm_client.get_tile(profile, z, x, y)
+        return Response(content=tile_bytes, media_type="application/x-protobuf")
+    except httpx.HTTPStatusError as e:
+        logger.error("OSRM HTTP error on /tile: status=%s", e.response.status_code)
+        raise HTTPException(status_code=e.response.status_code, detail=_parse_osrm_error(e))
+    except Exception:
+        logger.exception("Unexpected error on /tile")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/vrp", tags=["Optimization"], summary="Solve Vehicle Routing Problem", response_model=VrpResponse)

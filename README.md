@@ -4,6 +4,18 @@
 
 High-performance routing and map-matching microservice for Costa Rica.
 
+### Apple Silicon (M1/M2/M3) Support
+
+Since the official OSRM Docker images are only provided for `linux/amd64`, this project uses Docker's emulation capabilities to run on Apple Silicon.
+
+If you encounter `exec format error` during build, ensure you have emulation enabled. On Docker Desktop for Mac, this is usually automatic. For other environments, you can run:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+The `Makefile` targets (like `make compose-up`) will attempt to run this for you.
+
 ## Setup Instructions
 
 This project uses a **Local Build & Bundled Transfer** workflow to support deployment to remote Docker hosts while processing data locally on macOS.
@@ -31,7 +43,7 @@ make process-osrm PROFILE=car
 
 Deploy the API and the OSRM engine to the remote host. The processed data is bundled directly from the builder image into the OSRM runtime image via a multi-stage `Dockerfile.osrm`.
 
-`ghcr.io/project-osrm/osrm-backend` is currently `amd64` only. Confirm your active Docker daemon architecture before starting services.
+`osrm/osrm-backend` supports multiple architectures (amd64, arm64). Confirm your active Docker daemon architecture before starting services.
 
 ```bash
 # Target the remote host
@@ -78,15 +90,23 @@ import requests
 
 BASE_URL = "http://localhost:8000"
 
-# 1. Route Plotting
+# 1. Route Plotting (Walking Profile)
 route_payload = {
     "origin": {"lat": 9.9281, "lon": -84.0907},
     "destination": {"lat": 9.9333, "lon": -84.0833},
-    "alternatives": True
+    "profile": "walking",
+    "steps": True
 }
 route_res = requests.post(f"{BASE_URL}/route", json=route_payload)
 
-# 2. Traveling Salesperson Problem (TSP)
+# 2. Nearest Point (Road Snapping)
+nearest_payload = {
+    "coordinate": {"lat": 9.9281, "lon": -84.0907},
+    "number": 3
+}
+nearest_res = requests.post(f"{BASE_URL}/nearest", json=nearest_payload)
+
+# 3. Traveling Salesperson Problem (TSP)
 tsp_payload = {
     "locations": [
         {"lat": 9.9281, "lon": -84.0907},

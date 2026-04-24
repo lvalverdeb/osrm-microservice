@@ -12,9 +12,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_MATCH: str = "600/minute"
     RATE_LIMIT_TRIP: str = "300/minute"
     RATE_LIMIT_VRP: str = "100/minute"
+    RATE_LIMIT_NEAREST: str = "600/minute"
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 settings = Settings()
 
