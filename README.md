@@ -92,8 +92,8 @@ BASE_URL = "http://localhost:8000"
 
 # 1. Route Plotting (Walking Profile)
 route_payload = {
-    "origin": {"lat": 9.9281, "lon": -84.0907},
-    "destination": {"lat": 9.9333, "lon": -84.0833},
+    "origin": {"longitude": -84.0907, "latitude": 9.9281},
+    "destination": {"longitude": -84.0833, "latitude": 9.9333},
     "profile": "walking",
     "steps": True
 }
@@ -101,40 +101,40 @@ route_res = requests.post(f"{BASE_URL}/route", json=route_payload)
 
 # 2. Nearest Point (Road Snapping)
 nearest_payload = {
-    "coordinate": {"lat": 9.9281, "lon": -84.0907},
+    "coordinate": {"longitude": -84.0907, "latitude": 9.9281},
     "number": 3
 }
 nearest_res = requests.post(f"{BASE_URL}/nearest", json=nearest_payload)
 
 # 3. Traveling Salesperson Problem (TSP)
 tsp_payload = {
-    "locations": [
-        {"lat": 9.9281, "lon": -84.0907},
-        {"lat": 9.9333, "lon": -84.0833},
-        {"lat": 9.9981, "lon": -84.1107}
+    "coordinates": [
+        {"longitude": -84.0907, "latitude": 9.9281},
+        {"longitude": -84.0833, "latitude": 9.9333},
+        {"longitude": -84.1107, "latitude": 9.9981}
     ]
 }
 tsp_res = requests.post(f"{BASE_URL}/trip", json=tsp_payload)
 
-# 3. Clustering (Location Allocation)
+# 4. Clustering (Location Allocation)
 cluster_payload = {
-    "depots": [{"id": "D1", "lat": 9.9281, "lon": -84.0907}],
-    "locations": [
-        {"id": "L1", "lat": 9.9333, "lon": -84.0833},
-        {"id": "L2", "lat": 9.9981, "lon": -84.1107}
+    "depots": [{"id": "D1", "longitude": -84.0907, "latitude": 9.9281}],
+    "stops": [
+        {"id": "L1", "longitude": -84.0833, "latitude": 9.9333},
+        {"id": "L2", "longitude": -84.1107, "latitude": 9.9981}
     ],
-    "num_vehicles": 2
+    "vehicle_count": 2
 }
 cluster_res = requests.post(f"{BASE_URL}/vrp/allocate", json=cluster_payload)
 
-# 4. Vehicle Routing Problem (VRP)
+# 5. Vehicle Routing Problem (VRP)
 vrp_payload = {
-    "depots": [{"id": "D1", "lat": 9.9281, "lon": -84.0907}],
-    "locations": [
-        {"id": "L1", "lat": 9.9333, "lon": -84.0833},
-        {"id": "L2", "lat": 9.9981, "lon": -84.1107}
+    "depots": [{"id": "D1", "longitude": -84.0907, "latitude": 9.9281}],
+    "stops": [
+        {"id": "L1", "longitude": -84.0833, "latitude": 9.9333},
+        {"id": "L2", "longitude": -84.1107, "latitude": 9.9981}
     ],
-    "num_vehicles": 2
+    "vehicle_count": 2
 }
 vrp_res = requests.post(f"{BASE_URL}/vrp", json=vrp_payload)
 ```

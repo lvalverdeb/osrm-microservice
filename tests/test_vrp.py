@@ -1,11 +1,12 @@
 import pytest
+import httpx
 from httpx import AsyncClient
 from app.main import app
 
 @pytest.mark.asyncio
 async def test_vrp_endpoint_basic():
     """Test the VRP endpoint with a simple depot-stop setup."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
         payload = {
             "depots": [
                 {"longitude": -84.09, "latitude": 9.93},

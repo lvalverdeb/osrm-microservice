@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 from app.services.osrm_client import OSRMClient
-from app.models.schemas import MatrixRequest, MatchRequest, TripRequest, Coordinate, GPSBreadcrumb
+from app.models.schemas import RouteRequest, MatrixRequest, MatchRequest, TripRequest, Coordinate, GPSBreadcrumb
 
 @pytest.mark.asyncio
 async def test_route_parity():
@@ -11,8 +11,12 @@ async def test_route_parity():
         mock_get.return_value = {"code": "Ok"}
         
         coords = [{"longitude": -84.0, "latitude": 9.0}, {"longitude": -84.1, "latitude": 9.1}]
-        # Current signature: get_route(coordinates, alternatives)
-        await client.get_route(coords, alternatives=True)
+        req = RouteRequest(
+            origin=Coordinate(longitude=-84.0, latitude=9.0),
+            destination=Coordinate(longitude=-84.1, latitude=9.1),
+            alternatives=True
+        )
+        await client.get_route(coords, request=req)
         
         args, kwargs = mock_get.call_args
         endpoint = args[0]

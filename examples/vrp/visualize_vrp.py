@@ -85,8 +85,8 @@ def visualize_vrp():
                 popup=f"Stop {stop_idx}"
             ).add_to(marker_cluster)
 
-    m.save("examples/vrpvrp_map.html")
-    print("VRP Visualization saved to vrp_map.html")
+    m.save("examples/vrp/vrp_map.html")
+    print("VRP Visualization saved to examples/vrp/vrp_map.html")
     print(f"Total Fleet Distance: {data['total_distance']/1000:.2f} km")
     print(f"Total Fleet Duration: {data['total_duration']/60:.2f} min")
 

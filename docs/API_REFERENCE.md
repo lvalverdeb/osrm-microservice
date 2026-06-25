@@ -68,8 +68,48 @@ Optional OSRM general options applicable to Route, Table, Match, and Trip servic
 | :--- | :--- | :--- |
 | `breadcrumbs` | `List[GPSBreadcrumb]` | Sequence of points to snap to the road network. |
 | `profile` | `str` | Routing profile: `driving`, `cycling`, `walking`. |
+| `overview` | `str` | Geometry resolution: `simplified`, `full`, `false`. |
+| `geometries` | `str` | Geometry format: `polyline`, `polyline6`, `geojson`. |
 | `steps` | `bool` | Return steps for the matched path. |
+| `annotations` | `str` | Comma-separated metadata per segment. |
+| `gaps` | `str` | Split trace on large gaps: `split` or `ignore`. |
 | `tidy` | `bool` | Remove repeated or out-of-order coordinates before matching. |
+| `match_waypoints` | `List[int]` | Indices into breadcrumbs to treat as explicit waypoints. |
+
+### `GPSBreadcrumb`
+
+A single GPS trace point.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `longitude` | `float` | Longitude of the point. |
+| `latitude` | `float` | Latitude of the point. |
+| `timestamp` | `int` | Unix timestamp. |
+| `accuracy_meters` | `float` | Snapping radius/accuracy in meters (Default: `5.0`). |
+
+### `Stop` (Inherits from `Coordinate`)
+
+A geographic delivery stop or depot location with identification.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `longitude` | `float` | Longitude of the point. |
+| `latitude` | `float` | Latitude of the point. |
+| `id` | `str or int` | Optional unique identifier for tracking. |
+
+### `TripRequest` (Inherits from `CommonRoutingOptions`)
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `coordinates` | `List[Coordinate]` | Coordinates to optimize. |
+| `roundtrip` | `bool` | Return to first point at the end (Default: `true`). |
+| `source` | `str` | Start point restriction: `first` or `any`. |
+| `destination` | `str` | End point restriction: `last` or `any`. |
+| `profile` | `str` | Routing profile: `driving`, `cycling`, `walking`. |
+| `overview` | `str` | Geometry resolution: `simplified`, `full`, `false`. |
+| `geometries` | `str` | Geometry format: `polyline`, `polyline6`, `geojson`. |
+| `steps` | `bool` | Return turn-by-turn steps. |
+| `annotations` | `str` | Comma-separated segment metadata. |
 
 ### `NearestRequest` (Inherits from `CommonRoutingOptions`)
 
@@ -79,18 +119,83 @@ Optional OSRM general options applicable to Route, Table, Match, and Trip servic
 | `number` | `int` | Number of nearest road segments to return (Default: 1). |
 | `profile` | `str` | Routing profile: `driving`, `cycling`, `walking`. |
 
+### `NearestResponse`
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `code` | `str` | Operation status code (e.g., `Ok`). |
+| `waypoints` | `List[Dict]` | Snapped road segments metadata. |
+
+### `VrpRequest`
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `depots` | `List[Stop]` | List of warehouse/depot locations. |
+| `stops` | `List[Stop]` | List of delivery stops. |
+| `vehicle_count` | `int` | Number of available vehicles. Defaults to one per depot. |
+| `capacity` | `int` | Maximum stops/packages per vehicle (Default: 35). |
+| `max_radius_km` | `float` | Optional maximum road distance from depot (km). |
+| `clustering_mode` | `str` | Clustering type: `travel_time` (default), `distance`, or `radial`. |
+| `hysteresis_m` | `float` | Depot snapping boundary tolerance in meters (Default: `2000.0`). |
+| `roundtrip` | `bool` | Return to depot at route end (Default: `true`). |
+
+### `VehicleRoute`
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `vehicle_id` | `str or int` | Suffix-labelled identifier of the vehicle. |
+| `depot_index` | `int` | Index of the assigned warehouse. |
+| `stops_indices` | `List[int]` | Optimized sequence of stop indices. |
+| `stop_ids` | `List[str or int]` | Optional list of stop IDs in optimized order. |
+| `stop_coordinates` | `List[Coordinate]` | Coordinates in optimized order. |
+| `route_geometry` | `Dict` | GeoJSON LineString geometry of the route. |
+| `distance_meters` | `float` | Total distance in meters. |
+| `duration_seconds` | `float` | Total duration in seconds. |
+
+### `VrpResponse`
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `code` | `str` | Response status code. |
+| `routes` | `List[VehicleRoute]` | Optimized routes per vehicle. |
+| `total_distance` | `float` | Total distance across all vehicles. |
+| `total_duration` | `float` | Total travel time across all vehicles. |
+
+### `VrpAllocationResponse`
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `code` | `str` | Response status code. |
+| `allocations` | `Dict[str/int, List]` | Depot identifiers mapping to assigned stop IDs/indices. |
+| `unreachable_stops` | `List` | List of stop IDs/indices exceeding route limits. |
+
 ---
 
 ## Endpoints
 
-### 1. Routing
+### System Endpoints
+
+#### `GET /health`
+
+Checks if the gateway is running.
+
+**Response Body:**
+```json
+{
+  "status": "healthy",
+  "service": "osrm-api-gateway"
+}
+```
+
+---
+
+### Routing Endpoints
 
 #### `POST /route`
 
-Calculates the fastest route between points.
+Calculates the fastest route between coordinates.
 
 **Request Body (`RouteRequest`):**
-
 ```json
 {
   "origin": {"longitude": -84.09, "latitude": 9.93},
@@ -100,56 +205,192 @@ Calculates the fastest route between points.
 }
 ```
 
----
-
-### 2. Matrix (Distance Tables)
-
-#### `POST /matrix`
-#### `POST /matrix-graph`
-
-Generates a table of durations and distances.
+**Response Body (JSON):** Passes through the OSRM `/route` output containing `code`, `routes`, and `waypoints`.
 
 ---
-
-### 3. Map Matching
-
-#### `POST /match`
-
-Snaps noisy GPS traces to the road network.
-
----
-
-### 4. Optimization (TSP)
-
-#### `POST /trip`
-
-Solves the Traveling Salesperson Problem.
-
----
-
-### 5. Nearest (Road Snapping)
 
 #### `POST /nearest`
 
-Find the nearest road network point(s) to a given coordinate.
+Snaps a coordinate to the nearest road segments.
 
 **Request Body (`NearestRequest`):**
-
 ```json
 {
-  "coordinate": {"longitude": -84.09, "latitude": 9.93},
-  "number": 3,
-  "profile": "cycling"
+  "coordinate": {"longitude": -84.0907, "latitude": 9.9281},
+  "number": 1,
+  "profile": "driving"
+}
+```
+
+**Response Body (`NearestResponse`):**
+```json
+{
+  "code": "Ok",
+  "waypoints": [
+    {
+      "name": "Calle Central",
+      "distance": 4.2,
+      "location": [-84.0906, 9.9282],
+      "hint": "abc..."
+    }
+  ]
 }
 ```
 
 ---
 
-### 6. Tiles (Mapbox Vector Tiles)
+### Matrix Endpoints
+
+#### `POST /matrix`
+
+Calculates travel times/distances between all supplied locations.
+
+**Request Body (`MatrixRequest`):**
+```json
+{
+  "coordinates": [
+    {"longitude": -84.0907, "latitude": 9.9281},
+    {"longitude": -84.0833, "latitude": 9.9333}
+  ],
+  "profile": "driving"
+}
+```
+
+**Response Body:** Passes through the OSRM `/table` output containing `code`, `durations`, `distances`, `sources`, and `destinations`.
+
+---
+
+#### `POST /matrix-graph`
+
+Builds a serializable directed graph representation of the matrix.
+
+**Request Body (`MatrixRequest`):** Same as `POST /matrix`.
+
+**Response Body (`MatrixGraphResponse`):**
+```json
+{
+  "nodes": [{"id": 0, "lon": -84.0907, "lat": 9.9281}],
+  "edges": [{"source": 0, "target": 1, "duration": 180.0, "distance": 1200.0}]
+}
+```
+
+---
+
+### Map Matching Endpoints
+
+#### `POST /match`
+
+Snaps noisy GPS points to the road network.
+
+**Request Body (`MatchRequest`):**
+```json
+{
+  "breadcrumbs": [
+    {"longitude": -84.0907, "latitude": 9.9281, "timestamp": 1713000000},
+    {"longitude": -84.0880, "latitude": 9.9300, "timestamp": 1713000030}
+  ],
+  "profile": "driving",
+  "tidy": true
+}
+```
+
+**Response Body:** Passes through the OSRM `/match` output containing `code`, `matchings`, and `tracepoints`.
+
+---
+
+### Optimization Endpoints
+
+#### `POST /trip`
+
+Optimizes a sequence of stops (Travelling Salesperson Problem).
+
+**Request Body (`TripRequest`):**
+```json
+{
+  "coordinates": [
+    {"longitude": -84.0907, "latitude": 9.9281},
+    {"longitude": -84.0833, "latitude": 9.9333},
+    {"longitude": -84.1000, "latitude": 9.9400}
+  ],
+  "roundtrip": true,
+  "profile": "driving"
+}
+```
+
+**Response Body:** Passes through the OSRM `/trip` output containing `code`, `trips`, and `waypoints`.
+
+---
+
+#### `POST /vrp`
+
+Solves multi-vehicle Vehicle Routing Problems using location-allocation clustering.
+
+**Request Body (`VrpRequest`):**
+```json
+{
+  "depots": [{"id": "D1", "longitude": -84.09, "latitude": 9.93}],
+  "stops": [
+    {"id": "S1", "longitude": -84.10, "latitude": 9.94},
+    {"id": "S2", "longitude": -84.14, "latitude": 9.96}
+  ],
+  "vehicle_count": 2,
+  "capacity": 35
+}
+```
+
+**Response Body (`VrpResponse`):**
+```json
+{
+  "code": "Ok",
+  "routes": [
+    {
+      "vehicle_id": "D1-1",
+      "depot_index": 0,
+      "stops_indices": [0, 1],
+      "stop_ids": ["S1", "S2"],
+      "stop_coordinates": [
+        {"longitude": -84.10, "latitude": 9.94},
+        {"longitude": -84.14, "latitude": 9.96}
+      ],
+      "route_geometry": {
+        "type": "LineString",
+        "coordinates": [[-84.09, 9.93], [-84.10, 9.94], [-84.14, 9.96], [-84.09, 9.93]]
+      },
+      "distance_meters": 12450.0,
+      "duration_seconds": 920.0
+    }
+  ],
+  "total_distance": 12450.0,
+  "total_duration": 920.0
+}
+```
+
+---
+
+#### `POST /vrp/allocate`
+
+Pre-clusters stops to depots before routing (ideal for checking assignments).
+
+**Request Body (`VrpRequest`):** Same as `POST /vrp`.
+
+**Response Body (`VrpAllocationResponse`):**
+```json
+{
+  "code": "Ok",
+  "allocations": {
+    "D1": ["S1", "S2"]
+  },
+  "unreachable_stops": []
+}
+```
+
+---
+
+### Tiles Endpoints
 
 #### `GET /tile/{profile}/{z}/{x}/{y}.mvt`
 
-Proxy a Mapbox Vector Tile from OSRM. Minimum zoom level: 12.
+Proxy Mapbox Vector Tiles from the OSRM backend. Minimum zoom level: 12.
 
 ---
 
