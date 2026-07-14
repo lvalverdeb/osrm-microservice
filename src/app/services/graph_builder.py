@@ -1,5 +1,5 @@
 import networkx as nx
-from typing import Any, Dict, List
+from typing import Any, Dict
 from app.models.schemas import MatrixRequest
 
 class GraphBuilder:

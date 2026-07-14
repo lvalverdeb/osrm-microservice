@@ -1,4 +1,5 @@
 import logging
+from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -10,7 +11,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def setup_tracing(app):
+def setup_tracing(app: FastAPI) -> None:
     provider = TracerProvider()
     if settings.OTLP_ENDPOINT:
         try:

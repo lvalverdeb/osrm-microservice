@@ -2,12 +2,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Response
 import httpx
 import logging
-from typing import Any, Dict
+from typing import Any, AsyncIterator, Dict
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.models.schemas import (
-    RouteRequest, MatchRequest, MatrixRequest, MatrixGraphResponse, TripRequest,
+    RouteRequest, MatchRequest, MatrixRequest, TripRequest,
     NearestRequest, VrpRequest, VrpResponse, VrpAllocationResponse
 )
 from app.services.osrm_client import OSRMClient
@@ -31,7 +31,7 @@ vrp_service = VrpService(osrm_client)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     await osrm_client.close()
     await redis_cache.close()
@@ -47,11 +47,12 @@ def _parse_osrm_error(e: httpx.HTTPStatusError):
     try:
         body = e.response.json()
         return {"code": body.get("code", "Error"), "message": body.get("message", "Routing service error")}
-    except Exception:
+    except Exception as parse_err:
+        logger.debug("Failed to parse OSRM error body: %s", parse_err)
         return "Routing service error"
 
 @app.get("/health", tags=["System"], summary="Health Check")
-async def health_check():
+async def health_check() -> Dict[str, str]:
     """Health check endpoint that also probes the OSRM backend."""
     osrm_healthy = True
     try:
@@ -61,7 +62,8 @@ async def health_check():
         )
         if resp.is_error:
             osrm_healthy = False
-    except Exception:
+    except Exception as probe_err:
+        logger.warning("OSRM health probe failed: %s", probe_err)
         osrm_healthy = False
 
     return {
@@ -72,7 +74,7 @@ async def health_check():
 
 @app.post("/route", tags=["Routing"], summary="Calculate Route")
 @limiter.limit(settings.RATE_LIMIT_ROUTE)
-async def get_route(request: Request, payload: RouteRequest):
+async def get_route(request: Request, payload: RouteRequest) -> Dict[str, Any]:
     """Calculate highly accurate driving route."""
     try:
         # Collect all points: origin, then waypoints (if any), then destination
@@ -91,7 +93,7 @@ async def get_route(request: Request, payload: RouteRequest):
 
 @app.post("/matrix", tags=["Matrix"], summary="Get Distance/Duration Matrix")
 @limiter.limit(settings.RATE_LIMIT_MATRIX)
-async def get_matrix(request: Request, payload: MatrixRequest):
+async def get_matrix(request: Request, payload: MatrixRequest) -> Dict[str, Any]:
     """Fetch raw distance/duration matrix."""
     try:
         return await osrm_client.get_matrix(payload)
@@ -104,7 +106,7 @@ async def get_matrix(request: Request, payload: MatrixRequest):
 
 @app.post("/matrix-graph", tags=["Matrix"], summary="Get Matrix as Graph")
 @limiter.limit(settings.RATE_LIMIT_MATRIX)
-async def get_matrix_graph(request: Request, payload: MatrixRequest):
+async def get_matrix_graph(request: Request, payload: MatrixRequest) -> Dict[str, Any]:
     """Generate a directed graph from a distance/duration matrix."""
     try:
         matrix_data = await osrm_client.get_matrix(payload)
@@ -118,7 +120,7 @@ async def get_matrix_graph(request: Request, payload: MatrixRequest):
 
 @app.post("/match", tags=["Map Matching"], summary="Map Match GPS Traces")
 @limiter.limit(settings.RATE_LIMIT_MATCH)
-async def match_trace(request: Request, payload: MatchRequest):
+async def match_trace(request: Request, payload: MatchRequest) -> Dict[str, Any]:
     """
     Map match noisy GPS traces to the road network.
     Handles multiple segments automatically (Trace Splitting).
@@ -136,7 +138,7 @@ async def match_trace(request: Request, payload: MatchRequest):
 
 @app.post("/trip", tags=["Optimization"], summary="Solve Traveling Salesperson Problem")
 @limiter.limit(settings.RATE_LIMIT_TRIP)
-async def get_trip(request: Request, payload: TripRequest):
+async def get_trip(request: Request, payload: TripRequest) -> Dict[str, Any]:
     """
     Solve TSP for an optimized sequence of coordinates.
     Ideal for comparing actual vs optimized routes.
@@ -151,7 +153,7 @@ async def get_trip(request: Request, payload: TripRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 @app.post("/nearest", tags=["Routing"], summary="Snap Coordinate to Road Network")
 @limiter.limit(settings.RATE_LIMIT_NEAREST)
-async def get_nearest(request: Request, payload: NearestRequest):
+async def get_nearest(request: Request, payload: NearestRequest) -> Dict[str, Any]:
     """
     Find the nearest road network node(s) to a given coordinate.
     Useful for snapping raw GPS coordinates to the routable road graph.
@@ -172,7 +174,7 @@ async def get_nearest(request: Request, payload: NearestRequest):
     response_class=Response
 )
 @limiter.limit(settings.RATE_LIMIT_TILE)
-async def get_tile(request: Request, profile: str, z: int, x: int, y: int):
+async def get_tile(request: Request, profile: str, z: int, x: int, y: int) -> Response:
     """
     Proxy a Mapbox Vector Tile from the OSRM tile service.
     Returns binary protobuf content (application/x-protobuf).
@@ -190,7 +192,7 @@ async def get_tile(request: Request, profile: str, z: int, x: int, y: int):
 
 @app.post("/vrp", tags=["Optimization"], summary="Solve Vehicle Routing Problem", response_model=VrpResponse)
 @limiter.limit(settings.RATE_LIMIT_VRP)
-async def solve_vrp(request: Request, payload: VrpRequest):
+async def solve_vrp(request: Request, payload: VrpRequest) -> VrpResponse:
     """
     Solve multi-vehicle Vehicle Routing Problem using Location-Allocation.
     Assigns stops to the logistically closest warehouse before routing.
@@ -203,7 +205,7 @@ async def solve_vrp(request: Request, payload: VrpRequest):
 
 @app.post("/vrp/allocate", tags=["Optimization"], summary="Cluster Products to Warehouses", response_model=VrpAllocationResponse)
 @limiter.limit(settings.RATE_LIMIT_VRP)
-async def allocate_vrp(request: Request, payload: VrpRequest):
+async def allocate_vrp(request: Request, payload: VrpRequest) -> VrpAllocationResponse:
     """
     Cluster products to warehouses using Location-Allocation.
     This is the first phase of the VRP solving process.

@@ -1,6 +1,6 @@
 import httpx
 import logging
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List
 import tenacity
 from app.config import settings
 from app.models.schemas import RouteRequest, MatchRequest, MatrixRequest, TripRequest, NearestRequest
@@ -18,7 +18,7 @@ class OSRMClient:
             base_url=self.base_url, timeout=settings.OSRM_CLIENT_TIMEOUT
         )
 
-    async def close(self):
+    async def close(self) -> None:
         """Gracefully close the underlying httpx client."""
         await self._client.aclose()
 
@@ -170,24 +170,24 @@ class OSRMClient:
             params=params
         )
 
+    _COMMON_OPTION_SERIALIZERS = [
+        ("bearings", lambda values: ";".join(v if v is not None else "" for v in values)),
+        ("radiuses", lambda values: ";".join(str(v) if v is not None else "unlimited" for v in values)),
+        ("hints", lambda values: ";".join(v if v is not None else "" for v in values)),
+        ("approaches", lambda values: ";".join(v if v is not None else "" for v in values)),
+        ("exclude", lambda values: ",".join(values)),
+        ("snapping", lambda value: value),
+        ("skip_waypoints", lambda value: "true" if value else "false"),
+    ]
+
     @staticmethod
     def _serialize_common_options(request) -> Dict[str, Any]:
         """Serialize optional OSRM general options into query parameter entries."""
-        params = {}
-        if request.bearings is not None:
-            params["bearings"] = ";".join(b if b is not None else "" for b in request.bearings)
-        if request.radiuses is not None:
-            params["radiuses"] = ";".join(str(r) if r is not None else "unlimited" for r in request.radiuses)
-        if request.hints is not None:
-            params["hints"] = ";".join(h if h is not None else "" for h in request.hints)
-        if request.approaches is not None:
-            params["approaches"] = ";".join(a if a is not None else "" for a in request.approaches)
-        if request.exclude is not None:
-            params["exclude"] = ",".join(request.exclude)
-        if request.snapping is not None:
-            params["snapping"] = request.snapping
-        if request.skip_waypoints is not None:
-            params["skip_waypoints"] = "true" if request.skip_waypoints else "false"
+        params: Dict[str, Any] = {}
+        for field, serialize in OSRMClient._COMMON_OPTION_SERIALIZERS:
+            value = getattr(request, field)
+            if value is not None:
+                params[field] = serialize(value)
         return params
 
     async def get_tile(self, profile: str, z: int, x: int, y: int) -> bytes:
