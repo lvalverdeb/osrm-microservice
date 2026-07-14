@@ -47,8 +47,8 @@ Options générales OSRM facultatives applicables aux services Route, Table, Mat
 | `waypoints` | `List[Coordinate]` | Points intermédiaires facultatifs. |
 | `profile` | `str` | Profil de routage : `driving` (par défaut), `cycling`, `walking`. |
 | `alternatives` | `bool ou int` | Retourner des alternatives (booléen) ou un nombre spécifique (entier). |
-| `overview` | `str` | Résolution de la géométrie : `simplified` (par défaut), `full`, `false`. |
-| `geometries` | `str` | Format de la géométrie : `polyline` (par défaut), `polyline6`, `geojson`. |
+| `overview` | `str` | Résolution de la géométrie : `simplified`, `full` (par défaut), `false`. |
+| `geometries` | `str` | Format de la géométrie : `polyline`, `polyline6`, `geojson` (par défaut). |
 | `steps` | `bool` | Retourner les instructions de virage (Par défaut : `true`). |
 | `annotations` | `str` | Métadonnées par segment (ex: `distance,duration`). |
 
@@ -60,7 +60,7 @@ Options générales OSRM facultatives applicables aux services Route, Table, Mat
 | `profile` | `str` | Profil de routage : `driving`, `cycling`, `walking`. |
 | `sources` | `List[int]` | Indices des points à utiliser comme origines. |
 | `destinations` | `List[int]` | Indices des points à utiliser comme destinations. |
-| `annotations` | `str` | `duration` (par défaut), `distance`, ou `duration,distance`. |
+| `annotations` | `str` | `duration`, `distance`, ou `duration,distance` (par défaut). |
 
 ### `MatchRequest` (Hérite de `CommonRoutingOptions`)
 
@@ -177,15 +177,18 @@ Un point de livraison géographique ou l'emplacement d'un dépôt avec identific
 
 #### `GET /health`
 
-Vérifie si la passerelle est en cours d'exécution.
+Vérifie si la passerelle est en cours d'exécution et sonde le backend OSRM.
 
 **Corps de la Réponse :**
 ```json
 {
   "status": "healthy",
-  "service": "osrm-api-gateway"
+  "service": "OSRM API Gateway",
+  "osrm_backend": "up"
 }
 ```
+
+`status` est `"degraded"` et `osrm_backend` est `"down"` lorsque la sonde du backend OSRM échoue.
 
 ---
 

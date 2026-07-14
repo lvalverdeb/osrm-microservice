@@ -49,7 +49,7 @@ Cette Description de Conception Logicielle (SDD) définit l'architecture et la c
 OSRM API Gateway est un microservice asynchrone basé sur FastAPI qui encapsule le backend C++ d'OSRM (Open Source Routing Machine), exposant des capacités spécialisées de routage, d'appariement cartographique, d'optimisation et de résolution de Problèmes de Tournées de Véhicules (VRP) via une API RESTful JSON. Géographiquement focalisé sur le Costa Rica.
 
 **Inclusions :**
-- API HTTP RESTful avec 9 points d'accès
+- API HTTP RESTful avec 10 points d'accès
 - Proxy HTTP asynchrone vers le backend OSRM avec pool de connexions
 - Traitement de traces GPS par appariement cartographique
 - Calcul de matrices distance/durée et conversion en graphes
@@ -94,7 +94,7 @@ OSRM API Gateway est un microservice asynchrone basé sur FastAPI qui encapsule 
 | GitHub Spec Kit (Méthodologie SDD) | dernière | Informative |
 | GATEWAY_IMPLEMENTATION_PLAN.md | v0.2.2 | Normative |
 | API_REFERENCE.md | v0.2.2 | Normative |
-| examples/vrp/PROPOSAL.md | v0.2.2 | Informative |
+| docs/planning/vrp_proposal.md | v0.2.2 | Informative |
 
 ### 1.5 Aperçu du Document
 
@@ -176,7 +176,7 @@ Le système fonctionne comme une passerelle entre les clients et le backend C++ 
 ├───────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │  Couche API (app/main.py)                            │  │
-│  │  Application FastAPI, 9 endpoints, gestion erreurs,  │  │
+│  │  Application FastAPI, 10 endpoints, gestion erreurs, │  │
 │  │  limiteurs de débit (slowapi), validation requêtes   │  │
 │  └──────────┬──────────────────────────────────────────┘  │
 │             │                                             │
@@ -195,7 +195,7 @@ Le système fonctionne comme une passerelle entre les clients et le backend C++ 
 │                                                           │
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │  Couche Modèles (app/models/schemas.py)              │  │
-│  │  14 modèles Pydantic v2 : Coordinate, Stop,         │  │
+│  │  15 modèles Pydantic v2 : Coordinate, Stop,         │  │
 │  │  RouteReq, MatchReq, MatrixReq, TripReq,            │  │
 │  │  NearestReq, VrpReq, VrpResponse, VehicleRoute, etc.│  │
 │  └─────────────────────────────────────────────────────┘  │
@@ -578,7 +578,7 @@ Pour chaque paire (dépôt, cluster) :
 │  └──────────────────────────────────────────────────────┘     │
 │                                                              │
 │  ┌─ api ────────────────────────────────────────────────┐     │
-│  │  Image : osrm-api-gateway (app/Dockerfile)            │     │
+│  │  Image : osrm-api-gateway (Dockerfile)                │     │
 │  │  Conteneur : osrm-api-gateway                         │     │
 │  │  Port : 8080 → 8000 (FastAPI interne)                 │     │
 │  │  ENV : OSRM_BASE_URL=http://osrm-backend:5000         │     │
@@ -651,7 +651,7 @@ Le système utilise un modèle asynchrone monothread :
 **Contexte :** OSRM ne supporte pas nativement le routage multi-véhicules. Un solveur VRP personnalisé était nécessaire, déléguant le routage au service `/trip` d'OSRM.  
 **Options :** (a) Appels OSRM trip purs par véhicule (sans allocation), (b) Location-Allocation + TSP, (c) Solveur VRP externe (OR-Tools, jsprit).  
 **Résultat :** Option choisie (b) — Location-Allocation avec clustering par hystérésis, puis TSP par cluster via OSRM `/trip`. Équilibre la qualité algorithmique avec la réutilisation d'OSRM.  
-**Plus d'Informations :** voir `examples/vrp/PROPOSAL.md`.
+**Plus d'Informations :** voir `docs/planning/vrp_proposal.md`.
 
 **ID:** DEC-004  
 **Titre:** Stabilité d'Affectation Basée sur l'Hystérésis  
@@ -669,7 +669,7 @@ Le système utilise un modèle asynchrone monothread :
 **Titre:** Builds Docker Multi-Étapes pour le Traitement des Données OSRM  
 **Contexte :** L'extraction des données OSRM est lente (~30min) et nécessite des outils différents du serveur d'exécution.  
 **Options :** (a) Build mono-étape avec tous les outils, (b) Multi-étapes avec constructeur et exécution séparés, (c) Volume de données pré-traitées.  
-**Résultat :** Option choisie (b) — Trois Dockerfiles : `Dockerfile.builder` (extraction/partitionnement/personnalisation), `Dockerfile.osrm` (exécution) et `app/Dockerfile` (passerelle API). Seules les images d'exécution sont utilisées en production.
+**Résultat :** Option choisie (b) — Trois Dockerfiles : `Dockerfile.builder` (extraction/partitionnement/personnalisation), `Dockerfile.osrm` (exécution) et `Dockerfile` (passerelle API, racine du dépôt). Seules les images d'exécution sont utilisées en production.
 
 **ID:** DEC-007  
 **Titre:** slowapi pour la Limitation de Débit  

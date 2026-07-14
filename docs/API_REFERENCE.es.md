@@ -47,8 +47,8 @@ Opciones generales opcionales de OSRM aplicables a los servicios Route, Table, M
 | `waypoints` | `List[Coordinate]` | Puntos intermedios opcionales para pasar. |
 | `profile` | `str` | Perfil de enrutamiento: `driving` (predeterminado), `cycling`, `walking`. |
 | `alternatives` | `bool o int` | Devolver alternativas (booleano) o un número específico (entero). |
-| `overview` | `str` | Resolución de la geometría: `simplified` (predeterminado), `full`, `false`. |
-| `geometries` | `str` | Formato de geometría: `polyline` (predeterminado), `polyline6`, `geojson`. |
+| `overview` | `str` | Resolución de la geometría: `simplified`, `full` (predeterminado), `false`. |
+| `geometries` | `str` | Formato de geometría: `polyline`, `polyline6`, `geojson` (predeterminado). |
 | `steps` | `bool` | Devolver instrucciones de giro paso a paso (Predeterminado: `true`). |
 | `annotations` | `str` | Metadatos separados por comas por segmento (ej. `distance,duration`). |
 
@@ -60,7 +60,7 @@ Opciones generales opcionales de OSRM aplicables a los servicios Route, Table, M
 | `profile` | `str` | Perfil de enrutamiento: `driving`, `cycling`, `walking`. |
 | `sources` | `List[int]` | Índices de puntos para usar como orígenes. |
 | `destinations` | `List[int]` | Índices de puntos para usar como destinos. |
-| `annotations` | `str` | `duration` (predeterminado), `distance`, o `duration,distance`. |
+| `annotations` | `str` | `duration`, `distance`, o `duration,distance` (predeterminado). |
 
 ### `MatchRequest` (Hereda de `CommonRoutingOptions`)
 
@@ -177,15 +177,18 @@ Una parada de entrega geográfica o ubicación de depósito con identificación.
 
 #### `GET /health`
 
-Verifica si la pasarela (gateway) está activa.
+Verifica si la pasarela (gateway) está activa y sondea el backend OSRM.
 
 **Cuerpo de la Respuesta:**
 ```json
 {
   "status": "healthy",
-  "service": "osrm-api-gateway"
+  "service": "OSRM API Gateway",
+  "osrm_backend": "up"
 }
 ```
+
+`status` es `"degraded"` y `osrm_backend` es `"down"` cuando falla el sondeo del backend OSRM.
 
 ---
 

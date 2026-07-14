@@ -50,7 +50,7 @@ This Software Design Description (SDD) defines the architecture and system desig
 The OSRM API Gateway is a FastAPI-based asynchronous microservice that wraps the OSRM (Open Source Routing Machine) C++ backend, exposing specialized routing, map matching, optimization, and Vehicle Routing Problem (VRP) capabilities via a RESTful JSON API. Geographically focused on Costa Rica.
 
 **Inclusions:**
-- RESTful HTTP API with 9 endpoints
+- RESTful HTTP API with 10 endpoints
 - Async HTTP proxy to OSRM backend with connection pooling
 - Map-matched GPS trace processing
 - Distance/duration matrix computation and graph conversion
@@ -101,7 +101,7 @@ The OSRM API Gateway is a FastAPI-based asynchronous microservice that wraps the
 | GitHub Spec Kit (SDD Methodology) | latest | Informative |
 | GATEWAY_IMPLEMENTATION_PLAN.md | v0.2.2 | Normative |
 | API_REFERENCE.md | v0.2.2 | Normative |
-| examples/vrp/PROPOSAL.md | v0.2.2 | Informative |
+| docs/planning/vrp_proposal.md | v0.2.2 | Informative |
 | REMEDIATION_PLAN_v2.md | v0.3.0 | Normative |
 
 ### 1.5 Document Overview
@@ -184,7 +184,7 @@ The system operates as a gateway between clients and the OSRM C++ backend. Clien
 ├───────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  API Layer (app/main.py)                                 │  │
-│  │  FastAPI application, 9 endpoints, error handling,       │  │
+│  │  FastAPI application, 10 endpoints, error handling,      │  │
 │  │  rate limiting (slowapi), request validation,            │  │
 │  │  Prometheus /metrics, health probe, lifespan shutdown,   │  │
 │  │  OpenTelemetry tracing middleware                        │  │
@@ -226,7 +226,7 @@ The system operates as a gateway between clients and the OSRM C++ backend. Clien
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │  Models Layer (app/models/schemas.py)                    │  │
-│  │  14 Pydantic v2 models: Coordinate, Stop, RouteReq,     │  │
+│  │  15 Pydantic v2 models: Coordinate, Stop, RouteReq,     │  │
 │  │  MatchReq, MatrixReq, TripReq, NearestReq, VrpReq,      │  │
 │  │  VrpResponse, VehicleRoute, etc.                        │  │
 │  └─────────────────────────────────────────────────────────┘  │
@@ -618,7 +618,7 @@ For each (depot, cluster) pair:
 │  └──────────────────────────────────────────────────────┘     │
 │                                                              │
 │  ┌─ api ────────────────────────────────────────────────┐     │
-│  │  Image: osrm-api-gateway (app/Dockerfile)             │     │
+│  │  Image: osrm-api-gateway (Dockerfile)                  │     │
 │  │  Container: osrm-api-gateway                          │     │
 │  │  Port: 8080 → 8000 (FastAPI internal)                 │     │
 │  │  ENV: OSRM_BASE_URL=http://osrm-backend:5000          │     │
@@ -696,7 +696,7 @@ The system uses a single-threaded async model:
 **Context:** OSRM does not natively support multi-vehicle routing. A custom VRP solver was needed that delegates routing to OSRM's `/trip` service.  
 **Options:** (a) Pure OSRM trip calls per vehicle (no allocation), (b) Location-Allocation + TSP, (c) External VRP solver (OR-Tools, jsprit).  
 **Outcome:** Chosen option (b) — Location-Allocation with hysteresis clustering, then per-cluster TSP via OSRM `/trip`. Balances algorithmic quality with OSRM reuse.  
-**More Information:** see `examples/vrp/PROPOSAL.md`.
+**More Information:** see `docs/planning/vrp_proposal.md`.
 
 **ID:** DEC-004  
 **Title:** Hysteresis-Based Assignment Stability  
@@ -714,7 +714,7 @@ The system uses a single-threaded async model:
 **Title:** Multi-Stage Docker Builds for OSRM Data Processing  
 **Context:** OSRM data extraction is slow (~30min) and requires different tools than the runtime server.  
 **Options:** (a) Single-stage build with all tools, (b) Multi-stage with separate builder and runtime, (c) Pre-processed data volume.  
-**Outcome:** Chosen option (b) — Three Dockerfiles: `Dockerfile.builder` (extract/partition/customize), `Dockerfile.osrm` (runtime), and `app/Dockerfile` (API gateway). Only the runtime images are used in production.
+**Outcome:** Chosen option (b) — Three Dockerfiles: `Dockerfile.builder` (extract/partition/customize), `Dockerfile.osrm` (runtime), and `Dockerfile` (API gateway, repo root). Only the runtime images are used in production.
 
 **ID:** DEC-007  
 **Title:** slowapi for Rate Limiting  

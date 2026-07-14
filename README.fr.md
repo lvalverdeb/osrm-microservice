@@ -54,7 +54,7 @@ make compose-down
 
 ## Services Principaux
 
-L'application encapsule la logique de routage complexe dans plusieurs services clés situés dans `app/services/` :
+L'application encapsule la logique de routage complexe dans plusieurs services clés situés dans `src/app/services/` :
 
 ### 1. Client OSRM (`osrm_client.py`)
 Un client HTTP asynchrone qui interagit directement avec le backend OSRM en C++. Il formate les requêtes et normalise les réponses.
@@ -129,18 +129,48 @@ vrp_res = requests.post(f"{BASE_URL}/vrp", json=vrp_payload)
 
 Le projet comprend des outils Python pour visualiser et comparer les itinéraires :
 
-- **`visualize_routes.py`** : Récupère et trace les itinéraires principaux et alternatifs pour un voyage.
-- **`compare_tsp.py`** : Compare une séquence d'arrêts fournie (Réel) à un voyage aller-retour optimisé par TSP (Optimisé).
-- **`examples/clustering/simple_id_example.py`** : Un démonstrateur VRP complet qui simule 10 véhicules sur plusieurs dépôts et génère une carte Folium interactive.
+### Scripts d'Exemple
+
+| Catégorie | Script | Ce Qu'il Démontre |
+|----------|--------|---------------------|
+| **Routage** | `visualize_routes.py` | Itinéraires principaux + alternatifs avec info-bulles de distance/durée |
+| | `route_advanced_options.py` | Contraintes de cap, exclusion de voies, continue_straight, annotations d'étapes |
+| | `error_handling_demo.py` | 8 scénarios d'erreur : 422, 429, erreurs de connexion, validation |
+| | `matrix_example.py` | Tableau de matrice distance/durée entre plusieurs villes |
+| | `matrix_graph_example.py` | Conversion de matrice en graphe avec attributs de nœuds/arêtes |
+| | `nearest_example.py` | Ajustement au réseau routier avec plusieurs segments proches |
+| | `match_example.py` | Appariement de traces GPS avec géométrie brute vs appariée |
+| | `tile_example.py` | Téléchargement de Mapbox Vector Tile depuis `/tile` |
+| **Benchmarking** | `compare_tsp.py` | Comparaison de séquence de livraison réelle vs optimisée par TSP |
+| | `clustering_mode_comparison.py` | Comparaison des modes de clustering travel_time vs distance vs radial sur le même jeu de données |
+| | `hysteresis_demo.py` | Tampon d'hystérésis empêchant le battement des affectations |
+| **VRP** | `visualize_vrp.py` | VRP multi-dépôts avec itinéraires de véhicules codés par couleur |
+| | `stress_test_vrp.py` | Test de charge avec 6 dépôts et 2500 arrêts |
+| | `simple_id_example.py` | 10 véhicules, 300 arrêts avec des IDs personnalisés |
+| | `run_clustering_workflow.py` | Clustering de 6500 arrêts, distance routière vs temps de trajet |
+| **Infrastructure** | `health_and_metrics.py` | Sonde de santé, métriques Prometheus, cache, réessais, journalisation |
 
 **Utilisation** :
 
 ```bash
-# Exécuter la simulation VRP de 10 véhicules
-uv run examples/clustering/simple_id_example.py
+# Ou lancer le menu interactif (découvre automatiquement tous les scripts)
+uv run examples/main.py
+
+# Exemples de routage
+uv run examples/src/routing/matrix_example.py
+uv run examples/src/routing/route_advanced_options.py
+uv run examples/src/routing/error_handling_demo.py
+
+# Exemples VRP
+uv run examples/src/vrp/clustering_mode_comparison.py
+uv run examples/src/vrp/hysteresis_demo.py
+uv run examples/src/clustering/simple_id_example.py
+
+# Infrastructure
+uv run examples/src/infra/health_and_metrics.py
 
 # Comparer les séquences réelles vs optimisées
-uv run compare_tsp.py
+uv run examples/src/benchmarking/compare_tsp.py
 ```
 
 Les cartes sont enregistrées sous forme de fichiers HTML interactifs (`map.html`, `comparison_map.html`).

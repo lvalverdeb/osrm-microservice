@@ -67,7 +67,7 @@ Avoid running `docker compose down & docker compose up --build`; `&` backgrounds
 
 ## Core Services
 
-The application encapsulates complex routing logic into several key services located in `app/services/`:
+The application encapsulates complex routing logic into several key services located in `src/app/services/`:
 
 ### 1. OSRM Client (`osrm_client.py`)
 An asynchronous HTTP client that interacts directly with the C++ OSRM backend. It formats queries and standardizes responses.
@@ -167,21 +167,24 @@ The project includes Python tools to visualize and compare routes:
 **Usage**:
 
 ```bash
+# Or launch the interactive menu (discovers all scripts automatically)
+uv run examples/main.py
+
 # Routing examples
-uv run examples/routing/matrix_example.py
-uv run examples/routing/route_advanced_options.py
-uv run examples/routing/error_handling_demo.py
+uv run examples/src/routing/matrix_example.py
+uv run examples/src/routing/route_advanced_options.py
+uv run examples/src/routing/error_handling_demo.py
 
 # VRP examples
-uv run examples/vrp/clustering_mode_comparison.py
-uv run examples/vrp/hysteresis_demo.py
-uv run examples/clustering/simple_id_example.py
+uv run examples/src/vrp/clustering_mode_comparison.py
+uv run examples/src/vrp/hysteresis_demo.py
+uv run examples/src/clustering/simple_id_example.py
 
 # Infrastructure
-uv run examples/infra/health_and_metrics.py
+uv run examples/src/infra/health_and_metrics.py
 
 # Compare actual vs optimized sequences
-uv run examples/benchmarking/compare_tsp.py
+uv run examples/src/benchmarking/compare_tsp.py
 ```
 
 Maps are saved as interactive HTML files (`map.html`, `comparison_map.html`).

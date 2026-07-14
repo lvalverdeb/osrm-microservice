@@ -47,8 +47,8 @@ Optional OSRM general options applicable to Route, Table, Match, and Trip servic
 | `waypoints` | `List[Coordinate]` | Optional intermediate points to pass through. |
 | `profile` | `str` | Routing profile: `driving` (default), `cycling`, `walking`. |
 | `alternatives` | `bool or int` | Return alternates (boolean) or a specific number (integer). |
-| `overview` | `str` | Geometry resolution: `simplified` (default), `full`, `false`. |
-| `geometries` | `str` | Geometry format: `polyline` (default), `polyline6`, `geojson`. |
+| `overview` | `str` | Geometry resolution: `simplified`, `full` (default), `false`. |
+| `geometries` | `str` | Geometry format: `polyline`, `polyline6`, `geojson` (default). |
 | `steps` | `bool` | Return step-by-step turn instructions (Default: `true`). |
 | `annotations` | `str` | Comma-separated metadata per segment (e.g. `distance,duration`). |
 
@@ -60,7 +60,7 @@ Optional OSRM general options applicable to Route, Table, Match, and Trip servic
 | `profile` | `str` | Routing profile: `driving`, `cycling`, `walking`. |
 | `sources` | `List[int]` | Indices of points to use as origins. |
 | `destinations` | `List[int]` | Indices of points to use as destinations. |
-| `annotations` | `str` | `duration` (default), `distance`, or `duration,distance`. |
+| `annotations` | `str` | `duration`, `distance`, or `duration,distance` (default). |
 
 ### `MatchRequest` (Inherits from `CommonRoutingOptions`)
 
@@ -177,15 +177,18 @@ A geographic delivery stop or depot location with identification.
 
 #### `GET /health`
 
-Checks if the gateway is running.
+Checks if the gateway is running and probes the OSRM backend.
 
 **Response Body:**
 ```json
 {
   "status": "healthy",
-  "service": "osrm-api-gateway"
+  "service": "OSRM API Gateway",
+  "osrm_backend": "up"
 }
 ```
+
+`status` is `"degraded"` and `osrm_backend` is `"down"` when the OSRM backend probe fails.
 
 ---
 
