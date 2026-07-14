@@ -24,7 +24,7 @@ data/*
 .docker/
 *.log
 
-# IDEs
+# IDE
 .idea/
 .vscode/
 *.swp
@@ -37,3 +37,12 @@ Thumbs.db
 # Environment Secrets
 .env
 .env.local
+
+# Docker build cache
+.docker_tmp/
+
+# uv cache
+.uv_cache/
+
+# Generated Mapbox Vector Tiles
+*.mvt

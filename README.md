@@ -143,22 +143,45 @@ vrp_res = requests.post(f"{BASE_URL}/vrp", json=vrp_payload)
 
 The project includes Python tools to visualize and compare routes:
 
-- **`visualize_routes.py`**: Fetches and plots primary and alternate routes for a trip.
-- **`compare_tsp.py`**: Compares a provided sequence of stops (Actual) against a TSP-optimized round-trip (Optimized).
-- **`matrix_example.py`**: Demonstrates how to generate a distance and duration table (matrix) between multiple origins and destinations.
-- **`simple_id_example.py`**: A comprehensive VRP demonstrator that simulates 10 vehicles across multiple depots and generates an interactive Folium map.
+### Example Scripts
+
+| Category | Script | What It Demonstrates |
+|----------|--------|---------------------|
+| **Routing** | `visualize_routes.py` | Primary + alternate routes with distance/duration popups |
+| | `route_advanced_options.py` | Bearing constraints, road exclusion, continue_straight, step annotations |
+| | `error_handling_demo.py` | 8 error scenarios: 422, 429, connection errors, validation |
+| | `matrix_example.py` | Distance/duration matrix table between multiple cities |
+| | `matrix_graph_example.py` | Matrix-to-graph conversion with node/edge attributes |
+| | `nearest_example.py` | Road snapping with multiple nearest segments |
+| | `match_example.py` | GPS trace map matching with raw vs matched geometry |
+| | `tile_example.py` | Mapbox Vector Tile download from `/tile` |
+| **Benchmarking** | `compare_tsp.py` | Actual vs TSP-optimized delivery sequence comparison |
+| | `clustering_mode_comparison.py` | travel_time vs distance vs radial clustering on same dataset |
+| | `hysteresis_demo.py` | Hysteresis buffer preventing assignment flapping |
+| **VRP** | `visualize_vrp.py` | Multi-warehouse VRP with color-coded vehicle routes |
+| | `stress_test_vrp.py` | 6 warehouses + 2500 stops stress test |
+| | `simple_id_example.py` | 10 vehicles, 300 stops with custom IDs |
+| | `run_clustering_workflow.py` | 6500-stop clustering with road distance vs travel time |
+| **Infrastructure** | `health_and_metrics.py` | Health probe, Prometheus metrics, caching, retry, logging |
 
 **Usage**:
 
 ```bash
-# Run the distance/duration matrix example
+# Routing examples
 uv run examples/routing/matrix_example.py
+uv run examples/routing/route_advanced_options.py
+uv run examples/routing/error_handling_demo.py
 
-# Run the 10-vehicle VRP simulation
+# VRP examples
+uv run examples/vrp/clustering_mode_comparison.py
+uv run examples/vrp/hysteresis_demo.py
 uv run examples/clustering/simple_id_example.py
 
+# Infrastructure
+uv run examples/infra/health_and_metrics.py
+
 # Compare actual vs optimized sequences
-uv run compare_tsp.py
+uv run examples/benchmarking/compare_tsp.py
 ```
 
 Maps are saved as interactive HTML files (`map.html`, `comparison_map.html`).

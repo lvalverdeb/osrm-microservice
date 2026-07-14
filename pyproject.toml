@@ -14,7 +14,22 @@ dependencies = [
     "folium>=0.16.0",
     "requests>=2.31.0",
     "slowapi>=0.1.9",
+    "cachetools>=5.3.3",
+    "tenacity>=9.0.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    "redis[asyncio]>=5.2.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-instrumentation-httpx>=0.51b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
 ]
+
+[tool.uv.workspace]
+members = ["examples"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [build-system]
 requires = ["hatchling"]
@@ -23,11 +38,19 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.sdist]
 include = [
     "README*.md",
-    "app",
+    "src",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["src/app"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+    "ruff>=0.5.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/lvalverdeb/osrm-microservice"

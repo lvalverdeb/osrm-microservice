@@ -1,0 +1,11 @@
+[project]
+name = "osrm-api-gateway-examples"
+version = "0.1.0"
+description = "Example client scripts for OSRM API Gateway"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27.0",
+    "requests>=2.31.0",
+    "folium>=0.16.0",
+    "pydantic-settings>=2.2.0",
+]

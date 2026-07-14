@@ -6,6 +6,7 @@ export
 DATA_DIR = $(shell pwd)/data
 
 OSM_FILE = costa-rica-latest.osm.pbf
+OSM_BASE = $(OSM_FILE:.osm.pbf=)
 GEO_URL = http://download.geofabrik.de/central-america/$(OSM_FILE)
 
 # Profile selection (car, bicycle, foot) - defaults to car
