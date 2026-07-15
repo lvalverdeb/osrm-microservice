@@ -82,9 +82,6 @@ def main():
 
     print()
     print("--- Analysis ---")
-    mid_0 = results[0]["allocations"]
-    mid_2 = results[2000]["allocations"]
-    mid_10 = results[10000]["allocations"]
 
     def find_stop(d, stop_id):
         for depot, stops in d.items():

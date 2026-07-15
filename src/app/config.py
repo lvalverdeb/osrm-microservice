@@ -36,7 +36,11 @@ class Settings(BaseSettings):
     OSRM_RETRY_MAX: int = 10
 
     # Health Check Settings
-    HEALTH_CHECK_TIMEOUT: int = 5
+    # Must stay well below the Dockerfile's HEALTHCHECK --timeout (currently 8s):
+    # this probe blocks the /health response, so it needs enough margin left over
+    # for connection setup and response overhead, or Docker kills the check before
+    # the app ever gets to reply "degraded" — exactly when OSRM is actually down.
+    HEALTH_CHECK_TIMEOUT: int = 2
     HEALTH_CHECK_COORDS: str = "0,0;0,0"
 
     # VRP / Matrix Settings

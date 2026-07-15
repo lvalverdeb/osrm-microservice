@@ -222,14 +222,14 @@ wheels = [
 
 [[package]]
 name = "boti-tripwire"
-version = "0.1.0"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boti" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/17/ac/1f77d1a58ab5779f6c3d5ddfbf241a4b129f6cb4b669aa95742c7d28ef63/boti_tripwire-0.1.0.tar.gz", hash = "sha256:b33c98fbffa97a961f83d8afc7be2162004cad6e13fd6f597a51ca6e8c3ffd77", size = 27705, upload-time = "2026-07-14T18:20:24.557Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/43/3ae123c690786e0960dc5508fbb702d97788eb17a496f74aa0150373027c/boti_tripwire-1.0.1.tar.gz", hash = "sha256:30fe67a57e83c1cd0a9d114c665e37060aaf6a0548f2dcbf5ebba6d46fdf3908", size = 29268, upload-time = "2026-07-15T15:06:56.433Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/59/20f458b8aa69156c877de32b0ca914ecec5c9f64172029cdfa5c0c97e96f/boti_tripwire-0.1.0-py3-none-any.whl", hash = "sha256:8173e7943e20802f4a3e7a4d73cacc2131cec1fe3971abf5ad2b41305d6d0cdc", size = 31427, upload-time = "2026-07-14T18:20:23.288Z" },
+    { url = "https://files.pythonhosted.org/packages/af/c6/a32cbae815a56f282fa16cf0a5667a725bb8c669489a2778b105d07f2a5e/boti_tripwire-1.0.1-py3-none-any.whl", hash = "sha256:df04d9defaf6b793130acf3c8b20aabb1ae6fb8992411bf01db09fd86173c9c4", size = 32510, upload-time = "2026-07-15T15:06:55.343Z" },
 ]
 
 [[package]]
@@ -1796,15 +1796,15 @@ wheels = [
 
 [[package]]
 name = "spaghetti-detector"
-version = "0.1.1"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boti" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/07/e1a3238cdc265f20321e2926d386bc67b4c8941c39c5759ed6061461b619/spaghetti_detector-0.1.1.tar.gz", hash = "sha256:2ccb78f9f27260ba96fd8274ad7d2b7e594daddad3b94dffbcb6642b5160f209", size = 40792, upload-time = "2026-07-14T22:53:28.943Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/62/042b2cb392b4a946f952f9f7552fcb238ebbd4b4df6768e4774a10f6a67e/spaghetti_detector-1.0.1.tar.gz", hash = "sha256:eab583d2348f18ee379fff147d04cc2bc6757fc7fb6613a686a734006ac1e8b9", size = 41206, upload-time = "2026-07-15T15:07:32.885Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/d2/7e0e84e6f6da410ecee6144955364f61989aaf95764f7977c430ac8f28ef/spaghetti_detector-0.1.1-py3-none-any.whl", hash = "sha256:fa86a84d91bb3508270461b22ed71c14a71a720f96ef44def9e0bd61be1cd67e", size = 33171, upload-time = "2026-07-14T22:53:29.99Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/b9/aafe184b62a11e45c9ee806f8f69e34c2577f00c1335697868e20e2b6e26/spaghetti_detector-1.0.1-py3-none-any.whl", hash = "sha256:02b4885d3d6d0ef3ef59cffab924bf1a8421b7b21aea9a1e5780921e80142521", size = 33376, upload-time = "2026-07-15T15:07:31.425Z" },
 ]
 
 [[package]]

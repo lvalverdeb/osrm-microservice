@@ -62,10 +62,10 @@ def try_request(method: str, path: str, json_body: dict = None,
         except Exception:
             print(f"    Body (text): {resp.text[:200]}")
     except httpx.ConnectError:
-        print(f"    Status: — (Connection refused)")
+        print("    Status: — (Connection refused)")
         print(f"    Detail: Gateway unreachable at {url}")
     except httpx.TimeoutException:
-        print(f"    Status: — (Timeout)")
+        print("    Status: — (Timeout)")
         print(f"    Detail: Request timed out after {timeout}s")
     except Exception as e:
         print(f"    Status: — (Unexpected error: {type(e).__name__})")

@@ -110,7 +110,7 @@ COORDINATES = [WAREHOUSE] + STOPS
 
 
 def get_route(coords):
-    print(f"Requesting actual round-trip route (sequence as provided)...")
+    print("Requesting actual round-trip route (sequence as provided)...")
     # For a round trip in /route, the destination MUST be the origin
     payload = {
         "origin": coords[0],
@@ -200,7 +200,7 @@ def main():
         m.m2.get_root().html.add_child(folium.Element(title_html_m2))
 
         # Add a shared Legend
-        legend_html = f'''
+        legend_html = '''
              <div style="
                 position: fixed; 
                 bottom: 50px; left: 50%; 
@@ -290,12 +290,12 @@ def main():
         output_file = "examples/src/benchmarking/comparison_map.html"
         m.save(output_file)
 
-        print(f"\n--- TSP ROUND-TRIP Comparison ---")
+        print("\n--- TSP ROUND-TRIP Comparison ---")
         print(f"Warehouse: {WAREHOUSE['longitude']}, {WAREHOUSE['latitude']}")
         print(f"Stops: {len(STOPS)}")
         print(f"\nActual Route (Red):   {distance:.2f} km | {duration:.1f} min")
         print(f"TSP Optimized (Green): {trip_dist:.2f} km | {trip_dur:.1f} min")
-        print(f"\nBest (Optimized) Sequence:")
+        print("\nBest (Optimized) Sequence:")
         print(sequence_str)
         print(f"\nOptimization Gain: {distance - trip_dist:.2f} km SAVED")
         print(f"\nMap saved to {os.path.abspath(output_file)}")

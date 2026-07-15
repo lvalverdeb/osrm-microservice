@@ -107,7 +107,7 @@ async def main():
         await test_match_parity()
         await test_trip_parity()
         print("\nAll baseline parity tests PASSED.")
-    except AssertionError as e:
+    except AssertionError:
         print("\nBASELINE PARITY FAILED!")
         sys.exit(1)
     except Exception as e:

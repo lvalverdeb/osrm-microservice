@@ -13,21 +13,25 @@ GEO_URL = http://download.geofabrik.de/central-america/$(OSM_FILE)
 PROFILE ?= car
 COMPOSE ?= docker compose
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti tripwire
 
 help:
 	@echo "Available targets:"
 	@echo "  download-data  - Download Costa Rica OSM data from Geofabrik"
 	@echo "  process-osrm   - Extract, partition, and customize OSRM data (PROFILE=$(PROFILE))"
 	@echo "  compose-doctor - Show active Docker host and daemon architecture"
-	@echo "  compose-up     - Auto-build OSRM data image, then start OSRM + API with safe sequencing"
+	@echo "  compose-up     - Auto-build OSRM data image, then start Redis + OSRM + API with safe sequencing"
 	@echo "  compose-down   - Stop and remove running compose services"
-	@echo "  compose-logs   - Tail API and OSRM logs"
+	@echo "  compose-logs   - Tail API, OSRM, and Redis logs"
 	@echo "  compose-health - Quick runtime checks for API and OSRM services"
 	@echo "  build-pkg      - Build the Python package for PyPI distribution"
 	@echo "  publish        - Publish the Python package to PyPI (requires UV_PUBLISH_TOKEN in .env)"
 	@echo "  clean          - Remove downloaded and processed data"
 	@echo "  clean-pkg      - Remove Python build artifacts"
+	@echo "  test           - Run the pytest suite"
+	@echo "  lint           - Run ruff checks"
+	@echo "  spaghetti      - Run the spaghetti-detector complexity/architecture scan"
+	@echo "  tripwire       - Run the boti-tripwire security scan"
 
 download-data:
 	mkdir -p $(DATA_DIR)
@@ -49,6 +53,7 @@ compose-up:
 	@echo "Ensuring cross-platform emulation is available on Docker daemon..."
 	-docker run --privileged --rm tonistiigi/binfmt --install all
 	$(COMPOSE) build osrm-data-builder
+	$(COMPOSE) up -d redis
 	$(COMPOSE) up -d --build osrm
 	$(COMPOSE) up -d --build api
 	$(MAKE) compose-health
@@ -57,7 +62,7 @@ compose-down:
 	$(COMPOSE) down
 
 compose-logs:
-	$(COMPOSE) logs --tail=100 api osrm
+	$(COMPOSE) logs --tail=100 api osrm redis
 
 compose-health:
 	$(COMPOSE) ps
@@ -90,4 +95,16 @@ clean:
 
 clean-pkg:
 	rm -rf dist/
+
+test:
+	uv run python -m pytest tests/ -q --tb=short
+
+lint:
+	uv run ruff check .
+
+spaghetti:
+	uv run spaghetti --package osrm-api-gateway=src/app --severity warning
+
+tripwire:
+	uv run tripwire --package osrm-api-gateway=src/app
 

@@ -18,7 +18,6 @@ Requires:
 import httpx
 import folium
 import os
-import json
 
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
@@ -40,11 +39,10 @@ def main():
     base_payload = {"origin": origin, "destination": destination, "waypoints": []}
 
     # --- 1. Default route (single, no alternatives) ---
-    r1 = fetch_route({**base_payload, "alternatives": False}, "Single route, no alternates")
+    fetch_route({**base_payload, "alternatives": False}, "Single route, no alternates")
 
     # --- 2. Request 3 alternatives ---
     r2 = fetch_route({**base_payload, "alternatives": 3}, "3 alternatives")
-    num_alt = len(r2.get("routes", []))
 
     # --- 3. Bearing constraint: force departure heading NE (45 deg, ±10 deg tolerance) ---
     bearing_payload = {
@@ -52,11 +50,11 @@ def main():
         "alternatives": False,
         "bearings": ["45,10", None],
     }
-    r3 = fetch_route(bearing_payload, "Bearing constraint (origin → NE 45°±10°)")
+    fetch_route(bearing_payload, "Bearing constraint (origin → NE 45°±10°)")
 
     # --- 4. Exclude toll roads ---
     exclude_payload = {**base_payload, "alternatives": 1, "exclude": ["toll"]}
-    r4 = fetch_route(exclude_payload, "Avoid toll roads")
+    fetch_route(exclude_payload, "Avoid toll roads")
 
     # --- 5. continue_straight = false (force turns at waypoints) ---
     waypoint = {"longitude": -84.110, "latitude": 9.935}
@@ -66,7 +64,7 @@ def main():
         "continue_straight": "false",
         "alternatives": False,
     }
-    r5 = fetch_route(straight_payload, "continue_straight=false at waypoint")
+    fetch_route(straight_payload, "continue_straight=false at waypoint")
 
     # --- 6. Steps + full annotations ---
     steps_payload = {

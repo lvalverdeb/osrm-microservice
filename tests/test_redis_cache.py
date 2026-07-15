@@ -1,5 +1,4 @@
 import pytest
-from typing import Dict, Any
 from app.services.redis_cache import RedisCache
 from app.services.cache import build_cache_key
 

@@ -15,7 +15,7 @@ from pathlib import Path
 # Load .env into os.environ before any subprocess runs
 _src = Path(__file__).parent / "src"
 sys.path.insert(0, str(_src))
-from config import settings  # noqa: F401
+from config import settings  # noqa: F401,E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_SRC = PROJECT_ROOT / "examples" / "src"

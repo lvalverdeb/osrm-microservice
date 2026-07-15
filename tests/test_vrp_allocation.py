@@ -36,10 +36,6 @@ def test_allocate_distance_mode(service):
     """Two depots, two stops — uses distance matrix instead of duration."""
     depots = _make_stops([(-84.09, 9.93), (-84.15, 9.97)])
     stops = _make_stops([(-84.10, 9.94), (-84.14, 9.96)])
-    durations = [
-        [60, 600],
-        [600, 60],
-    ]
     distances = [
         [5000, 50000],
         [50000, 5000],

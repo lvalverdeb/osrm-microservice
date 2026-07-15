@@ -75,7 +75,7 @@ def main():
 
     lines = metrics_text.splitlines()
     print(f"  Raw metrics output: {len(lines)} lines")
-    print(f"  First 3 lines:")
+    print("  First 3 lines:")
     for line in lines[:3]:
         print(f"    {line}")
 

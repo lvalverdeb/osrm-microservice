@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from fastapi import FastAPI
 
 
@@ -18,7 +18,7 @@ class TestTracingSetup:
     def test_setup_tracing_with_endpoint(self, app):
         with patch("app.tracing.settings") as mock_settings, \
              patch("app.tracing.OTLPSpanExporter") as mock_exporter, \
-             patch("app.tracing.BatchSpanProcessor") as mock_processor, \
+             patch("app.tracing.BatchSpanProcessor"), \
              patch("app.tracing.FastAPIInstrumentor.instrument_app") as mock_instrument, \
              patch("app.tracing.HTTPXClientInstrumentor") as mock_instrumentor_cls:
             mock_settings.OTLP_ENDPOINT = "http://localhost:4318/v1/traces"

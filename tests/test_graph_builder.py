@@ -1,4 +1,3 @@
-import pytest
 from app.services.graph_builder import GraphBuilder
 from app.models.schemas import MatrixRequest, Coordinate
 

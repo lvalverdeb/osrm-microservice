@@ -4,7 +4,9 @@ from typing import List, Dict, Any, Optional, Union
 import logging
 import math
 import numpy as np
-from app.models.schemas import VrpRequest, VrpResponse, VehicleRoute, TripRequest, Coordinate
+from app.models.schemas import (
+    VrpRequest, VrpResponse, VrpAllocationResponse, VehicleRoute, TripRequest, Coordinate
+)
 from app.services.osrm_client import OSRMClient
 from app.config import settings
 
@@ -116,13 +118,11 @@ class VrpService:
 
         return routes
 
-    async def allocate_products(self, request: VrpRequest) -> "VrpAllocationResponse":
+    async def allocate_products(self, request: VrpRequest) -> VrpAllocationResponse:
         """
         Stand-alone Allocation phase with ID propagation.
         Assigns each product to its logistically best warehouse and returns ID-mapped results.
         """
-        from app.models.schemas import VrpAllocationResponse
-
         allocation_result = await self._get_allocation_data(request)
 
         # Map indices back to provided IDs (for both depots and stops)
@@ -328,11 +328,14 @@ class VrpService:
     @staticmethod
     def _prepare_cost_matrices(durations: List[List[float]], distances: List[List[float]]):
         """Convert raw OSRM matrices to NumPy float arrays, mapping null/unreachable entries to UNREACHABLE."""
+        # `== None` (not `is None`) is intentional: these are object-dtype NumPy arrays
+        # (OSRM returns JSON null for unreachable pairs) and the comparison must broadcast
+        # elementwise to build the replacement mask, which `is None` would not do.
         dist_np = np.array(distances)
-        dist_np = np.where(dist_np == None, UNREACHABLE, dist_np).astype(float)
+        dist_np = np.where(dist_np == None, UNREACHABLE, dist_np).astype(float)  # noqa: E711
 
         dur_np = np.array(durations)
-        dur_np = np.where(dur_np == None, UNREACHABLE, dur_np).astype(float)
+        dur_np = np.where(dur_np == None, UNREACHABLE, dur_np).astype(float)  # noqa: E711
 
         return dist_np, dur_np
 

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Created `AGENTS.md` to define standard developer agent mandates, tech stacks, code styles, and output formats.
+- Created standalone documentation `docs/features/agent_guidelines.md` for agent guidelines.
 - [feat] **Full OSRM API Coverage**: Implemented all six OSRM services (Route, Table, Match, Trip, Nearest, and Tile).
 - [feat] **Multi-modal Support**: Added `profile` parameter to all endpoints, enabling `driving`, `cycling`, and `walking` modes.
 - [feat] **Advanced Routing Options**: Exposed core OSRM parameters including `overview`, `geometries`, `steps`, `annotations`, and `continue_straight`.
@@ -15,6 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Expanded `CLAUDE.md` to document local build, test, and quality commands while preserving the git attribution overrides.
 - [refactor] **Structured Error Handling**: Forwarding OSRM `code` and `message` in error responses instead of generic strings.
 - [refactor] **Dynamic Parameterization**: Removed hardcoded OSRM constants in favor of schema-driven request models.
 

@@ -34,7 +34,7 @@ def generate_example_payload():
     
     with open("examples/src/clustering/stress_test_payload.json", "w") as f:
         json.dump(payload, f, indent=2)
-    print(f"Generated examples/src/clustering/stress_test_payload.json with 6 depots and 50 stops.")
+    print("Generated examples/src/clustering/stress_test_payload.json with 6 depots and 50 stops.")
 
 if __name__ == "__main__":
     generate_example_payload()

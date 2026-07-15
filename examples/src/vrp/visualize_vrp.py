@@ -1,6 +1,7 @@
 import os
 import requests
 import folium
+from folium.plugins import MarkerCluster
 import random
 import sys
 
@@ -10,8 +11,6 @@ API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 def get_random_color():
     """Generate a random hex color for each vehicle."""
     return "#{:06x}".format(random.randint(0, 0xFFFFFF))
-
-from folium.plugins import MarkerCluster
 
 def visualize_vrp():
     # Warehouse Presets
@@ -66,8 +65,7 @@ def visualize_vrp():
     
     for route in data["routes"]:
         color = colors[route["vehicle_id"] % len(colors)]
-        vehicle_id = route["vehicle_id"]
-        
+
         # Route geometry
         geom = route["route_geometry"]
         if geom["type"] == "LineString":
@@ -86,7 +84,7 @@ def visualize_vrp():
             ).add_to(marker_cluster)
 
     m.save("examples/src/vrp/vrp_map.html")
-    print(f"VRP Visualization saved to examples/src/vrp/vrp_map.html")
+    print("VRP Visualization saved to examples/src/vrp/vrp_map.html")
     print(f"Total Fleet Distance: {data['total_distance']/1000:.2f} km")
     print(f"Total Fleet Duration: {data['total_duration']/60:.2f} min")
 

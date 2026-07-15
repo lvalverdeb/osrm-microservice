@@ -1,6 +1,5 @@
 import os
 import httpx
-import json
 
 # Configuration - set OSRM_API_URL env var to point to your host
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")

@@ -1,6 +1,5 @@
 import requests
 import folium
-from folium.plugins import MarkerCluster
 import random
 import json
 import os
@@ -105,9 +104,12 @@ def generate_payload(total_stops=6500):
     
     for prov, hubs in PROVINCES_HUBS.items():
         for hub in hubs:
-            h = hub.copy(); h["province"] = prov
-            if hub.get("valle_central"): valle_hubs.append(h)
-            else: rest_hubs.append(h)
+            h = hub.copy()
+            h["province"] = prov
+            if hub.get("valle_central"):
+                valle_hubs.append(h)
+            else:
+                rest_hubs.append(h)
                 
     valle_target = int(total_stops * 0.6)
     rest_target = total_stops - valle_target
@@ -164,7 +166,6 @@ def run_clustering(payload, mode="road", hysteresis=2000.0):
 
 def visualize_results(payload, results, output_file):
     """Generate a folium map with clustering spider-web lines."""
-    import folium
     
     m = folium.Map(location=[9.7489, -83.7534], zoom_start=8)
     colors = ['blue', 'green', 'red', 'purple', 'orange', 'darkred']

@@ -62,7 +62,6 @@ def allocate(mode: str, hysteresis_m: float = 2000) -> dict:
 def print_table(results: dict):
     """Print a stop→depot assignment matrix for all modes."""
     modes = list(results.keys())
-    depots = list(results[modes[0]]["allocations"].keys())
 
     print(f"\n{'Stop ID':<10}", end="")
     for m in modes:
@@ -105,11 +104,11 @@ def main():
     print_table(results)
 
     print("=== Hysteresis effect (travel_time mode) ===")
-    results_high_hyst = allocate("travel_time", hysteresis_m=10000)
-    results_low_hyst = allocate("travel_time", hysteresis_m=100)
+    allocate("travel_time", hysteresis_m=10000)
+    allocate("travel_time", hysteresis_m=100)
 
-    print(f"\nWith  high hysteresis (10km): borderline stops assigned to anchor")
-    print(f"With  low  hysteresis (100m): borderline stops may switch to better depot")
+    print("\nWith  high hysteresis (10km): borderline stops assigned to anchor")
+    print("With  low  hysteresis (100m): borderline stops may switch to better depot")
 
 
 if __name__ == "__main__":

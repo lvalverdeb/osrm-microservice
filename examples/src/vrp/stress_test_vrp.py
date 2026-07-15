@@ -75,7 +75,7 @@ def run_stress_test():
         "max_radius_km": 25.0
     }
     
-    print(f"Sending VRP scale test: 6 depots, 2500 stops...")
+    print("Sending VRP scale test: 6 depots, 2500 stops...")
     print(f"Constraints: Capacity={payload['capacity']}, Max Radius={payload['max_radius_km']}km")
     print("This may take a moment as OSRM processes many matrix batches and TSP chunks.")
     
@@ -163,7 +163,7 @@ def generate_map(data, depots, stops):
             ).add_to(stop_cluster)
 
     m.save("examples/src/vrp/stress_test_vrp_map.html")
-    print(f"Map generated: examples/src/vrp/stress_test_vrp_map.html")
+    print("Map generated: examples/src/vrp/stress_test_vrp_map.html")
 
 if __name__ == "__main__":
     result_data, depots, stops = run_stress_test()
