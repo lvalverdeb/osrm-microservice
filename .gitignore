@@ -13,6 +13,11 @@ dist/
 .coverage
 htmlcov/
 .agent/
+.ruff_cache/
+.mypy_cache/
+dump.rdb
+.claude/
+.junie/
 
 # OSRM Data (Large binary artifacts)
 data/*
