@@ -397,6 +397,26 @@ Proxy de teselas vectoriales Mapbox del backend de OSRM. Nivel de zoom mínimo: 
 
 ---
 
+## Límites de Velocidad (Rate Limits)
+
+Todos los endpoints tienen límites de velocidad por IP del cliente. `GET /health` y `GET /metrics` son ilimitados.
+
+| Método | Ruta | Límite | Variable de Entorno |
+|--------|------|--------|---------------------|
+| POST | `/route` | 600/min | `RATE_LIMIT_ROUTE` |
+| POST | `/matrix` | 300/min | `RATE_LIMIT_MATRIX` |
+| POST | `/matrix-graph` | 300/min | `RATE_LIMIT_MATRIX` |
+| POST | `/match` | 600/min | `RATE_LIMIT_MATCH` |
+| POST | `/trip` | 300/min | `RATE_LIMIT_TRIP` |
+| POST | `/nearest` | 600/min | `RATE_LIMIT_NEAREST` |
+| GET | `/tile/{p}/{z}/{x}/{y}.mvt` | 600/min | `RATE_LIMIT_TILE` |
+| POST | `/vrp` | 100/min | `RATE_LIMIT_VRP` |
+| POST | `/vrp/allocate` | 100/min | `RATE_LIMIT_VRP` |
+
+Exceder un límite devuelve HTTP `429 Too Many Requests`.
+
+---
+
 ## Manejo de Errores
 
 El servicio devuelve cuerpos de error estructurados de OSRM cuando están disponibles:

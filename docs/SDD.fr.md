@@ -2,7 +2,7 @@
 
 ## Pour OSRM API Gateway
 
-**Version 0.2.2**  
+**Version 0.3.0**  
 Préparé par Luis Valverde  
 lvalverdeb  
 2026-06-25
@@ -40,7 +40,7 @@ lvalverdeb
 
 ### 1.1 Objectif du Document
 
-Cette Description de Conception Logicielle (SDD) définit l'architecture et la conception du système OSRM API Gateway (v0.2.2). Elle sert de référence technique principale pour les développeurs, mainteneurs et opérateurs afin de comprendre comment le système est structuré, comment les composants interagissent et comment les décisions de conception correspondent aux exigences fonctionnelles. Le document décrit à la fois les étapes de conception préliminaire (architecturale) et détaillée (au niveau des composants).
+Cette Description de Conception Logicielle (SDD) définit l'architecture et la conception du système OSRM API Gateway (v0.3.0). Elle sert de référence technique principale pour les développeurs, mainteneurs et opérateurs afin de comprendre comment le système est structuré, comment les composants interagissent et comment les décisions de conception correspondent aux exigences fonctionnelles. Le document décrit à la fois les étapes de conception préliminaire (architecturale) et détaillée (au niveau des composants).
 
 **Public visé :** Ingénieurs logiciels, ingénieurs DevOps, architectes techniques, ingénieurs QA et futurs mainteneurs du système.
 
@@ -57,6 +57,8 @@ OSRM API Gateway est un microservice asynchrone basé sur FastAPI qui encapsule 
 - Solveur VRP avec clustering Location-Allocation
 - Proxy de tuiles vectorielles Mapbox (MVT)
 - Limitation de débit sur tous les points d'accès
+- Traçage distribué OpenTelemetry sur tous les chemins de requête
+- Cache distribué Redis pour les réponses de routage/matrice
 
 **Exclusions :**
 - Internes du moteur C++ d'OSRM (traitement des données, algorithme de routage)
@@ -82,6 +84,10 @@ OSRM API Gateway est un microservice asynchrone basé sur FastAPI qui encapsule 
 | Hystérésis | Distance tampon empêchant le basculement d'affectation près des limites de dépôt |
 | Location-Allocation | Algorithme de clustering attribuant les arrêts aux dépôts optimaux |
 | Euclidienne | Distance en ligne droite entre deux points |
+| OTel | OpenTelemetry - framework d'observabilité pour le traçage distribué |
+| Redis | Serveur de dictionnaire distant - magasin de structures de données en mémoire utilisé comme cache |
+| W3C TraceContext | Standard pour propager le contexte de trace entre les limites de service (en-tête traceparent) |
+| Cache-Aside | Modèle de cache applicatif : lire du cache, en cas de miss charger la source et peupler le cache |
 
 ### 1.4 Références
 
@@ -628,6 +634,8 @@ Le système utilise un modèle asynchrone monothread :
 | **Paramètres (Settings)** | Configuration basée sur l'environnement via Pydantic BaseSettings | `app/config.py:Settings` |
 | **Stratégie** | `clustering_mode` sélectionne l'algorithme d'allocation (distance/temps/radial) | Paramètre mode de `_allocate_stops()` |
 | **Traitement par Lots** | Matrices volumineuses divisées en lots de 500 arrêts | `_get_depot_to_stop_matrix()` |
+| **Cache-Aside** | L'application lit L1 (en mémoire), en miss lit L2 (Redis), en miss interroge OSRM et peuple les deux niveaux | `OSRMClient._get()` + `RedisCache` |
+| **Traçage Distribué OpenTelemetry** | Middleware de traçage auto-instrumentant FastAPI et httpx, exportant les spans via OTLP | `app/tracing.py` |
 
 ---
 
@@ -676,6 +684,41 @@ Le système utilise un modèle asynchrone monothread :
 **Contexte :** Les points d'accès nécessitent une protection contre une utilisation excessive.  
 **Options :** (a) Middleware personnalisé, (b) slowapi, (c) Limitation de débit au niveau Nginx.  
 **Résultat :** Option choisie (b) — `slowapi` avec suivi de débit en mémoire. Configuration simple par point d'accès via des décorateurs. Nginx pourrait être ajouté en amont pour les déploiements distribués.
+
+**ID :** DEC-008  
+**Titre :** Nouvelles Essais avec Backoff Exponentiel pour les Défaillances Transitoires d'OSRM  
+**Contexte :** OSRM peut retourner des 5xx sporadiques ou des timeouts sous charge. Une seule défaillance propagerait une erreur 500 au client.  
+**Options :** (a) Laisser propager les défaillances, (b) Nouvelles essais avec délai fixe, (c) Backoff exponentiel avec jitter.  
+**Résultat :** Option choisie (c) — `tenacity` avec backoff exponentiel (1s → 10s max, 3 tentatives). Ne réessaie que sur 5xx, timeouts et erreurs de transport. Les erreurs 4xx ne sont jamais réessayées.
+
+**ID :** DEC-009  
+**Titre :** Cache des Réponses pour les Requêtes OSRM Répétées  
+**Contexte :** La même requête de routage ou de matrice peut être soumise plusieurs fois en quelques minutes. Les appels inutiles à OSRM gaspillent des ressources.  
+**Options :** (a) Pas de cache, (b) Cache en mémoire avec TTL, (c) Cache Redis.  
+**Résultat :** Option choisie (b) — `cachetools.TTLCache` avec TTL de 15 minutes et limite de 1024 entrées. Stratégie cache-first : `_get` retourne les données cachées immédiatement, passant à OSRM en cas de miss.
+
+**ID :** DEC-010  
+**Titre :** Métriques Prometheus pour l'Observabilité  
+**Contexte :** Le système n'avait aucune visibilité sur la latence, le taux d'erreur ou le débit.  
+**Options :** (a) Pas de métriques, (b) Prometheus client avec instrumentation personnalisée, (c) Exportateur OpenTelemetry.  
+**Résultat :** Option choisie (b) — `prometheus-fastapi-instrumentator` auto-instrumente tous les points d'accès. Expose `/metrics` au format Prometheus.
+
+**ID :** DEC-011  
+**Titre :** FastAPI Lifespan pour la Fermeture Gracieuse du Pool de Connexions  
+**Contexte :** Le pool `httpx.AsyncClient` n'était jamais explicitement fermé, causant des avertissements de transport non fermé.  
+**Résultat :** `OSRMClient.close()` connecté au context manager `lifespan` de FastAPI. Le pool est démantelé gracieusement lors de l'arrêt du serveur ASGI.
+
+**ID :** DEC-012  
+**Titre :** Traçage Distribué OpenTelemetry  
+**Contexte :** Le système s'étend sur deux services et effectue plusieurs appels HTTP sortants par requête. Une visibilité de la répartition de la latence et de la corrélation de bout en bout est nécessaire.  
+**Options :** (a) Pas de traçage, (b) IDs de corrélation personnalisés, (c) OpenTelemetry avec W3C TraceContext.  
+**Résultat :** Option choisie (c) — SDK OpenTelemetry avec `opentelemetry-instrumentation-fastapi` et `opentelemetry-instrumentation-httpx`. Spans exportés via OTLP. En-têtes W3C `traceparent` propagés au backend OSRM.
+
+**ID :** DEC-013  
+**Titre :** Cache Distribué Redis  
+**Contexte :** Le TTLCache en mémoire (DEC-009) est perdu au redémarrage, non partagé entre réplicas, et limité à 1024 entrées.  
+**Options :** (a) Uniquement en mémoire, (b) Redis comme L2 derrière L1 en mémoire, (c) Uniquement Redis.  
+**Résultat :** Option choisie (b) — Deux niveaux : L1 est `cachetools.TTLCache` (lectures locales sub-milliseconde), L2 est Redis (partagé entre instances, survit aux redémarrages). Modèle Cache-Aside : `_get()` consulte L1 → L2 → OSRM.
 
 ---
 

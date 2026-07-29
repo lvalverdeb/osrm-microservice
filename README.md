@@ -189,6 +189,10 @@ uv run examples/src/benchmarking/compare_tsp.py
 
 Maps are saved as interactive HTML files (`map.html`, `comparison_map.html`).
 
+## Configuration
+
+All settings are controlled via environment variables (or a `.env` file). See the [Configuration Reference](docs/configuration.md) for the complete list.
+
 ## API Documentation
 
 Interactive documentation is available once the service is running:
@@ -201,6 +205,15 @@ For a detailed developer guide, see:
 - [API Reference (English)](docs/API_REFERENCE.md)
 - [Referencia de la API (Español)](docs/API_REFERENCE.es.md)
 - [Référence API (Français)](docs/API_REFERENCE.fr.md)
+
+## Feature Documentation
+
+| Feature | Description |
+|---------|-------------|
+| [Response Caching](docs/features/caching.md) | L1/L2 Cache-Aside strategy with in-memory and Redis layers. |
+| [VRP Clustering Modes](docs/features/clustering_modes.md) | `travel_time`, `distance`, and `radial` allocation with hysteresis. |
+| [Observability](docs/features/observability.md) | Structured logging, Prometheus metrics, OpenTelemetry tracing, health checks. |
+| [Rate Limiting](docs/features/rate_limiting.md) | Per-endpoint request limits and configuration. |
 
 ## Components
 

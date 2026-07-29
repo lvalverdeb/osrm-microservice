@@ -397,6 +397,26 @@ Proxy Mapbox Vector Tiles from the OSRM backend. Minimum zoom level: 12.
 
 ---
 
+## Rate Limits
+
+All endpoints are rate-limited per client IP. `GET /health` and `GET /metrics` are unlimited.
+
+| Method | Path | Limit | Env Variable |
+|--------|------|-------|-------------|
+| POST | `/route` | 600/min | `RATE_LIMIT_ROUTE` |
+| POST | `/matrix` | 300/min | `RATE_LIMIT_MATRIX` |
+| POST | `/matrix-graph` | 300/min | `RATE_LIMIT_MATRIX` |
+| POST | `/match` | 600/min | `RATE_LIMIT_MATCH` |
+| POST | `/trip` | 300/min | `RATE_LIMIT_TRIP` |
+| POST | `/nearest` | 600/min | `RATE_LIMIT_NEAREST` |
+| GET | `/tile/{p}/{z}/{x}/{y}.mvt` | 600/min | `RATE_LIMIT_TILE` |
+| POST | `/vrp` | 100/min | `RATE_LIMIT_VRP` |
+| POST | `/vrp/allocate` | 100/min | `RATE_LIMIT_VRP` |
+
+Exceeding a limit returns HTTP `429 Too Many Requests`.
+
+---
+
 ## Error Handling
 
 The service returns structured OSRM error bodies when available:

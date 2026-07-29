@@ -397,6 +397,26 @@ Proxy des tuiles vectorielles Mapbox du backend de OSRM. Niveau de zoom minimum 
 
 ---
 
+## Limites de Débit (Rate Limits)
+
+Tous les endpoints sont limités par IP client. `GET /health` et `GET /metrics` sont illimités.
+
+| Méthode | Chemin | Limite | Variable d'Environnement |
+|---------|--------|--------|--------------------------|
+| POST | `/route` | 600/min | `RATE_LIMIT_ROUTE` |
+| POST | `/matrix` | 300/min | `RATE_LIMIT_MATRIX` |
+| POST | `/matrix-graph` | 300/min | `RATE_LIMIT_MATRIX` |
+| POST | `/match` | 600/min | `RATE_LIMIT_MATCH` |
+| POST | `/trip` | 300/min | `RATE_LIMIT_TRIP` |
+| POST | `/nearest` | 600/min | `RATE_LIMIT_NEAREST` |
+| GET | `/tile/{p}/{z}/{x}/{y}.mvt` | 600/min | `RATE_LIMIT_TILE` |
+| POST | `/vrp` | 100/min | `RATE_LIMIT_VRP` |
+| POST | `/vrp/allocate` | 100/min | `RATE_LIMIT_VRP` |
+
+Dépasser une limite renvoie HTTP `429 Too Many Requests`.
+
+---
+
 ## Gestion des Erreurs
 
 Le service renvoie des corps d'erreur structurés d'OSRM lorsqu'ils sont disponibles :

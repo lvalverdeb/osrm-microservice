@@ -1,7 +1,7 @@
 services:
   osrm-data-builder:
     image: osrm-data-builder:latest
-    platform: linux/amd64
+    platform: linux/arm64
     build:
       context: .
       dockerfile: Dockerfile.builder
@@ -12,7 +12,7 @@ services:
       - build
 
   osrm:
-    platform: linux/amd64
+    platform: linux/arm64
     build:
       context: .
       dockerfile: Dockerfile.osrm

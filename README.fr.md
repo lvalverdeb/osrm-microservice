@@ -31,7 +31,7 @@ make process-osrm PROFILE=car
 
 Déployez l'API et le moteur OSRM sur l'hôte distant. Les données traitées sont regroupées directement de l'image du constructeur vers l'image d'exécution OSRM via un `Dockerfile.osrm` à plusieurs étapes.
 
-`ghcr.io/project-osrm/osrm-backend` est actuellement disponible uniquement en `amd64`. Vérifiez l'architecture du daemon Docker actif avant de démarrer les services.
+`osrm/osrm-backend` prend en charge plusieurs architectures (amd64, arm64). Confirmez l'architecture du daemon Docker actif avant de démarrer les services.
 
 ```bash
 # Cibler l'hôte distant
@@ -187,6 +187,16 @@ Pour un guide détaillé pour les développeurs, voir :
 - [Référence API (Anglais)](docs/API_REFERENCE.md)
 - [Referencia de la API (Espagnol)](docs/API_REFERENCE.es.md)
 - [Référence API (Français)](docs/API_REFERENCE.fr.md)
+
+## Documentation des Fonctionnalités
+
+| Fonctionnalité | Description |
+|----------------|-------------|
+| [Cache des Réponses](docs/features/caching.md) | Stratégie Cache-Aside L1/L2 avec couches mémoire et Redis. |
+| [Modes de Regroupement VRP](docs/features/clustering_modes.md) | Allocation `travel_time`, `distance` et `radial` avec hystérésis. |
+| [Observabilité](docs/features/observability.md) | Journalisation structurée, métriques Prometheus, tracing OpenTelemetry, santé. |
+| [Limitation de Débit](docs/features/rate_limiting.md) | Limites de requêtes par endpoint et configuration. |
+| [Référence de Configuration](docs/configuration.md) | Liste complète des variables d'environnement. |
 
 ## Composants
 

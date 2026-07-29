@@ -1,5 +1,5 @@
 # Builder image to process OSRM data without host mounts
-FROM --platform=linux/amd64 ghcr.io/project-osrm/osrm-backend:latest AS builder
+FROM --platform=linux/arm64 ghcr.io/project-osrm/osrm-backend:latest AS builder
 
 ARG PROFILE=car
 ARG OSM_FILE=costa-rica-latest.osm.pbf

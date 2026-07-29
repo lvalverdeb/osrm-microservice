@@ -31,7 +31,7 @@ make process-osrm PROFILE=car
 
 Despliegue la API y el motor OSRM en el host remoto. Los datos procesados se agrupan directamente desde la imagen del constructor a la imagen de tiempo de ejecución OSRM a través de un `Dockerfile.osrm` de múltiples etapas.
 
-`ghcr.io/project-osrm/osrm-backend` es actualmente solo `amd64`. Confirme la arquitectura del daemon Docker activo antes de iniciar los servicios.
+`osrm/osrm-backend` soporta múltiples arquitecturas (amd64, arm64). Confirme la arquitectura del daemon Docker activo antes de iniciar los servicios.
 
 ```bash
 # Apuntar al host remoto
@@ -187,6 +187,16 @@ Para una guía detallada para desarrolladores, consulte:
 - [Referencia de la API (Inglés)](docs/API_REFERENCE.md)
 - [Referencia de la API (Español)](docs/API_REFERENCE.es.md)
 - [Référence API (Francés)](docs/API_REFERENCE.fr.md)
+
+## Documentación de Funcionalidades
+
+| Funcionalidad | Descripción |
+|---------------|-------------|
+| [Caché de Respuestas](docs/features/caching.md) | Estrategia Cache-Aside L1/L2 con capas de memoria y Redis. |
+| [Modos de Agrupación VRP](docs/features/clustering_modes.md) | Asignación `travel_time`, `distance` y `radial` con histéresis. |
+| [Observabilidad](docs/features/observability.md) | Logging estructurado, métricas Prometheus, tracing OpenTelemetry, salud. |
+| [Limitación de Velocidad](docs/features/rate_limiting.md) | Límites de solicitudes por endpoint y configuración. |
+| [Referencia de Configuración](docs/configuration.md) | Lista completa de variables de entorno. |
 
 ## Componentes
 
