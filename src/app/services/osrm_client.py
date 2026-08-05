@@ -18,9 +18,26 @@ class OSRMClient:
             base_url=self.base_url, timeout=settings.OSRM_CLIENT_TIMEOUT
         )
 
+    # spaghetti-ignore[pass-through-method]: lifecycle wrapper; exposing the raw httpx client would leak transport internals
     async def close(self) -> None:
         """Gracefully close the underlying httpx client."""
         await self._client.aclose()
+
+    async def ping(self) -> bool:
+        """Probe the OSRM backend with a minimal route request.
+
+        Returns:
+            True if OSRM responded without an error status, False otherwise.
+        """
+        try:
+            response = await self._client.get(
+                f"/route/v1/driving/{settings.HEALTH_CHECK_COORDS}",
+                timeout=settings.HEALTH_CHECK_TIMEOUT,
+            )
+            return not response.is_error
+        except Exception as probe_err:
+            logger.warning("OSRM health probe failed: %s", probe_err)
+            return False
 
     @staticmethod
     def _retryable(exception: Exception) -> bool:

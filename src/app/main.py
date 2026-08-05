@@ -54,17 +54,7 @@ def _parse_osrm_error(e: httpx.HTTPStatusError):
 @app.get("/health", tags=["System"], summary="Health Check")
 async def health_check() -> Dict[str, str]:
     """Health check endpoint that also probes the OSRM backend."""
-    osrm_healthy = True
-    try:
-        resp = await osrm_client._client.get(
-            f"/route/v1/driving/{settings.HEALTH_CHECK_COORDS}",
-            timeout=settings.HEALTH_CHECK_TIMEOUT
-        )
-        if resp.is_error:
-            osrm_healthy = False
-    except Exception as probe_err:
-        logger.warning("OSRM health probe failed: %s", probe_err)
-        osrm_healthy = False
+    osrm_healthy = await osrm_client.ping()
 
     return {
         "status": "healthy" if osrm_healthy else "degraded",

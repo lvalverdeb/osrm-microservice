@@ -27,6 +27,7 @@ class RedisCache:
         try:
             data = await self._redis.get(key)
             if data is not None:
+                # spaghetti-ignore[magic-number]: debug-log key truncation length, not a tunable value
                 logger.debug("Redis L2 hit for key %s", key[:40])
                 return json.loads(data)
         except Exception as e:

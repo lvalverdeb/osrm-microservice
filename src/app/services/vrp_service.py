@@ -20,12 +20,19 @@ _HYSTERESIS_SPEED_MS: float = 11.1111
 """Assumed average speed (40 km/h) used to convert hysteresis from meters to seconds: 40000 / 3600 ≈ 11.111 m/s."""
 DEG_TO_M: float = 111320.0
 """Approximate meters per degree of latitude at the equator."""
+KM_TO_M: float = 1000.0
+"""Conversion factor: kilometers to meters."""
+
+MODE_TRAVEL_TIME: str = "travel_time"
+MODE_DISTANCE: str = "distance"
+MODE_RADIAL: str = "radial"
+"""Clustering modes accepted by VrpRequest.clustering_mode (validated by the schema's Literal)."""
 
 
 @dataclass(frozen=True)
 class AllocationOptions:
     """Location-Allocation tuning knobs, grouped into one object to keep _allocate_stops's parameter count down."""
-    mode: str = "travel_time"
+    mode: str = MODE_TRAVEL_TIME
     hysteresis_m: float = 2000.0
     max_radius_m: Optional[float] = None
     sanity_limit_m: Optional[float] = None
@@ -161,7 +168,7 @@ class VrpService:
         matrix_data = await self._get_depot_to_stop_matrix(request.depots, request.stops)
 
         # 2. Convert radius to meters (if provided)
-        max_radius_m = request.max_radius_km * 1000 if request.max_radius_km else None
+        max_radius_m = request.max_radius_km * KM_TO_M if request.max_radius_km else None
 
         # 3. Assign stops based on Road Distance with Radial Fallback and Hysteresis
         return self._allocate_stops(
@@ -301,9 +308,9 @@ class VrpService:
         unreachable = []
 
         dist_np, dur_np = self._prepare_cost_matrices(durations, distances)
-        target_matrix = dur_np if options.mode == "travel_time" else dist_np
+        target_matrix = dur_np if options.mode == MODE_TRAVEL_TIME else dist_np
         effective_hysteresis = (
-            (options.hysteresis_m / _HYSTERESIS_SPEED_MS) if options.mode == "travel_time" else options.hysteresis_m
+            (options.hysteresis_m / _HYSTERESIS_SPEED_MS) if options.mode == MODE_TRAVEL_TIME else options.hysteresis_m
         )
         sanity_limit_m = options.sanity_limit_m if options.sanity_limit_m is not None else settings.VRP_SANITY_LIMIT_M
 
@@ -344,6 +351,7 @@ class VrpService:
         """Vectorized straight-line distance (meters) from one stop to every depot."""
         lat_diffs_m = np.array([d.latitude - stop.latitude for d in depots]) * DEG_TO_M
         lon_diffs_m = np.array([d.longitude - stop.longitude for d in depots]) * DEG_TO_M * lon_scale
+        # spaghetti-ignore[magic-number]: exponent in the Euclidean distance formula, not a tunable threshold
         return np.sqrt(lat_diffs_m ** 2 + lon_diffs_m ** 2)
 
     @staticmethod
@@ -358,7 +366,7 @@ class VrpService:
         """Pick the depot for one stop: 'radial' uses the nearest by air distance; other modes
         prefer the cost-matrix optimum unless it fails the visual-sanity or hysteresis checks."""
         anchor_depot_idx = int(np.argmin(euclidean_m))
-        if mode == "radial":
+        if mode == MODE_RADIAL:
             return anchor_depot_idx
 
         anchor_euclidean_dist = euclidean_m[anchor_depot_idx]

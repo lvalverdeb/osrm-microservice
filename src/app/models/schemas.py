@@ -6,6 +6,7 @@ class Coordinate(BaseModel):
     longitude: float = Field(..., ge=-180, le=180, description="Longitude of the point")
     latitude: float = Field(..., ge=-90, le=90, description="Latitude of the point")
 
+# spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class Stop(Coordinate):
     """Specific delivery stop with an optional ID."""
     id: Optional[Union[str, int]] = Field(None, description="Unique identifier for the stop used for tracking")
@@ -54,6 +55,7 @@ class CommonRoutingOptions(BaseModel):
         description="Suppress the waypoints array in the response to reduce payload size."
     )
 
+# spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class RouteRequest(CommonRoutingOptions):
     """Request model for routing between points."""
     origin: Coordinate
@@ -88,6 +90,7 @@ class GPSBreadcrumb(BaseModel):
     timestamp: int = Field(..., ge=0, description="Unix timestamp (integer)")
     accuracy_meters: Optional[float] = Field(5.0, gt=0, description="Optional accuracy in meters")
 
+# spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class MatchRequest(CommonRoutingOptions):
     """Request model for map matching a sequence of GPS breadcrumbs."""
     breadcrumbs: List[GPSBreadcrumb] = Field(..., min_length=2, max_length=5000)
@@ -117,6 +120,7 @@ class MatchRequest(CommonRoutingOptions):
         }
     }
 
+# spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class MatrixRequest(CommonRoutingOptions):
     """Request model for generating a distance matrix."""
     coordinates: List[Coordinate] = Field(..., min_length=2, max_length=5000)
@@ -149,6 +153,7 @@ class MatrixGraphResponse(BaseModel):
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
 
+# spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class TripRequest(CommonRoutingOptions):
     """Request model for TSP optimization (Trip service)."""
     coordinates: List[Coordinate] = Field(..., min_length=2, max_length=200)
@@ -180,6 +185,7 @@ class TripRequest(CommonRoutingOptions):
         }
     }
 
+# spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class NearestRequest(CommonRoutingOptions):
     """Request model for the OSRM Nearest service."""
     coordinate: Coordinate
