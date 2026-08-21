@@ -1,6 +1,6 @@
 import asyncio
-import sys
 import logging
+import sys
 from unittest.mock import AsyncMock, patch
 
 # Ensure app is importable
@@ -8,8 +8,15 @@ sys.path.append('.')
 # Add .venv site-packages for pydantic, etc.
 sys.path.append('./.venv/lib/python3.12/site-packages')
 
+from app.models.schemas import (
+    Coordinate,
+    GPSBreadcrumb,
+    MatchRequest,
+    MatrixRequest,
+    RouteRequest,
+    TripRequest,
+)
 from app.services.osrm_client import OSRMClient
-from app.models.schemas import RouteRequest, MatrixRequest, MatchRequest, TripRequest, Coordinate, GPSBreadcrumb
 
 # Disable logging for cleaner output
 logging.disable(logging.CRITICAL)

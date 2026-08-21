@@ -1,13 +1,16 @@
+from typing import Any
+
 import networkx as nx
-from typing import Any, Dict
+
 from app.models.schemas import MatrixRequest
+
 
 # spaghetti-ignore[lazy-class]: intentional namespace for graph-construction helpers
 class GraphBuilder:
     """Service to construct NetworkX graphs from OSRM table data."""
 
     @staticmethod
-    def build_from_matrix(matrix_data: Dict[str, Any], request: MatrixRequest) -> Dict[str, Any]:
+    def build_from_matrix(matrix_data: dict[str, Any], request: MatrixRequest) -> dict[str, Any]:
         """
         Converts OSRM table response to a directed NetworkX graph.
         

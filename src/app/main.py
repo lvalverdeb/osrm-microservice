@@ -1,29 +1,48 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, Response
-import httpx
 import logging
-from typing import Any, AsyncIterator, Dict
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request, Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from app.models.schemas import (
-    RouteRequest, MatchRequest, MatrixRequest, TripRequest,
-    NearestRequest, VrpRequest, VrpResponse, VrpAllocationResponse
-)
-from app.services.osrm_client import OSRMClient
-from app.services.vrp_service import VrpService
-from app.services.graph_builder import GraphBuilder
+from slowapi.util import get_remote_address
+
 from app.config import settings
 from app.logging_config import setup_logging
 from app.metrics import setup_metrics
-from app.tracing import setup_tracing
+from app.models.schemas import (
+    MatchRequest,
+    MatrixRequest,
+    NearestRequest,
+    RouteRequest,
+    TripRequest,
+    VrpAllocationResponse,
+    VrpRequest,
+    VrpResponse,
+)
+from app.services.graph_builder import GraphBuilder
+from app.services.osrm_client import OSRMClient
 from app.services.redis_cache import RedisCache
+from app.services.vrp_service import VrpService
+from app.tracing import setup_tracing
 
 setup_logging(settings.DEBUG)
 
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address)
+# Limits live in Redis when it is configured: slowapi's default in-memory
+# storage is per process, so under `--workers N` -- or across nodes -- the
+# effective limit would silently become N x the configured value. The in-memory
+# fallback keeps the gateway serving if Redis goes away, matching how
+# RedisCache degrades rather than failing.
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.REDIS_URL or None,
+    in_memory_fallback_enabled=True,
+    swallow_errors=True,
+)
 osrm_client = OSRMClient()
 redis_cache = RedisCache(url=settings.REDIS_URL, ttl=settings.REDIS_TTL, maxsize=settings.REDIS_MAXSIZE)
 osrm_client.redis_cache = redis_cache
@@ -52,7 +71,7 @@ def _parse_osrm_error(e: httpx.HTTPStatusError):
         return "Routing service error"
 
 @app.get("/health", tags=["System"], summary="Health Check")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Health check endpoint that also probes the OSRM backend."""
     osrm_healthy = await osrm_client.ping()
 
@@ -62,9 +81,33 @@ async def health_check() -> Dict[str, str]:
         "osrm_backend": "up" if osrm_healthy else "down"
     }
 
+@app.get("/ready", tags=["System"], summary="Readiness Probe")
+async def readiness_check(response: Response) -> dict[str, str]:
+    """Readiness probe for load balancers and deploy-time checks.
+
+    `/health` always answers 200 so humans and dashboards can read the detail,
+    which means a balancer keeps sending traffic to a node whose engine is
+    down. This endpoint answers 503 in that case, so the node drains instead.
+
+    Args:
+        response: Injected response whose status is set to 503 when not ready.
+
+    Returns:
+        A mapping with the readiness status and the OSRM backend state.
+    """
+    osrm_healthy = await osrm_client.ping()
+    if not osrm_healthy:
+        response.status_code = 503
+
+    return {
+        "status": "ready" if osrm_healthy else "not_ready",
+        "service": settings.APP_NAME,
+        "osrm_backend": "up" if osrm_healthy else "down"
+    }
+
 @app.post("/route", tags=["Routing"], summary="Calculate Route")
 @limiter.limit(settings.RATE_LIMIT_ROUTE)
-async def get_route(request: Request, payload: RouteRequest) -> Dict[str, Any]:
+async def get_route(request: Request, payload: RouteRequest) -> dict[str, Any]:
     """Calculate highly accurate driving route."""
     try:
         # Collect all points: origin, then waypoints (if any), then destination
@@ -83,7 +126,7 @@ async def get_route(request: Request, payload: RouteRequest) -> Dict[str, Any]:
 
 @app.post("/matrix", tags=["Matrix"], summary="Get Distance/Duration Matrix")
 @limiter.limit(settings.RATE_LIMIT_MATRIX)
-async def get_matrix(request: Request, payload: MatrixRequest) -> Dict[str, Any]:
+async def get_matrix(request: Request, payload: MatrixRequest) -> dict[str, Any]:
     """Fetch raw distance/duration matrix."""
     try:
         return await osrm_client.get_matrix(payload)
@@ -96,7 +139,7 @@ async def get_matrix(request: Request, payload: MatrixRequest) -> Dict[str, Any]
 
 @app.post("/matrix-graph", tags=["Matrix"], summary="Get Matrix as Graph")
 @limiter.limit(settings.RATE_LIMIT_MATRIX)
-async def get_matrix_graph(request: Request, payload: MatrixRequest) -> Dict[str, Any]:
+async def get_matrix_graph(request: Request, payload: MatrixRequest) -> dict[str, Any]:
     """Generate a directed graph from a distance/duration matrix."""
     try:
         matrix_data = await osrm_client.get_matrix(payload)
@@ -110,7 +153,7 @@ async def get_matrix_graph(request: Request, payload: MatrixRequest) -> Dict[str
 
 @app.post("/match", tags=["Map Matching"], summary="Map Match GPS Traces")
 @limiter.limit(settings.RATE_LIMIT_MATCH)
-async def match_trace(request: Request, payload: MatchRequest) -> Dict[str, Any]:
+async def match_trace(request: Request, payload: MatchRequest) -> dict[str, Any]:
     """
     Map match noisy GPS traces to the road network.
     Handles multiple segments automatically (Trace Splitting).
@@ -128,7 +171,7 @@ async def match_trace(request: Request, payload: MatchRequest) -> Dict[str, Any]
 
 @app.post("/trip", tags=["Optimization"], summary="Solve Traveling Salesperson Problem")
 @limiter.limit(settings.RATE_LIMIT_TRIP)
-async def get_trip(request: Request, payload: TripRequest) -> Dict[str, Any]:
+async def get_trip(request: Request, payload: TripRequest) -> dict[str, Any]:
     """
     Solve TSP for an optimized sequence of coordinates.
     Ideal for comparing actual vs optimized routes.
@@ -143,7 +186,7 @@ async def get_trip(request: Request, payload: TripRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Internal server error")
 @app.post("/nearest", tags=["Routing"], summary="Snap Coordinate to Road Network")
 @limiter.limit(settings.RATE_LIMIT_NEAREST)
-async def get_nearest(request: Request, payload: NearestRequest) -> Dict[str, Any]:
+async def get_nearest(request: Request, payload: NearestRequest) -> dict[str, Any]:
     """
     Find the nearest road network node(s) to a given coordinate.
     Useful for snapping raw GPS coordinates to the routable road graph.

@@ -1,0 +1,297 @@
+#!/bin/sh
+#
+# Idempotent installer for the OSRM API Gateway on FreeBSD.
+#
+# Runs inside the target jail (or on a plain FreeBSD host) and is invoked over
+# SSH by the Makefile's jail-* targets. Every phase is safe to re-run.
+#
+# Usage: install.sh [deps|sync|app|data|services|stop|status|health|logs|all]
+#
+# Sources are staged into JAIL_STAGE by the Makefile as the login user, then
+# placed into JAIL_DIR here with escalated privileges -- the login user has no
+# write access to /usr/local/www.
+#
+# Configuration arrives via the environment; see the defaults below.
+
+set -eu
+
+STAGE="${JAIL_STAGE:-/tmp/osrm-api-gateway-stage}"
+APP_DIR="${JAIL_DIR:-/usr/local/www/osrm-api-gateway}"
+APP_USER="${JAIL_APP_USER:-osrmapi}"
+API_HOST="${JAIL_API_HOST:-0.0.0.0}"
+API_PORT="${JAIL_API_PORT:-8000}"
+API_WORKERS="${JAIL_API_WORKERS:-1}"
+FORWARDED_ALLOW_IPS="${JAIL_FORWARDED_ALLOW_IPS:-}"
+DATA_DIR="${JAIL_DATA_DIR:-/var/db/osrm-backend}"
+PROFILE="${PROFILE:-car}"
+OSM_FILE="${OSM_FILE:-costa-rica-latest.osm.pbf}"
+OSM_BASE="${OSM_BASE:-costa-rica-latest}"
+GEO_URL="${GEO_URL:-}"
+REDIS_URL="${JAIL_REDIS_URL:-redis://127.0.0.1:6379/0}"
+OSRM_URL="${JAIL_OSRM_URL:-http://127.0.0.1:5000}"
+
+# Shared app settings, staged from deploy/env/ alongside deploy/freebsd/.
+SHARED_ENV="${STAGE}/deploy/env/app.env"
+
+PYTHON="/usr/local/bin/python3.13"
+VENV="${APP_DIR}/.venv"
+PROFILE_LUA="/usr/local/share/osrm/profiles/${PROFILE}.lua"
+# OSRM_DATA is a base path, not a file: osrm-extract/partition/customize strip
+# the .osrm suffix and read and write ${OSRM_DATA}.<suffix> siblings. Nothing in
+# OSRM 6 ever creates the bare .osrm file. OSRM_BUILT is the last artifact
+# osrm-customize writes, so it is what "the data is built" actually means.
+OSRM_DATA="${DATA_DIR}/${PROFILE}/${OSM_BASE}.osrm"
+OSRM_BUILT="${OSRM_DATA}.cell_metrics"
+
+log() { echo "==> $*"; }
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+# --- privilege escalation -------------------------------------------------
+# Neither doas nor sudo is guaranteed to exist, so resolve at runtime and fail
+# with a remediation message rather than half-installing.
+if [ "$(id -u)" = "0" ]; then
+    SUDO=""
+elif command -v doas >/dev/null 2>&1; then
+    SUDO="doas"
+elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+else
+    echo "ERROR: this script needs root, but neither doas nor sudo is available." >&2
+    echo "       Fix with one of (as root in the jail):" >&2
+    echo "         pkg install -y doas && echo 'permit nopass :wheel' > /usr/local/etc/doas.conf" >&2
+    echo "         pkg install -y sudo && visudo" >&2
+    echo "       Or deploy with JAIL_USER=root after installing an SSH key for root." >&2
+    exit 1
+fi
+
+run() { if [ -n "$SUDO" ]; then $SUDO "$@"; else "$@"; fi; }
+
+# --- phases ---------------------------------------------------------------
+
+install_pkgs() {
+    missing=""
+    for p in "$@"; do
+        if ! pkg info -e "$p" >/dev/null 2>&1; then
+            missing="${missing} ${p}"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        log "installing packages:${missing}"
+        # shellcheck disable=SC2086
+        run pkg install -y ${missing}
+    else
+        log "packages already present: $*"
+    fi
+}
+
+phase_deps() {
+    # osrm-backend brings the engine, its Lua profiles and its own rc.d script.
+    # The build toolchain is here only because PyPI publishes no FreeBSD wheels
+    # and FreeBSD packages Python modules for the default interpreter (3.12)
+    # only, so a 3.13 venv compiles every extension module itself:
+    #   pkgconf, openblas - numpy's meson build and its BLAS backend
+    #   ninja             - meson-python requests the PyPI `ninja` sdist only
+    #                       when no system ninja is on PATH, and that sdist
+    #                       builds CMake from source, which fails here
+    #   rust              - pydantic-core is a Rust extension; with no cargo on
+    #                       PATH maturin's sdist tries to download a rustup
+    #                       toolchain instead, and rustup has no FreeBSD target
+    install_pkgs osrm-backend redis python313 uv pkgconf openblas ninja rust
+
+    if ! pw usershow "$APP_USER" >/dev/null 2>&1; then
+        log "creating service user ${APP_USER}"
+        run pw useradd -n "$APP_USER" -c "OSRM API Gateway" \
+            -d /nonexistent -s /usr/sbin/nologin
+    fi
+
+    run mkdir -p "$APP_DIR" "$DATA_DIR"
+}
+
+phase_sync() {
+    [ -d "${STAGE}/src/app" ] || die "no staged sources at ${STAGE}; run 'make jail-stage' first."
+    log "placing sources into ${APP_DIR}"
+    run mkdir -p "$APP_DIR"
+    # Replace outright rather than merge, so deleted modules do not linger.
+    run rm -rf "${APP_DIR}/app" "${APP_DIR}/deploy"
+    run cp -R "${STAGE}/src/app" "${APP_DIR}/app"
+    run cp -R "${STAGE}/deploy" "${APP_DIR}/deploy"
+    run cp "${STAGE}/pyproject.toml" "${APP_DIR}/pyproject.toml"
+    if [ -f "${STAGE}/README.md" ]; then
+        run cp "${STAGE}/README.md" "${APP_DIR}/README.md"
+    fi
+}
+
+phase_app() {
+    [ -x "$PYTHON" ] || die "${PYTHON} missing; run the deps phase first."
+    [ -f "${APP_DIR}/pyproject.toml" ] || die "no pyproject.toml in ${APP_DIR}; run the sync phase first."
+    # Fail now rather than tens of minutes into a build that cannot finish.
+    for _tool in cargo ninja; do
+        command -v "$_tool" >/dev/null 2>&1 || \
+            die "${_tool} missing; run the deps phase first ('make jail-bootstrap')."
+    done
+
+    if [ ! -x "${VENV}/bin/python" ]; then
+        log "creating venv at ${VENV} (python3.13)"
+        # Never `uv python install`: python-build-standalone ships no FreeBSD
+        # builds, so the pkg interpreter is the only option.
+        run uv venv --python "$PYTHON" "$VENV"
+    fi
+
+    # numpy and pydantic-core are compiled here; the deps phase installs the
+    # toolchain they need. No BLAS fallback: numpy >= 2.0 already defaults to
+    # allow-noblas=true, and `-C setup-args=` would apply to every package in
+    # the resolution, breaking build backends that reject the option.
+    log "installing Python dependencies (numpy and pydantic-core are compiled from source; this is slow)"
+    run uv pip install --python "${VENV}/bin/python" -r "${APP_DIR}/pyproject.toml"
+
+    log "writing ${APP_DIR}/.env"
+    # Two tiers in one file. The shared block is deploy/env/app.env verbatim --
+    # the same file the Docker path loads via env_file -- so app settings are
+    # maintained in one place for both deployments. The overlay appended after it
+    # carries the values only this deployment can know; dotenv takes the last
+    # occurrence of a duplicated key, so the overlay wins.
+    #
+    # OSRM_API_URL stays at the shared value on purpose: it is a client-side
+    # setting (examples/ reads it to find the gateway), not a server one. The bind
+    # address is not written either -- it is not a URL a client could use, and the
+    # rc.d script passes it to uvicorn from osrm_api_gateway_host.
+    [ -f "${SHARED_ENV}" ] || \
+        die "missing ${SHARED_ENV}; run 'make jail-stage' from a checkout that has deploy/env/app.env"
+    run sh -c "cat '${SHARED_ENV}' > ${APP_DIR}/.env"
+    run sh -c "cat >> ${APP_DIR}/.env <<ENVEOF
+
+# --- generated by deploy/freebsd/install.sh; overrides the shared block above ---
+OSRM_BASE_URL=${OSRM_URL}
+REDIS_URL=${REDIS_URL}
+ENVEOF"
+
+    # Root owns the code, the service user only reads it: the gateway cannot
+    # rewrite its own source or configuration at runtime.
+    run chown -R "root:${APP_USER}" "$APP_DIR"
+    run chmod 750 "$APP_DIR"
+    run chmod 640 "${APP_DIR}/.env"
+}
+
+phase_data() {
+    if [ -f "$OSRM_BUILT" ]; then
+        log "OSRM data already built at ${OSRM_DATA}; skipping"
+        return 0
+    fi
+    [ -f "$PROFILE_LUA" ] || die "profile ${PROFILE_LUA} missing; is osrm-backend installed?"
+
+    if [ ! -f "${DATA_DIR}/${OSM_FILE}" ]; then
+        if [ -f "${STAGE}/data/${OSM_FILE}" ]; then
+            log "using staged ${OSM_FILE} uploaded from the workstation"
+            run cp "${STAGE}/data/${OSM_FILE}" "${DATA_DIR}/${OSM_FILE}"
+        elif [ -n "$GEO_URL" ]; then
+            log "fetching ${OSM_FILE}"
+            run fetch -o "${DATA_DIR}/${OSM_FILE}" "$GEO_URL"
+        else
+            die "${DATA_DIR}/${OSM_FILE} missing, nothing staged, and GEO_URL unset."
+        fi
+    fi
+
+    # Mirrors Dockerfile.builder so both deployment paths produce identical data.
+    log "osrm-extract (memory-hungry; see docs/deployment_freebsd.md if this is killed)"
+    run sh -c "cd ${DATA_DIR} && osrm-extract -p ${PROFILE_LUA} ${DATA_DIR}/${OSM_FILE}"
+    run mkdir -p "${DATA_DIR}/${PROFILE}"
+    run sh -c "mv ${DATA_DIR}/${OSM_BASE}.osrm* ${DATA_DIR}/${PROFILE}/"
+    log "osrm-partition"
+    run osrm-partition "$OSRM_DATA"
+    log "osrm-customize"
+    run osrm-customize "$OSRM_DATA"
+    run chown -R osrm:osrm "${DATA_DIR}/${PROFILE}"
+}
+
+phase_services() {
+    for _rc in osrm-api-gateway osrm-routed redis-cache.conf; do
+        [ -f "${APP_DIR}/deploy/freebsd/${_rc}" ] || \
+            die "rc.d script ${_rc} missing; run the sync phase first."
+    done
+    [ -f "$OSRM_BUILT" ] || \
+        die "no routing data at ${OSRM_DATA}; run the data phase first ('make jail-data')."
+    log "installing rc.d scripts and configuring services"
+    run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-api-gateway" \
+        /usr/local/etc/rc.d/osrm_api_gateway
+    run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-routed" \
+        /usr/local/etc/rc.d/osrm_routed
+    run install -m 644 "${APP_DIR}/deploy/freebsd/redis-cache.conf" \
+        /usr/local/etc/redis-osrm-cache.conf
+
+    # www/osrm-backend's own `osrm` service cannot pass flags to osrm-routed
+    # -- see the header of deploy/freebsd/osrm-routed -- so it is disabled and
+    # replaced. Its settings are removed rather than left to rot in rc.conf.
+    run service osrm onestop >/dev/null 2>&1 || true
+    run sysrc osrm_enable=NO >/dev/null
+    run sysrc -x osrm_file osrm_flags >/dev/null 2>&1 || true
+
+    # Engine and gateway run from the rc.d scripts in deploy/freebsd; redis
+    # uses its own port's script unchanged. Mirrors docker-compose.yml.
+    run sysrc osrm_routed_enable=YES >/dev/null
+    run sysrc osrm_routed_base="$OSRM_DATA" >/dev/null
+    run sysrc redis_enable=YES >/dev/null
+    run sysrc redis_config=/usr/local/etc/redis-osrm-cache.conf >/dev/null
+    run sysrc osrm_api_gateway_enable=YES >/dev/null
+    run sysrc osrm_api_gateway_dir="$APP_DIR" >/dev/null
+    run sysrc osrm_api_gateway_user="$APP_USER" >/dev/null
+    run sysrc osrm_api_gateway_host="$API_HOST" >/dev/null
+    run sysrc osrm_api_gateway_port="$API_PORT" >/dev/null
+    run sysrc osrm_api_gateway_workers="$API_WORKERS" >/dev/null
+    run sysrc osrm_api_gateway_forwarded_allow_ips="$FORWARDED_ALLOW_IPS" >/dev/null
+
+    for svc in redis osrm_routed osrm_api_gateway; do
+        log "restarting ${svc}"
+        run service "$svc" restart
+    done
+}
+
+phase_health() {
+    # /ready covers both processes: it answers 503 while the engine is
+    # unreachable, so a single probe replaces the old gateway + OSRM pair.
+    i=0
+    until fetch -qo /dev/null "http://127.0.0.1:${API_PORT}/ready"; do
+        i=$((i + 1))
+        if [ "$i" -ge 30 ]; then
+            die "readiness check failed after 30 attempts (gateway or OSRM engine down)"
+        fi
+        sleep 1
+    done
+    log "health checks passed"
+    fetch -qo - "http://127.0.0.1:${API_PORT}/health"
+    echo
+}
+
+phase_logs() {
+    tail -n 100 /var/log/osrm-api-gateway.log 2>/dev/null || echo "(no gateway log yet)"
+    echo "--- /var/log/messages ---"
+    tail -n 50 /var/log/messages 2>/dev/null || echo "(unreadable)"
+}
+
+phase_stop() {
+    for svc in osrm_api_gateway osrm_routed redis; do
+        log "stopping ${svc}"
+        run service "$svc" stop || true
+    done
+}
+
+phase_status() {
+    for svc in osrm_api_gateway osrm_routed redis; do
+        run service "$svc" status || true
+    done
+}
+
+case "${1:-all}" in
+    deps)     phase_deps ;;
+    sync)     phase_sync ;;
+    app)      phase_app ;;
+    data)     phase_data ;;
+    services) phase_services ;;
+    stop)     phase_stop ;;
+    status)   phase_status ;;
+    health)   phase_health ;;
+    logs)     phase_logs ;;
+    all)      phase_deps; phase_sync; phase_app; phase_data; phase_services ;;
+    *)        die "usage: $0 [deps|sync|app|data|services|stop|status|health|logs|all]" ;;
+esac
+
+log "done: ${1:-all}"

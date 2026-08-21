@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
+
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
@@ -10,7 +11,7 @@ class RedisCache:
     def __init__(self, url: str, ttl: int, maxsize: int):
         self._ttl = ttl
         self._maxsize = maxsize
-        self._redis: Optional[redis.Redis] = None
+        self._redis: redis.Redis | None = None
         self._available = False
         if url:
             self._redis = redis.from_url(url, decode_responses=False)
@@ -21,7 +22,7 @@ class RedisCache:
     def available(self) -> bool:
         return self._available
 
-    async def get(self, key: str) -> Optional[Dict[str, Any]]:
+    async def get(self, key: str) -> dict[str, Any] | None:
         if not self._available or self._redis is None:
             return None
         try:
@@ -34,7 +35,7 @@ class RedisCache:
             logger.warning("Redis get failed, falling back: %s", e)
         return None
 
-    async def set(self, key: str, value: Dict[str, Any]) -> None:
+    async def set(self, key: str, value: dict[str, Any]) -> None:
         if not self._available or self._redis is None:
             return
         try:

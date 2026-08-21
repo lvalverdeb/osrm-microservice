@@ -1,5 +1,7 @@
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional, Union, Dict, Any
+
 
 class Coordinate(BaseModel):
     """Standard coordinate model."""
@@ -9,7 +11,7 @@ class Coordinate(BaseModel):
 # spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class Stop(Coordinate):
     """Specific delivery stop with an optional ID."""
-    id: Optional[Union[str, int]] = Field(None, description="Unique identifier for the stop used for tracking")
+    id: str | int | None = Field(None, description="Unique identifier for the stop used for tracking")
 
 # Type alias used by Route, Match, and Trip annotation fields
 AnnotationValue = Literal[
@@ -26,31 +28,31 @@ class CommonRoutingOptions(BaseModel):
     All fields are optional and omitted from the upstream request when not set.
     Per-coordinate lists must have exactly one entry per coordinate (or be omitted entirely).
     """
-    bearings: Optional[List[Optional[str]]] = Field(
+    bearings: list[str | None] | None = Field(
         None,
         description="Per-coordinate bearing constraints as 'angle,deviation' strings (e.g. '90,30'). Use null for unconstrained coordinates."
     )
-    radiuses: Optional[List[Optional[float]]] = Field(
+    radiuses: list[float | None] | None = Field(
         None,
         description="Per-coordinate snapping radius in meters. Use null for unlimited."
     )
-    hints: Optional[List[Optional[str]]] = Field(
+    hints: list[str | None] | None = Field(
         None,
         description="Per-coordinate hint strings from a previous OSRM response to speed up snapping."
     )
-    approaches: Optional[List[Optional[Literal["unrestricted", "curb"]]]] = Field(
+    approaches: list[Literal["unrestricted", "curb"] | None] | None = Field(
         None,
         description="Per-coordinate approach side. Use null for default."
     )
-    exclude: Optional[List[str]] = Field(
+    exclude: list[str] | None = Field(
         None,
         description="Road classes to exclude globally (e.g. ['motorway', 'toll'])."
     )
-    snapping: Optional[Literal["default", "any"]] = Field(
+    snapping: Literal["default", "any"] | None = Field(
         None,
         description="Edge selection behaviour: 'default' (one-way roads respected) or 'any'."
     )
-    skip_waypoints: Optional[bool] = Field(
+    skip_waypoints: bool | None = Field(
         None,
         description="Suppress the waypoints array in the response to reduce payload size."
     )
@@ -60,14 +62,14 @@ class RouteRequest(CommonRoutingOptions):
     """Request model for routing between points."""
     origin: Coordinate
     destination: Coordinate
-    waypoints: Optional[List[Coordinate]] = Field(None, max_length=200, description="Optional intermediate waypoints")
-    alternatives: Union[bool, int] = Field(False, description="Number of alternate routes to return")
+    waypoints: list[Coordinate] | None = Field(None, max_length=200, description="Optional intermediate waypoints")
+    alternatives: bool | int = Field(False, description="Number of alternate routes to return")
     profile: Literal["driving", "cycling", "walking"] = Field("driving", description="Routing profile")
     overview: Literal["simplified", "full", "false"] = Field("full", description="Level of overview geometry returned")
     geometries: Literal["polyline", "polyline6", "geojson"] = Field("geojson", description="Geometry encoding format")
     steps: bool = Field(True, description="Return step-by-step turn instructions")
-    annotations: Optional[str] = Field("distance,duration", description="Comma-separated metadata to annotate each segment (distance, duration, nodes, datasources, weight, speed)")
-    continue_straight: Optional[Literal["default", "true", "false"]] = Field(None, description="Force route to continue straight at intermediate waypoints")
+    annotations: str | None = Field("distance,duration", description="Comma-separated metadata to annotate each segment (distance, duration, nodes, datasources, weight, speed)")
+    continue_straight: Literal["default", "true", "false"] | None = Field(None, description="Force route to continue straight at intermediate waypoints")
     
     model_config = {
         "json_schema_extra": {
@@ -88,20 +90,20 @@ class GPSBreadcrumb(BaseModel):
     longitude: float = Field(..., ge=-180, le=180)
     latitude: float = Field(..., ge=-90, le=90)
     timestamp: int = Field(..., ge=0, description="Unix timestamp (integer)")
-    accuracy_meters: Optional[float] = Field(5.0, gt=0, description="Optional accuracy in meters")
+    accuracy_meters: float | None = Field(5.0, gt=0, description="Optional accuracy in meters")
 
 # spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class MatchRequest(CommonRoutingOptions):
     """Request model for map matching a sequence of GPS breadcrumbs."""
-    breadcrumbs: List[GPSBreadcrumb] = Field(..., min_length=2, max_length=5000)
+    breadcrumbs: list[GPSBreadcrumb] = Field(..., min_length=2, max_length=5000)
     profile: Literal["driving", "cycling", "walking"] = Field("driving", description="Routing profile")
     overview: Literal["simplified", "full", "false"] = Field("full", description="Level of overview geometry returned")
     geometries: Literal["polyline", "polyline6", "geojson"] = Field("geojson", description="Geometry encoding format")
     steps: bool = Field(False, description="Return step-by-step instructions for the matched route")
-    annotations: Optional[str] = Field(None, description="Comma-separated metadata annotations per segment")
-    gaps: Optional[Literal["split", "ignore"]] = Field(None, description="How to handle large timestamp gaps in the trace")
-    tidy: Optional[bool] = Field(None, description="Remove repeated or out-of-order coordinates before matching")
-    match_waypoints: Optional[List[int]] = Field(None, description="Indices into breadcrumbs to treat as explicit waypoints")
+    annotations: str | None = Field(None, description="Comma-separated metadata annotations per segment")
+    gaps: Literal["split", "ignore"] | None = Field(None, description="How to handle large timestamp gaps in the trace")
+    tidy: bool | None = Field(None, description="Remove repeated or out-of-order coordinates before matching")
+    match_waypoints: list[int] | None = Field(None, description="Indices into breadcrumbs to treat as explicit waypoints")
     
     model_config = {
         "json_schema_extra": {
@@ -123,14 +125,14 @@ class MatchRequest(CommonRoutingOptions):
 # spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class MatrixRequest(CommonRoutingOptions):
     """Request model for generating a distance matrix."""
-    coordinates: List[Coordinate] = Field(..., min_length=2, max_length=5000)
-    sources: Optional[List[int]] = None
-    destinations: Optional[List[int]] = None
+    coordinates: list[Coordinate] = Field(..., min_length=2, max_length=5000)
+    sources: list[int] | None = None
+    destinations: list[int] | None = None
     profile: Literal["driving", "cycling", "walking"] = Field("driving", description="Routing profile")
     annotations: MatrixAnnotation = Field("duration,distance", description="Which cost annotations to return")
-    fallback_speed: Optional[float] = Field(None, gt=0, description="Speed (km/h) used to estimate travel time for unreachable pairs")
-    fallback_coordinate: Optional[Literal["input", "snapped"]] = Field(None, description="Which coordinate to use when a pair falls back to speed estimate")
-    scale_factor: Optional[float] = Field(None, gt=0, description="Multiply all durations by this factor (useful for congestion modelling)")
+    fallback_speed: float | None = Field(None, gt=0, description="Speed (km/h) used to estimate travel time for unreachable pairs")
+    fallback_coordinate: Literal["input", "snapped"] | None = Field(None, description="Which coordinate to use when a pair falls back to speed estimate")
+    scale_factor: float | None = Field(None, gt=0, description="Multiply all durations by this factor (useful for congestion modelling)")
 
     model_config = {
         "json_schema_extra": {
@@ -150,13 +152,13 @@ class MatrixRequest(CommonRoutingOptions):
 
 class MatrixGraphResponse(BaseModel):
     """Schema for returning adjacency lists/graph data."""
-    nodes: List[Dict[str, Any]]
-    edges: List[Dict[str, Any]]
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
 
 # spaghetti-ignore[lazy-class]: Pydantic request model; methodless by design
 class TripRequest(CommonRoutingOptions):
     """Request model for TSP optimization (Trip service)."""
-    coordinates: List[Coordinate] = Field(..., min_length=2, max_length=200)
+    coordinates: list[Coordinate] = Field(..., min_length=2, max_length=200)
     roundtrip: bool = Field(True, description="Whether the trip should return to the first point")
     source: Literal["first", "any"] = Field("first", description="Where the trip starts (first, any)")
     destination: Literal["last", "any"] = Field("last", description="Where the trip ends (last, any)")
@@ -164,7 +166,7 @@ class TripRequest(CommonRoutingOptions):
     overview: Literal["simplified", "full", "false"] = Field("full", description="Level of overview geometry returned")
     geometries: Literal["polyline", "polyline6", "geojson"] = Field("geojson", description="Geometry encoding format")
     steps: bool = Field(True, description="Return step-by-step turn instructions")
-    annotations: Optional[str] = Field("distance,duration", description="Comma-separated metadata annotations per segment")
+    annotations: str | None = Field("distance,duration", description="Comma-separated metadata annotations per segment")
 
     model_config = {
         "json_schema_extra": {
@@ -207,15 +209,15 @@ class NearestRequest(CommonRoutingOptions):
 class NearestResponse(BaseModel):
     """Response model for the OSRM Nearest service (pass-through)."""
     code: str
-    waypoints: List[Dict[str, Any]]
+    waypoints: list[dict[str, Any]]
 
 class VrpRequest(BaseModel):
     """Request model for Vehicle Routing Problem (VRP)."""
-    depots: List[Stop] = Field(..., min_length=1, max_length=500, description="List of warehouse/depot locations")
-    stops: List[Stop] = Field(..., min_length=1, max_length=10000, description="List of delivery points")
-    vehicle_count: Optional[int] = Field(None, gt=0, description="Total vehicles available. Defaults to one per depot.")
+    depots: list[Stop] = Field(..., min_length=1, max_length=500, description="List of warehouse/depot locations")
+    stops: list[Stop] = Field(..., min_length=1, max_length=10000, description="List of delivery points")
+    vehicle_count: int | None = Field(None, gt=0, description="Total vehicles available. Defaults to one per depot.")
     capacity: int = Field(35, gt=0, le=10000, description="Maximum packages a single vehicle can carry")
-    max_radius_km: Optional[float] = Field(None, gt=0, description="Optional maximum road distance from depot (km)")
+    max_radius_km: float | None = Field(None, gt=0, description="Optional maximum road distance from depot (km)")
     clustering_mode: Literal["distance", "travel_time", "radial"] = Field("travel_time", description="Clustering preference: 'distance', 'travel_time', or 'radial'")
     hysteresis_m: float = Field(2000.0, ge=0, description="Buffer distance to prevent assignment flipping (meters)")
     roundtrip: bool = Field(True, description="Whether each vehicle should return to the depot at the end of its route")
@@ -241,12 +243,12 @@ class VrpRequest(BaseModel):
 
 class VehicleRoute(BaseModel):
     """Response model for a single vehicle's optimized route."""
-    vehicle_id: Union[str, int]
+    vehicle_id: str | int
     depot_index: int
-    stops_indices: List[int]
-    stop_ids: Optional[List[Union[str, int]]] = None
-    stop_coordinates: Optional[List[Coordinate]] = None
-    route_geometry: Dict[str, Any]
+    stops_indices: list[int]
+    stop_ids: list[str | int] | None = None
+    stop_coordinates: list[Coordinate] | None = None
+    route_geometry: dict[str, Any]
     distance_meters: float
     duration_seconds: float
 
@@ -254,14 +256,14 @@ class VrpAllocationResponse(BaseModel):
     """Response model for the Location-Allocation (Clustering) phase."""
     code: str = "Ok"
     # depot_id/index -> list of stop identifiers (IDs or Indices)
-    allocations: Dict[Union[str, int], List[Union[str, int]]]
-    unreachable_stops: List[Union[str, int]]
+    allocations: dict[str | int, list[str | int]]
+    unreachable_stops: list[str | int]
     # Optionally return the distance matrix if needed for downstream
     # distances: Optional[List[List[float]]] = None
 
 class VrpResponse(BaseModel):
     """Response model for the VRP solution."""
     code: str = "Ok"
-    routes: List[VehicleRoute]
+    routes: list[VehicleRoute]
     total_distance: float
     total_duration: float

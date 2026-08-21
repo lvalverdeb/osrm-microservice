@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, patch
 sys.path.append('.')
 sys.path.append('./.venv/lib/python3.12/site-packages')
 
+from app.models.schemas import Coordinate, RouteRequest
 from app.services.osrm_client import OSRMClient
-from app.models.schemas import RouteRequest, Coordinate
+
 
 async def test_common_options_serialization():
     print("Testing Common Options serialization...", end=" ")

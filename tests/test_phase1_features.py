@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, patch
 sys.path.append('.')
 sys.path.append('./.venv/lib/python3.12/site-packages')
 
+from app.models.schemas import Coordinate, MatchRequest, MatrixRequest, RouteRequest
 from app.services.osrm_client import OSRMClient
-from app.models.schemas import RouteRequest, MatrixRequest, MatchRequest, Coordinate
+
 
 async def test_route_walking_profile():
     print("Testing Route walking profile...", end=" ")

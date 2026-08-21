@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, patch
 sys.path.append('.')
 sys.path.append('./.venv/lib/python3.12/site-packages')
 
+from app.models.schemas import Coordinate, NearestRequest
 from app.services.osrm_client import OSRMClient
-from app.models.schemas import NearestRequest, Coordinate
+
 
 async def test_nearest_service():
     print("Testing Nearest service...", end=" ")

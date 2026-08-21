@@ -63,7 +63,7 @@ The OSRM API Gateway is a FastAPI-based asynchronous microservice that wraps the
 
 **Exclusions:**
 - OSRM C++ engine internals (data processing, routing algorithm)
-- OSM data processing pipeline (handled by Dockerfile.builder)
+- OSM data processing pipeline (handled by deploy/docker/Dockerfile.builder)
 - Client-side visualization (examples provided but outside scope)
 - Authentication/authorization
 
@@ -643,7 +643,7 @@ The system uses a single-threaded async model:
 
 1. **ASGI Server:** Uvicorn runs the FastAPI application with async workers. All endpoint handlers are `async def`.
 2. **HTTP Client Pool:** `OSRMClient` initializes a single `httpx.AsyncClient` with connection pooling, reused across all requests. Default timeout: 30s.
-3. **Rate Limiting:** `slowapi` middleware with per-endpoint limits enforced via `@limiter.limit(...)` decorator. Key function: `get_remote_address`. Configuration:
+3. **Rate Limiting:** `slowapi` middleware with per-endpoint limits enforced via `@limiter.limit(...)` decorator. Key function: `get_remote_address` (the immediate peer; deployments pass `--forwarded-allow-ips` so a trusted proxy's `X-Forwarded-For` names the real client). Configuration:
    - `/route`: 600 req/min
    - `/matrix`, `/matrix-graph`: 300 req/min
    - `/match`: 600 req/min
@@ -714,7 +714,7 @@ The system uses a single-threaded async model:
 **Title:** Multi-Stage Docker Builds for OSRM Data Processing  
 **Context:** OSRM data extraction is slow (~30min) and requires different tools than the runtime server.  
 **Options:** (a) Single-stage build with all tools, (b) Multi-stage with separate builder and runtime, (c) Pre-processed data volume.  
-**Outcome:** Chosen option (b) — Three Dockerfiles: `Dockerfile.builder` (extract/partition/customize), `Dockerfile.osrm` (runtime), and `Dockerfile` (API gateway, repo root). Only the runtime images are used in production.
+**Outcome:** Chosen option (b) — Three Dockerfiles in `deploy/docker/`: `Dockerfile.builder` (extract/partition/customize), `Dockerfile.osrm` (runtime), and `Dockerfile` (API gateway). Only the runtime images are used in production.
 
 **ID:** DEC-007  
 **Title:** slowapi for Rate Limiting  

@@ -189,6 +189,25 @@ Checks if the gateway is running and probes the OSRM backend.
 ```
 
 `status` is `"degraded"` and `osrm_backend` is `"down"` when the OSRM backend probe fails.
+This endpoint always returns **200**, degraded or not — use `GET /ready` for load balancers.
+
+#### `GET /ready`
+
+Readiness probe for load balancers and deploy-time checks. Same OSRM probe as
+`/health`, but the HTTP status carries the verdict: **200** when the backend is
+up, **503** when it is down, so a balancer drains the node instead of routing to
+an engine that cannot answer.
+
+**Response Body:**
+```json
+{
+  "status": "ready",
+  "service": "OSRM API Gateway",
+  "osrm_backend": "up"
+}
+```
+
+With HTTP 503, `status` is `"not_ready"` and `osrm_backend` is `"down"`.
 
 ---
 
@@ -399,7 +418,7 @@ Proxy Mapbox Vector Tiles from the OSRM backend. Minimum zoom level: 12.
 
 ## Rate Limits
 
-All endpoints are rate-limited per client IP. `GET /health` and `GET /metrics` are unlimited.
+All endpoints are rate-limited per client IP. `GET /health`, `GET /ready`, and `GET /metrics` are unlimited.
 
 | Method | Path | Limit | Env Variable |
 |--------|------|-------|-------------|

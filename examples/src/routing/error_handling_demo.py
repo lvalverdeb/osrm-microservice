@@ -22,15 +22,16 @@ Note: The rate limit test sends many requests rapidly and may require
       resetting the rate limiter between runs.
 """
 
-import httpx
 import os
-import time
 import sys
+import time
+
+import httpx
 
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
 
-def try_request(method: str, path: str, json_body: dict = None,
+def try_request(method: str, path: str, json_body: dict | None = None,
                 label: str = "", timeout: float = 10.0) -> None:
     """Make a request and print the result."""
     url = f"{API_BASE_URL}{path}"

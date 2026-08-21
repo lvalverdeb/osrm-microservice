@@ -1,5 +1,5 @@
+from app.models.schemas import Coordinate, MatrixRequest
 from app.services.graph_builder import GraphBuilder
-from app.models.schemas import MatrixRequest, Coordinate
 
 
 def test_build_from_matrix_empty():

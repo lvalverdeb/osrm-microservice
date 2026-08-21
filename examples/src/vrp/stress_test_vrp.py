@@ -1,10 +1,11 @@
+import json
 import os
-import requests
-import folium
-from folium.plugins import MarkerCluster
 import random
 import sys
-import json
+
+import folium
+import requests
+from folium.plugins import MarkerCluster
 
 # Configuration
 API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
@@ -33,13 +34,11 @@ def is_in_costa_rica(lat, lon):
     p1x, p1y = poly[0][1], poly[0][0]
     for i in range(n + 1):
         p2x, p2y = poly[i % n][1], poly[i % n][0]
-        if lat > min(p1y, p2y):
-            if lat <= max(p1y, p2y):
-                if lon <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xints = (lat - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or lon <= xints:
-                        inside = not inside
+        if min(p1y, p2y) < lat <= max(p1y, p2y) and lon <= max(p1x, p2x):
+            if p1y != p2y:
+                xints = (lat - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+            if p1x == p2x or lon <= xints:
+                inside = not inside
         p1x, p1y = p2x, p2y
     return inside
 

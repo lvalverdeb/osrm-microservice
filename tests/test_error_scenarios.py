@@ -1,7 +1,9 @@
+from unittest.mock import AsyncMock, patch
+
 import httpx
 import pytest
-from httpx import AsyncClient, ASGITransport
-from unittest.mock import patch, AsyncMock
+from httpx import ASGITransport, AsyncClient
+
 from app.main import app
 from app.services.osrm_client import OSRMClient
 
@@ -76,3 +78,36 @@ async def test_invalid_coordinate_bounds_returns_422():
             "destination": {"longitude": -84.08, "latitude": 9.94},
         })
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_ready_returns_503_when_osrm_down():
+    with patch("app.main.osrm_client.ping", new_callable=AsyncMock) as mock_ping:
+        mock_ping.return_value = False
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/ready")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "not_ready"
+    assert body["osrm_backend"] == "down"
+
+
+@pytest.mark.asyncio
+async def test_ready_returns_200_when_osrm_up():
+    with patch("app.main.osrm_client.ping", new_callable=AsyncMock) as mock_ping:
+        mock_ping.return_value = True
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_health_stays_200_while_degraded():
+    """`/health` is for humans: it reports the degradation without failing."""
+    with patch("app.main.osrm_client.ping", new_callable=AsyncMock) as mock_ping:
+        mock_ping.return_value = False
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "degraded"

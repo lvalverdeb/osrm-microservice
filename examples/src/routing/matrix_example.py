@@ -1,12 +1,13 @@
 import os
+from typing import Any
+
 import requests
-from typing import List, Dict, Any
 
 # --- Configuration ---
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 MATRIX_URL = f"{API_BASE_URL}/matrix"
 
-def get_distance_duration_matrix(locations: List[Dict[str, float]], sources: List[int] = None, destinations: List[int] = None) -> Dict[str, Any]:
+def get_distance_duration_matrix(locations: list[dict[str, float]], sources: list[int] | None = None, destinations: list[int] | None = None) -> dict[str, Any]:
     """
     Fetch the distance and duration matrix for the given locations.
     

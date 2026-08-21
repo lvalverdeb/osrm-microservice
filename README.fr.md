@@ -4,53 +4,54 @@
 
 Routage haute performance et appariement de cartes (map-matching) pour le Costa Rica.
 
-## Instructions de Configuration
+## Déploiement
 
-Ce projet utilise un flux de travail de **Construction Locale et Transfert Groupé** pour prendre en charge le déploiement sur des hôtes Docker distants tout en traitant les données localement sur macOS.
+Le projet prend en charge **deux** options de déploiement. Les deux exécutent les
+mêmes trois services — le moteur OSRM, un cache Redis et la passerelle FastAPI —
+et tout ce dont l'une ou l'autre a besoin se trouve dans [`deploy/`](deploy).
 
-### 1. Prérequis
+| Option | Fichiers | Commencer par | Quand |
+|---|---|---|---|
+| **Docker** | [`deploy/docker/`](deploy/docker) | `make compose-up` | N'importe quel hôte Docker Linux, local ou distant |
+| **Prison FreeBSD** | [`deploy/freebsd/`](deploy/freebsd) | `make jail-up` | Une prison sur un hôte FreeBSD, qui ne peut pas exécuter Docker |
 
-- Docker Desktop (macOS)
-- Hôte Docker Distant (ex: VM Linux à `10.211.55.28`)
-- `make`
+Les instructions complètes pour les deux, y compris les prérequis et les notes sur
+Apple Silicon, se trouvent dans **[docs/deployment.md](docs/deployment.md)**.
 
-### 2. Acquisition de Données et Traitement Local
+### Docker, en bref
 
-Extrayez et traitez les données OSM du Costa Rica localement. Ce processus regroupe les données dans votre dossier local `./data` en utilisant un constructeur basé sur Docker "Sans Montage".
-
-```bash
-# Télécharger les dernières données cartographiques du Costa Rica
-make download-data
-
-# Traiter les données localement pour un profil spécifique (car, bicycle, foot)
-# Par défaut sur car si PROFILE est omis
-make process-osrm PROFILE=car
-```
-
-### 3. Déploiement Distant
-
-Déployez l'API et le moteur OSRM sur l'hôte distant. Les données traitées sont regroupées directement de l'image du constructeur vers l'image d'exécution OSRM via un `Dockerfile.osrm` à plusieurs étapes.
-
-`osrm/osrm-backend` prend en charge plusieurs architectures (amd64, arm64). Confirmez l'architecture du daemon Docker actif avant de démarrer les services.
+Les données sont traitées en une image sur votre machine puis regroupées dans
+l'image d'exécution par le `deploy/docker/Dockerfile.osrm` à plusieurs étapes :
+rien n'est monté et la pile peut être déployée telle quelle sur un hôte Docker
+distant.
 
 ```bash
-# Cibler l'hôte distant
-export DOCKER_HOST=tcp://10.211.55.28:2375
+make download-data              # télécharger l'extrait du Costa Rica dans ./data
+make process-osrm PROFILE=car   # extract / partition / customize
 
-# Vérifier l'hôte cible et l'architecture
-make compose-doctor
-
-# Construire et démarrer les services avec séquencement sûr + contrôles de santé
-make compose-up
-
-# Afficher les logs des services
+export DOCKER_HOST=tcp://10.211.55.28:2375   # optionnel : cibler un daemon distant
+make compose-doctor             # afficher l'hôte Docker actif et son architecture
+make compose-up                 # construire et démarrer, avec séquencement et contrôles de santé
 make compose-logs
-
-# Arrêter les services
 make compose-down
 ```
 
-Évitez d'exécuter `docker compose down & docker compose up --build` ; `&` exécute la première commande en arrière-plan et peut provoquer des conditions de course.
+Évitez d'exécuter `docker compose down & docker compose up --build` ; `&` exécute
+la première commande en arrière-plan et peut provoquer des conditions de course.
+
+### Prison FreeBSD, en bref
+
+Une prison ne peut pas exécuter Docker — les prisons partagent le noyau FreeBSD et
+Docker a besoin des namespaces et cgroups Linux — donc les mêmes services
+s'exécutent nativement à partir de paquets et de scripts rc.d. Voir
+[docs/deployment_freebsd.md](docs/deployment_freebsd.md).
+
+```bash
+make jail-doctor      # vérifier la cible et comment élever les privilèges
+make jail-bootstrap   # paquets et utilisateur de service
+make jail-data        # construire les données OSRM dans la prison
+make jail-up          # déployer la passerelle et démarrer tous les services
+```
 
 ## Services Principaux
 

@@ -1,13 +1,15 @@
 import asyncio
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
-from unittest.mock import AsyncMock, patch, MagicMock
 
 sys.path.append('.')
 sys.path.append('./.venv/lib/python3.12/site-packages')
 
-from app.services.osrm_client import OSRMClient
 from app.main import _parse_osrm_error
+from app.services.osrm_client import OSRMClient
+
 
 async def test_tile_proxy():
     print("Testing Tile proxy...", end=" ")

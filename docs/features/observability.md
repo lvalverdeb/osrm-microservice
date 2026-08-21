@@ -44,6 +44,50 @@ Auto-instrumented by `prometheus-fastapi-instrumentator`, which tracks per-route
 | `http_request_size_bytes` | Histogram | Request body size. |
 | `http_response_size_bytes` | Histogram | Response body size. |
 
+### Cache metrics
+
+The gateway also exports its own counter for the two-tier cache-aside path in
+`OSRMClient._get`:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `cache_lookups_total` | Counter | `tier`, `result`, `service` | One increment per cache lookup. |
+
+- `tier` — `l1` (in-process `TTLCache`) or `l2` (Redis).
+- `result` — `hit` or `miss`.
+- `service` — the OSRM service: `route`, `table`, `match`, `trip`, `nearest`, or
+  `other`. The raw endpoint carries coordinates, so it can never be a label —
+  every distinct request would mint a new time series. Tiles are not cached and
+  never appear.
+
+Two properties matter when reading it:
+
+**L2 is nested inside L1's misses.** Redis is consulted only after an L1 miss, so
+the `l2` series are a subset of `l1{result="miss"}`. Adding the tiers together
+double-counts; compute each tier's rate against its own total.
+
+**An unconfigured tier records nothing.** With no `REDIS_URL`, no `l2` series
+appear at all — an absent tier is not a miss. An `l2` series that is present but
+flat means Redis is reachable and simply never answering.
+
+```promql
+# L1 hit rate
+sum(rate(cache_lookups_total{tier="l1",result="hit"}[5m]))
+  / sum(rate(cache_lookups_total{tier="l1"}[5m]))
+
+# L2 hit rate -- denominator is L2 lookups, not all lookups
+sum(rate(cache_lookups_total{tier="l2",result="hit"}[5m]))
+  / sum(rate(cache_lookups_total{tier="l2"}[5m]))
+
+# Which services actually benefit from caching
+sum by (service) (rate(cache_lookups_total{result="hit"}[5m]))
+```
+
+A zero L2 hit rate under `make loadtest` is expected rather than a fault: the
+generator randomises payloads so keys rarely repeat, and with a single uvicorn
+worker the L1 tier absorbs the repeats that do occur before Redis is consulted.
+See [../deployment.md](../deployment.md) for load-testing either deployment.
+
 **Scraping configuration** (Prometheus):
 ```yaml
 scrape_configs:
@@ -98,9 +142,14 @@ Client ──> FastAPI Gateway ──> OSRM Backend
 
 ---
 
-## Health Check
+## Health and Readiness
 
-Endpoint: `GET /health`
+Two endpoints, two audiences: `GET /health` describes the state for humans and
+dashboards and always answers 200; `GET /ready` is the machine-readable verdict
+and answers 503 when the node cannot serve traffic. Both probe the OSRM
+backend the same way.
+
+### `GET /health`
 
 The health check actively probes the OSRM backend to report true system health.
 
@@ -122,6 +171,16 @@ The health check actively probes the OSRM backend to report true system health.
 }
 ```
 
+### `GET /ready`
+
+Returns 200 with `{"status": "ready", ...}` while the OSRM backend answers, and
+**503** with `{"status": "not_ready", "osrm_backend": "down"}` when it does not.
+
+Point load balancers and deploy-time checks here rather than at `/health`: a
+balancer reading `/health` sees 200 even in the degraded state and keeps sending
+traffic to a node that cannot route. `make compose-health` and `make jail-health`
+already use `/ready`. Like `/health` and `/metrics`, it is not rate-limited.
+
 **Configuration:**
 
 | Variable | Default | Effect |
@@ -129,10 +188,10 @@ The health check actively probes the OSRM backend to report true system health.
 | `HEALTH_CHECK_TIMEOUT` | `2` | Seconds before the OSRM probe times out. Must stay below Docker's `HEALTHCHECK --timeout` (8 s). |
 | `HEALTH_CHECK_COORDS` | `0,0;0,0` | Coordinate pair used for the probe route. |
 
-**Docker Compose health check** (in `docker-compose.yml`):
+**Docker Compose health check** (in `deploy/docker/docker-compose.yml`):
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:8000/ready"]
   interval: 30s
   timeout: 8s
   retries: 3

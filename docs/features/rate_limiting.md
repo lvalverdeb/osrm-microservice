@@ -83,3 +83,23 @@ HTTP Status: `429 Too Many Requests`.
 - **Option B:** Replace `slowapi`'s in-memory store with a Redis-backed store (requires custom `slowapi` storage backend).
 
 Neither is required for single-replica deployments.
+
+## Storage
+
+Limits are counted in Redis when `REDIS_URL` is set, and in process memory
+otherwise. This matters as soon as there is more than one process: slowapi's
+default in-memory storage is per worker, so `uvicorn --workers N` would make the
+effective limit `N x` the configured value, and a fleet behind a balancer `N x M x`.
+
+Measured on the jail deployment, 800 requests in 8s against `RATE_LIMIT_ROUTE`
+of 600/minute:
+
+| Setup | Allowed | Throttled |
+|---|---|---|
+| 1 worker | 547 | 254 |
+| 2 workers, in-memory storage | 772 | 29 |
+| 2 workers, Redis storage | 549 | 252 |
+
+`in_memory_fallback_enabled` keeps the gateway serving if Redis goes away — the
+limits revert to per-process until it returns, which is the same
+degrade-rather-than-fail stance `RedisCache` takes.

@@ -1,8 +1,9 @@
-import requests
-import folium
-import random
 import json
 import os
+import random
+
+import folium
+import requests
 
 # Configuration
 API_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
@@ -82,13 +83,11 @@ def is_in_costa_rica(lat, lon):
     p1x, p1y = poly[0][1], poly[0][0]
     for i in range(n + 1):
         p2x, p2y = poly[i % n][1], poly[i % n][0]
-        if py > min(p1y, p2y):
-            if py <= max(p1y, p2y):
-                if px <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xints = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or px <= xints:
-                        inside = not inside
+        if min(p1y, p2y) < py <= max(p1y, p2y) and px <= max(p1x, p2x):
+            if p1y != p2y:
+                xints = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+            if p1x == p2x or px <= xints:
+                inside = not inside
         p1x, p1y = p2x, p2y
     return inside
 

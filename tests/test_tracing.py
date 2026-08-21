@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
 from fastapi import FastAPI
 
 
@@ -40,8 +41,9 @@ class TestTracingSetup:
 
 @pytest.mark.asyncio
 async def test_tracing_does_not_block_request():
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
-    from httpx import AsyncClient, ASGITransport
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/health")
     assert resp.status_code == 200

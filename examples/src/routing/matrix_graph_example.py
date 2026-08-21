@@ -12,14 +12,15 @@ Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import httpx
 import os
-from typing import List, Dict, Any
+from typing import Any
+
+import httpx
 
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
 
-def fetch_matrix_graph(coordinates: List[Dict[str, float]]) -> Dict[str, Any]:
+def fetch_matrix_graph(coordinates: list[dict[str, float]]) -> dict[str, Any]:
     """Fetch the distance/duration matrix and convert to a graph."""
     payload = {"coordinates": coordinates}
     url = f"{API_BASE_URL}/matrix-graph"

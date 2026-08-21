@@ -1,6 +1,8 @@
-import httpx
-import folium
 import os
+import sys
+
+import folium
+import httpx
 
 # Configuration
 API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000") + "/route"
@@ -89,6 +91,6 @@ if __name__ == "__main__":
         import httpx
     except ImportError:
         print("Missing dependencies. Install them with: pip install folium httpx")
-        exit(1)
+        sys.exit(1)
         
     create_map()

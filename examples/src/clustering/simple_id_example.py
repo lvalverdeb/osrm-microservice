@@ -1,7 +1,8 @@
 import os
-import requests
 import random
+
 import folium
+import requests
 
 # Configuration
 API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
@@ -77,7 +78,7 @@ def run_enhanced_vrp_demo():
             print(f"Vehicle {v_id}: {len(route['stop_ids'])} stops assigned.")
             
             # Draw actual road geometry
-            if "route_geometry" in route and route["route_geometry"]:
+            if route.get("route_geometry"):
                 # GeoJSON is [lon, lat], Folium needs [lat, lon]
                 path = [[p[1], p[0]] for p in route["route_geometry"]["coordinates"]]
                 folium.PolyLine(path, color=color, weight=3, opacity=0.8, popup=f"Vehicle: {v_id}").add_to(m)

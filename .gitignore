@@ -6,6 +6,11 @@ __pycache__/
 env/
 venv/
 ENV/
+# ...but deploy/env/ is the shared app-settings directory, not a virtualenv.
+# On a case-insensitive filesystem (macOS default, core.ignorecase=true) the
+# ENV/ pattern above matches it, so it must be re-included explicitly -- and as
+# the directory, since git will not descend into an excluded one.
+!deploy/env/
 build/
 dist/
 *.egg-info/
@@ -42,6 +47,7 @@ Thumbs.db
 # Environment Secrets
 .env
 .env.local
+.env.publish
 
 # Docker build cache
 .docker_tmp/
@@ -51,3 +57,8 @@ Thumbs.db
 
 # Generated Mapbox Vector Tiles
 *.mvt
+
+# Scanner output (`make spaghetti`, `make fenceline`) -- regenerated on every run.
+# NOTE: .fenceline-baseline.json is a committed config file, not a report. It does
+# not match this pattern; do not widen the pattern so that it would.
+*_report.json

@@ -1,6 +1,7 @@
 import json
 import random
 
+
 def generate_example_payload():
     # Warehouses
     depots = [

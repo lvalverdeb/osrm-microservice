@@ -1,0 +1,93 @@
+# Docker deployment path. See ../../docs/deployment.md for the other one.
+#
+# Every build context is the repository root -- the API image copies src/app and
+# pyproject.toml, the builder image copies data/ -- so the contexts below are
+# ../.. and the dockerfile: paths are root-relative. That makes this file usable
+# from any working directory:
+#
+#   docker compose -f deploy/docker/docker-compose.yml -p osrm-microservice up
+#
+# but prefer `make compose-up`, which sequences the builds and health checks.
+# The -p is not optional when invoking directly: without it the project name
+# defaults to this file's directory ("docker") and the default network is
+# renamed. .dockerignore stays at the repository root because that is where
+# Docker reads it from: the root of the build context, not next to the Dockerfile.
+services:
+  osrm-data-builder:
+    image: osrm-data-builder:latest
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.builder
+      args:
+        - PROFILE=${PROFILE:-car}
+        - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
+    profiles:
+      - build
+
+  osrm:
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.osrm
+      args:
+        - PROFILE=${PROFILE:-car}
+        - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
+    container_name: osrm-backend
+    ports:
+      - "${OSRM_PORT:-5000}:5000"
+    command: sh -c "osrm-routed --algorithm mld --max-trip-size 200 /data/$${PROFILE}/$${OSM_BASE}.osrm"
+    restart: always
+    healthcheck:
+      # osrm-backend has no curl/wget; bash's /dev/tcp is the only connectivity
+      # probe available without adding packages to the upstream image.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5000' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: osrm-cache
+    command: redis-server --save "" --appendonly no
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: osrm-api-gateway
+    ports:
+      - "${API_PORT:-8080}:8000"
+    # Tier 1: shared app settings, the same file the jail installs. Resolved
+    # relative to this file's directory, like the build contexts above.
+    env_file:
+      - ../env/app.env
+    # Tier 2: the only settings that are deployment-specific. `environment:`
+    # outranks `env_file:`, so these win over the shared file's values.
+    environment:
+      - OSRM_BASE_URL=http://osrm-backend:5000
+      - REDIS_URL=redis://osrm-cache:6379/0
+      # Vertical scaling. Defaults to 1, matching the jail's
+      # osrm_api_gateway_workers -- raising it is opt-in per environment. The
+      # entrypoint sets PROMETHEUS_MULTIPROC_DIR when this is >1, without which
+      # /metrics would report roughly 1/N of the traffic.
+      - WORKERS=${API_WORKERS:-1}
+      # Comma-separated proxy addresses or CIDRs. Empty keeps uvicorn's default
+      # (127.0.0.1 only), so X-Forwarded-For is ignored and the limiter keys on
+      # the immediate peer. Set this when a load balancer fronts the gateway, or
+      # every client shares one bucket keyed on the balancer.
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
+    depends_on:
+      osrm:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always

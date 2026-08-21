@@ -189,6 +189,26 @@ Vérifie si la passerelle est en cours d'exécution et sonde le backend OSRM.
 ```
 
 `status` est `"degraded"` et `osrm_backend` est `"down"` lorsque la sonde du backend OSRM échoue.
+Cet endpoint renvoie toujours **200**, dégradé ou non — utilisez `GET /ready` pour les répartiteurs de charge.
+
+#### `GET /ready`
+
+Sonde de disponibilité destinée aux répartiteurs de charge et aux vérifications
+de déploiement. Même sondage OSRM que `/health`, mais le verdict est porté par
+le statut HTTP : **200** lorsque le backend est disponible, **503** lorsqu'il ne
+l'est pas, afin que le répartiteur retire le nœud du service au lieu d'y router
+du trafic que le moteur ne peut pas traiter.
+
+**Corps de la Réponse :**
+```json
+{
+  "status": "ready",
+  "service": "OSRM API Gateway",
+  "osrm_backend": "up"
+}
+```
+
+Avec un HTTP 503, `status` vaut `"not_ready"` et `osrm_backend` vaut `"down"`.
 
 ---
 
@@ -399,7 +419,7 @@ Proxy des tuiles vectorielles Mapbox du backend de OSRM. Niveau de zoom minimum 
 
 ## Limites de Débit (Rate Limits)
 
-Tous les endpoints sont limités par IP client. `GET /health` et `GET /metrics` sont illimités.
+Tous les endpoints sont limités par IP client. `GET /health`, `GET /ready` et `GET /metrics` sont illimités.
 
 | Méthode | Chemin | Limite | Variable d'Environnement |
 |---------|--------|--------|--------------------------|

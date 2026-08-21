@@ -4,53 +4,54 @@
 
 Enrutamiento de alto rendimiento y emparejamiento de mapas (map-matching) para Costa Rica.
 
-## Instrucciones de Configuración
+## Despliegue
 
-Este proyecto utiliza un flujo de trabajo de **Construcción Local y Transferencia Agrupada** para admitir el despliegue en hosts Docker remotos mientras se procesan los datos localmente en macOS.
+El proyecto admite **dos** opciones de despliegue. Ambas ejecutan los mismos tres
+servicios — el motor OSRM, una caché Redis y la pasarela FastAPI — y todo lo que
+cualquiera de las dos necesita vive en [`deploy/`](deploy).
 
-### 1. Requisitos Previos
+| Opción | Archivos | Empezar con | Cuándo |
+|---|---|---|---|
+| **Docker** | [`deploy/docker/`](deploy/docker) | `make compose-up` | Cualquier host Docker Linux, local o remoto |
+| **Jaula FreeBSD** | [`deploy/freebsd/`](deploy/freebsd) | `make jail-up` | Una jaula en un host FreeBSD, que no puede ejecutar Docker |
 
-- Docker Desktop (macOS)
-- Host Docker Remoto (ej. VM Linux en `10.211.55.28`)
-- `make`
+Las instrucciones completas de ambas, incluidos los requisitos previos y las notas
+sobre Apple Silicon, están en **[docs/deployment.md](docs/deployment.md)**.
 
-### 2. Adquisición de Datos y Procesamiento Local
+### Docker, en resumen
 
-Extraiga y procese los datos OSM de Costa Rica localmente. Este proceso agrupa los datos en su carpeta local `./data` utilizando un constructor basado en Docker "Sin Montaje".
-
-```bash
-# Descargar los últimos datos del mapa de Costa Rica
-make download-data
-
-# Procesar los datos localmente para un perfil específico (car, bicycle, foot)
-# Por defecto es car si se omite PROFILE
-make process-osrm PROFILE=car
-```
-
-### 3. Despliegue Remoto
-
-Despliegue la API y el motor OSRM en el host remoto. Los datos procesados se agrupan directamente desde la imagen del constructor a la imagen de tiempo de ejecución OSRM a través de un `Dockerfile.osrm` de múltiples etapas.
-
-`osrm/osrm-backend` soporta múltiples arquitecturas (amd64, arm64). Confirme la arquitectura del daemon Docker activo antes de iniciar los servicios.
+Los datos se procesan en una imagen en su máquina y se agrupan en la imagen de
+tiempo de ejecución mediante el `deploy/docker/Dockerfile.osrm` de múltiples
+etapas, así que no se monta nada y la pila puede desplegarse tal cual en un host
+Docker remoto.
 
 ```bash
-# Apuntar al host remoto
-export DOCKER_HOST=tcp://10.211.55.28:2375
+make download-data              # descargar el extracto de Costa Rica en ./data
+make process-osrm PROFILE=car   # extract / partition / customize
 
-# Verificar host objetivo y arquitectura
-make compose-doctor
-
-# Construir e iniciar servicios con secuencia segura + chequeos de salud
-make compose-up
-
-# Ver logs de servicios
+export DOCKER_HOST=tcp://10.211.55.28:2375   # opcional: apuntar a un daemon remoto
+make compose-doctor             # mostrar el host Docker activo y su arquitectura
+make compose-up                 # construir e iniciar, con secuencia y chequeos de salud
 make compose-logs
-
-# Detener servicios
 make compose-down
 ```
 
-Evite ejecutar `docker compose down & docker compose up --build`; `&` manda el primer comando al fondo y puede causar condiciones de carrera.
+Evite ejecutar `docker compose down & docker compose up --build`; `&` manda el
+primer comando al fondo y puede causar condiciones de carrera.
+
+### Jaula FreeBSD, en resumen
+
+Una jaula no puede ejecutar Docker — las jaulas comparten el kernel de FreeBSD y
+Docker necesita namespaces y cgroups de Linux — así que los mismos servicios se
+ejecutan de forma nativa desde paquetes y scripts rc.d. Véase
+[docs/deployment_freebsd.md](docs/deployment_freebsd.md).
+
+```bash
+make jail-doctor      # comprobar el destino y cómo escalar privilegios
+make jail-bootstrap   # paquetes y usuario de servicio
+make jail-data        # construir los datos OSRM en la jaula
+make jail-up          # desplegar la pasarela e iniciar todos los servicios
+```
 
 ## Servicios Principales
 

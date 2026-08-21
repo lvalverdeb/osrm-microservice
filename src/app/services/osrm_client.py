@@ -1,10 +1,19 @@
-import httpx
 import logging
-from typing import Any, Dict, List
+from collections.abc import Callable
+from typing import Any, ClassVar
+
+import httpx
 import tenacity
+
 from app.config import settings
-from app.models.schemas import RouteRequest, MatchRequest, MatrixRequest, TripRequest, NearestRequest
-from app.services.cache import response_cache, build_cache_key
+from app.models.schemas import (
+    MatchRequest,
+    MatrixRequest,
+    NearestRequest,
+    RouteRequest,
+    TripRequest,
+)
+from app.services.cache import build_cache_key, record_lookup, response_cache
 
 logger = logging.getLogger(__name__)
 
@@ -45,33 +54,62 @@ class OSRMClient:
             return exception.response.status_code >= 500
         return isinstance(exception, (httpx.TimeoutException, httpx.TransportError))
 
-    async def _get(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Internal helper with L1→L2→OSRM cache-aside strategy and retry."""
-        cache_key = build_cache_key(endpoint, params)
+    async def _lookup_cached(self, cache_key: str, endpoint: str) -> dict[str, Any] | None:
+        """Read through the cache tiers, counting each lookup.
 
-        # L1: in-memory cache
+        L2 is consulted only after an L1 miss, and an unconfigured L2 is not
+        counted at all -- an absent tier is not a miss.
+
+        Args:
+            cache_key: Key produced by `build_cache_key`.
+            endpoint: OSRM path, used for the metric's service label.
+
+        Returns:
+            The cached payload, or None when no tier holds it.
+        """
         cached = response_cache.get(cache_key)
         if cached is not None:
             logger.debug("L1 hit for %s", endpoint)
+            record_lookup("l1", "hit", endpoint)
             return cached
+        record_lookup("l1", "miss", endpoint)
 
-        # L2: Redis cache
         redis_cache = getattr(self, 'redis_cache', None)
-        if redis_cache is not None and redis_cache.available:
-            cached = await redis_cache.get(cache_key)
-            if cached is not None:
-                logger.debug("L2 hit for %s", endpoint)
-                response_cache[cache_key] = cached
-                return cached
+        if redis_cache is None or not redis_cache.available:
+            return None
 
-        # Miss — fetch from OSRM
-        data = await self._fetch_with_retry(endpoint, params)
+        cached = await redis_cache.get(cache_key)
+        if cached is not None:
+            logger.debug("L2 hit for %s", endpoint)
+            record_lookup("l2", "hit", endpoint)
+            # Promote into L1 so the next read of this key stops at the fast tier.
+            response_cache[cache_key] = cached
+            return cached
+        record_lookup("l2", "miss", endpoint)
+        return None
 
-        # Populate both layers
+    async def _store_cached(self, cache_key: str, data: dict[str, Any]) -> None:
+        """Populate every configured cache tier with a freshly fetched payload.
+
+        Args:
+            cache_key: Key produced by `build_cache_key`.
+            data: Payload returned by OSRM.
+        """
         response_cache[cache_key] = data
+        redis_cache = getattr(self, 'redis_cache', None)
         if redis_cache is not None and redis_cache.available:
             await redis_cache.set(cache_key, data)
 
+    async def _get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Internal helper with L1→L2→OSRM cache-aside strategy and retry."""
+        cache_key = build_cache_key(endpoint, params)
+
+        cached = await self._lookup_cached(cache_key, endpoint)
+        if cached is not None:
+            return cached
+
+        data = await self._fetch_with_retry(endpoint, params)
+        await self._store_cached(cache_key, data)
         return data
 
     @tenacity.retry(
@@ -83,7 +121,7 @@ class OSRMClient:
         ),
         stop=tenacity.stop_after_attempt(settings.OSRM_RETRY_ATTEMPTS),
     )
-    async def _fetch_with_retry(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _fetch_with_retry(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Fetch from OSRM with exponential backoff retry for transient failures."""
         response = await self._client.get(endpoint, params=params)
         if response.is_error:
@@ -91,7 +129,7 @@ class OSRMClient:
         response.raise_for_status()
         return response.json()
 
-    async def get_route(self, coordinates: List[Dict[str, float]], request: RouteRequest) -> Dict[str, Any]:
+    async def get_route(self, coordinates: list[dict[str, float]], request: RouteRequest) -> dict[str, Any]:
         """Fetch a routing result passing through multiple points."""
         coords_str = ";".join([f"{c['longitude']},{c['latitude']}" for c in coordinates])
         waypoints_indices = ";".join([str(i) for i in range(len(coordinates))])
@@ -113,7 +151,7 @@ class OSRMClient:
 
         return await self._get(f"/route/v1/{request.profile}/{coords_str}", params=params)
 
-    async def get_matrix(self, request: MatrixRequest) -> Dict[str, Any]:
+    async def get_matrix(self, request: MatrixRequest) -> dict[str, Any]:
         """Fetch a duration/distance matrix for multiple points."""
         coords = ";".join([f"{c.longitude},{c.latitude}" for c in request.coordinates])
         params = {"annotations": request.annotations}
@@ -132,7 +170,7 @@ class OSRMClient:
 
         return await self._get(f"/table/v1/{request.profile}/{coords}", params=params)
 
-    async def match_trace(self, request: MatchRequest) -> Dict[str, Any]:
+    async def match_trace(self, request: MatchRequest) -> dict[str, Any]:
         """Clean up noisy GPS breadcrumbs via map matching."""
         coords = ";".join([f"{b.longitude},{b.latitude}" for b in request.breadcrumbs])
         timestamps = ";".join([str(b.timestamp) for b in request.breadcrumbs])
@@ -159,7 +197,7 @@ class OSRMClient:
 
         return await self._get(f"/match/v1/{request.profile}/{coords}", params=params)
 
-    async def get_trip(self, request: TripRequest) -> Dict[str, Any]:
+    async def get_trip(self, request: TripRequest) -> dict[str, Any]:
         """Solve TSP for an optimized sequence of coordinates."""
         coords = ";".join([f"{c.longitude},{c.latitude}" for c in request.coordinates])
         params = {
@@ -177,7 +215,7 @@ class OSRMClient:
 
         return await self._get(f"/trip/v1/{request.profile}/{coords}", params=params)
 
-    async def get_nearest(self, request: NearestRequest) -> Dict[str, Any]:
+    async def get_nearest(self, request: NearestRequest) -> dict[str, Any]:
         """Find the nearest road network point(s) to a given coordinate."""
         coord_str = f"{request.coordinate.longitude},{request.coordinate.latitude}"
         params = {"number": request.number}
@@ -187,7 +225,7 @@ class OSRMClient:
             params=params
         )
 
-    _COMMON_OPTION_SERIALIZERS = [
+    _COMMON_OPTION_SERIALIZERS: ClassVar[list[tuple[str, Callable[[Any], str]]]] = [
         ("bearings", lambda values: ";".join(v if v is not None else "" for v in values)),
         ("radiuses", lambda values: ";".join(str(v) if v is not None else "unlimited" for v in values)),
         ("hints", lambda values: ";".join(v if v is not None else "" for v in values)),
@@ -198,9 +236,9 @@ class OSRMClient:
     ]
 
     @staticmethod
-    def _serialize_common_options(request) -> Dict[str, Any]:
+    def _serialize_common_options(request) -> dict[str, Any]:
         """Serialize optional OSRM general options into query parameter entries."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         for field, serialize in OSRMClient._COMMON_OPTION_SERIALIZERS:
             value = getattr(request, field)
             if value is not None:

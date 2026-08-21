@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
-from app.services.vrp_service import VrpService, AllocationOptions
+import pytest
+
 from app.models.schemas import Coordinate
+from app.services.vrp_service import AllocationOptions, VrpService
 
 
 @pytest.fixture

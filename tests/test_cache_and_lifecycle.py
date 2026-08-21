@@ -1,12 +1,14 @@
+from unittest.mock import AsyncMock, Mock, patch
+
 import httpx
-import tenacity
 import pytest
-from unittest.mock import patch, AsyncMock, Mock
-from app.services.osrm_client import OSRMClient
+import tenacity
+
 from app.services.cache import response_cache
+from app.services.osrm_client import OSRMClient
 
 
-def _mock_response(status_code: int, json_data: dict = None, is_error: bool = False):
+def _mock_response(status_code: int, json_data: dict | None = None, is_error: bool = False):
     mock = Mock(spec=httpx.Response)
     mock.status_code = status_code
     mock.is_error = is_error

@@ -62,7 +62,7 @@ OSRM API Gateway est un microservice asynchrone basé sur FastAPI qui encapsule 
 
 **Exclusions :**
 - Internes du moteur C++ d'OSRM (traitement des données, algorithme de routage)
-- Pipeline de traitement des données OSM (géré par Dockerfile.builder)
+- Pipeline de traitement des données OSM (géré par deploy/docker/Dockerfile.builder)
 - Visualisation côté client (exemples fournis mais hors périmètre)
 - Authentification/autorisation
 
@@ -608,7 +608,7 @@ Le système utilise un modèle asynchrone monothread :
 
 1. **Serveur ASGI :** Uvicorn exécute l'application FastAPI avec des workers asynchrones. Tous les gestionnaires de points d'accès sont `async def`.
 2. **Pool de Clients HTTP :** `OSRMClient` initialise un seul `httpx.AsyncClient` avec pool de connexions, réutilisé pour toutes les requêtes. Timeout par défaut : 30s.
-3. **Limitation de Débit :** Middleware `slowapi` avec limites par point d'accès appliquées via le décorateur `@limiter.limit(...)`. Fonction clé : `get_remote_address`. Configuration :
+3. **Limitation de Débit :** Middleware `slowapi` avec limites par point d'accès appliquées via le décorateur `@limiter.limit(...)`. Fonction clé : `get_remote_address` (le pair immédiat ; les déploiements passent `--forwarded-allow-ips` afin que le `X-Forwarded-For` d'un proxy de confiance désigne le vrai client). Configuration :
    - `/route` : 600 req/min
    - `/matrix`, `/matrix-graph` : 300 req/min
    - `/match` : 600 req/min
@@ -677,7 +677,7 @@ Le système utilise un modèle asynchrone monothread :
 **Titre:** Builds Docker Multi-Étapes pour le Traitement des Données OSRM  
 **Contexte :** L'extraction des données OSRM est lente (~30min) et nécessite des outils différents du serveur d'exécution.  
 **Options :** (a) Build mono-étape avec tous les outils, (b) Multi-étapes avec constructeur et exécution séparés, (c) Volume de données pré-traitées.  
-**Résultat :** Option choisie (b) — Trois Dockerfiles : `Dockerfile.builder` (extraction/partitionnement/personnalisation), `Dockerfile.osrm` (exécution) et `Dockerfile` (passerelle API, racine du dépôt). Seules les images d'exécution sont utilisées en production.
+**Résultat :** Option choisie (b) — Trois Dockerfiles dans `deploy/docker/` : `Dockerfile.builder` (extraction/partitionnement/personnalisation), `Dockerfile.osrm` (exécution) et `Dockerfile` (passerelle API). Seules les images d'exécution sont utilisées en production.
 
 **ID:** DEC-007  
 **Titre:** slowapi pour la Limitation de Débit  

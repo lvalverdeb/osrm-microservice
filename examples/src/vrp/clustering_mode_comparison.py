@@ -16,9 +16,10 @@ Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import httpx
 import os
 import sys
+
+import httpx
 
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
@@ -86,7 +87,7 @@ def print_table(results: dict):
             if stop in results[m].get("unreachable_stops", []):
                 print(f"  {'❌ UNREACHABLE':<14}", end="")
             elif assigned:
-                print(f"  {str(assigned):<14}", end="")
+                print(f"  {assigned!s:<14}", end="")
             else:
                 print(f"  {'—':<14}", end="")
         print()

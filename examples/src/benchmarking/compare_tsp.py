@@ -2,8 +2,8 @@ import os
 
 import folium
 import httpx
-from folium.plugins import DualMap, AntPath
 from folium.features import DivIcon
+from folium.plugins import AntPath, DualMap
 
 # Configuration - set OSRM_API_URL env var to point to your host
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")

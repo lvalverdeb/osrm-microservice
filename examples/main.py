@@ -15,7 +15,7 @@ from pathlib import Path
 # Load .env into os.environ before any subprocess runs
 _src = Path(__file__).parent / "src"
 sys.path.insert(0, str(_src))
-from config import settings  # noqa: F401,E402
+from config import settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_SRC = PROJECT_ROOT / "examples" / "src"
@@ -56,7 +56,7 @@ def run_script(script_path):
     print(f"Running: {rel}")
     print(f"  API: {settings.OSRM_API_URL}")
     print(f"{'=' * 60}\n")
-    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT, check=False)
     return result.returncode
 
 

@@ -15,9 +15,10 @@ Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import httpx
 import os
 import time
+
+import httpx
 
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
@@ -67,7 +68,7 @@ def main():
     if health["osrm_backend"] == "down":
         print("\n  ℹ️  OSRM backend is not running.")
         print("     The gateway reports 'degraded' but continues serving cached data.")
-        print("     Start OSRM via: docker compose up -d osrm")
+        print("     Start OSRM via: make compose-up (or 'docker compose -f deploy/docker/docker-compose.yml up -d osrm')")
 
     # --- Metrics ---
     print("\n--- GET /metrics ---")

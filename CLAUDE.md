@@ -4,11 +4,12 @@
 
 ## Build and Run Commands
 - **Local Application (FastAPI)**: Run directly using `uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000`
-- **Docker/Compose Stack**:
-  - Start all services: `make compose-up` (or `docker compose up -d`)
-  - Stop services: `make compose-down`
-  - Tail service logs: `make compose-logs`
-  - Health checks: `make compose-health`
+- **Deployment**: two options only, both under `deploy/` — see `docs/deployment.md`.
+  - **Docker** (`deploy/docker/`): `make compose-up` / `compose-down` / `compose-logs` / `compose-health`.
+    The compose file is not at the repo root, so a bare `docker compose up` will not
+    find it; use the make targets, or
+    `docker compose -f deploy/docker/docker-compose.yml -p osrm-microservice ...`.
+  - **FreeBSD jail** (`deploy/freebsd/`): `make jail-up` / `jail-down` / `jail-logs` / `jail-health`.
 - **Dependency Installation**: Always install within a virtual environment using `uv`:
   - Install dev dependencies: `uv pip install -e ".[dev]"`
 
@@ -21,7 +22,7 @@
 - **Lint check**: `make lint` or `uv run ruff check .`
 - **Auto-fix lint issues**: `uv run ruff check . --fix`
 - **Complexity/Architecture scan**: `make spaghetti` or `uv run spaghetti --package osrm-api-gateway=src/app --severity warning`
-- **Security scan**: `make tripwire` or `uv run tripwire --package osrm-api-gateway=src/app`
+- **Vulnerability scan**: `make fenceline` or `fenceline --package osrm-api-gateway=src/app`
 
 ## Code Style & Conventions
 - **Language & Framework**: Python 3.13+ and FastAPI.

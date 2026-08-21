@@ -21,8 +21,9 @@ Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import httpx
 import os
+
+import httpx
 
 API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 

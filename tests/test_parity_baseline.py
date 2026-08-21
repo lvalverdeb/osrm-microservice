@@ -1,7 +1,17 @@
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.models.schemas import (
+    Coordinate,
+    GPSBreadcrumb,
+    MatchRequest,
+    MatrixRequest,
+    RouteRequest,
+    TripRequest,
+)
 from app.services.osrm_client import OSRMClient
-from app.models.schemas import RouteRequest, MatrixRequest, MatchRequest, TripRequest, Coordinate, GPSBreadcrumb
+
 
 @pytest.mark.asyncio
 async def test_route_parity():

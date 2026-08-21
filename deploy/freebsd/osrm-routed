@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# PROVIDE: osrm_routed
+# REQUIRE: LOGIN cleanvar
+# KEYWORD: shutdown
+#
+# Replaces the `osrm` rc.d script shipped by www/osrm-backend, which cannot
+# start with any flags set. rc.subr expands ${name}_flags between the command
+# and command_args -- "$command $rc_flags $command_args" -- so a non-empty
+# osrm_flags reaches daemon(8) rather than osrm-routed, and daemon exits with
+# "unrecognized option `--algorithm'". The engine's flags are part of
+# command_args here, and no osrm_routed_flags variable exists to be expanded.
+#
+# The defaults mirror the osrm service in docker-compose.yml so both deployment
+# paths serve the same engine configuration.
+#
+# osrm_routed_enable (bool):    Set to NO by default. Set to YES to enable.
+# osrm_routed_user (str):       User to run as. Default: osrm
+# osrm_routed_base (str):       Base path of the dataset, e.g.
+#                               /var/db/osrm-backend/car/costa-rica-latest.osrm
+#                               Required; has no default.
+# osrm_routed_ip (str):         Bind address. Default: 127.0.0.1 (jail-local)
+# osrm_routed_port (int):       Bind port. Default: 5000
+# osrm_routed_max_trip_size (int): Waypoint cap for /trip. Default: 200
+# osrm_routed_logfile (str):    Log file. Default: /var/log/osrm-routed.log
+
+. /etc/rc.subr
+
+name="osrm_routed"
+rcvar=${name}_enable
+
+load_rc_config $name
+
+: ${osrm_routed_enable:="NO"}
+: ${osrm_routed_user:="osrm"}
+: ${osrm_routed_base:=""}
+: ${osrm_routed_ip:="127.0.0.1"}
+: ${osrm_routed_port:="5000"}
+: ${osrm_routed_max_trip_size:="200"}
+: ${osrm_routed_logfile:="/var/log/osrm-routed.log"}
+
+_child_pidfile="/var/run/${name}.child.pid"
+
+# Tracked pid is daemon(8) itself, the supervisor; SIGTERM to it reaps the
+# child and exits without restarting. Same shape as the gateway's script.
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+
+# No -u here: osrm_routed_user is ${name}_user, which rc.subr expands into
+# "su -m ... -c" around the whole command, so daemon(8) already runs as that
+# user. Passing -u as well would fail in the child, where restrict_process()
+# calls setusercontext(LOGIN_SETALL) and that needs root.
+#
+# --algorithm mld is fixed: the data phase builds MLD data with osrm-partition
+# and osrm-customize, and osrm-routed cannot serve it any other way.
+command_args="-r -t ${name} \
+    -P ${pidfile} -p ${_child_pidfile} -o ${osrm_routed_logfile} \
+    /usr/local/bin/osrm-routed --algorithm mld \
+    --ip ${osrm_routed_ip} --port ${osrm_routed_port} \
+    --max-trip-size ${osrm_routed_max_trip_size} ${osrm_routed_base}"
+
+start_precmd="${name}_precmd"
+
+osrm_routed_precmd()
+{
+    if [ -z "${osrm_routed_base}" ]; then
+        err 1 "osrm_routed_base is unset -- run 'make jail-up' to configure it."
+    fi
+    # .osrm is a base path, not a file: osrm-routed reads ${base}.<suffix>
+    # siblings and never opens ${base} itself. .cell_metrics is the last one
+    # osrm-customize writes, so it is what "the data is built" means.
+    if [ ! -f "${osrm_routed_base}.cell_metrics" ]; then
+        err 1 "no routing data at ${osrm_routed_base}.* -- run 'make jail-data' first."
+    fi
+    # This precmd is the last thing that runs as root: daemon(8) is unprivileged
+    # by the time it opens these, and /var/run is not writable by the service
+    # user, so both pidfiles and the log have to exist first.
+    install -o "${osrm_routed_user}" -m 644 /dev/null "${pidfile}"
+    install -o "${osrm_routed_user}" -m 644 /dev/null "${_child_pidfile}"
+    install -o "${osrm_routed_user}" -m 644 /dev/null "${osrm_routed_logfile}"
+}
+
+run_rc_command "$1"

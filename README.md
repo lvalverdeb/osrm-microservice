@@ -4,66 +4,52 @@
 
 High-performance routing and map-matching microservice for Costa Rica.
 
-### Apple Silicon (M1/M2/M3) Support
+## Deployment
 
-Since the official OSRM Docker images are only provided for `linux/amd64`, this project uses Docker's emulation capabilities to run on Apple Silicon.
+The project supports **two** deployment options. Both run the same three services
+— the OSRM engine, a Redis cache and the FastAPI gateway — and everything either
+one needs lives under [`deploy/`](deploy).
 
-If you encounter `exec format error` during build, ensure you have emulation enabled. On Docker Desktop for Mac, this is usually automatic. For other environments, you can run:
+| Option | Files | Start with | When |
+|---|---|---|---|
+| **Docker** | [`deploy/docker/`](deploy/docker) | `make compose-up` | Any Linux Docker host, local or remote |
+| **FreeBSD jail** | [`deploy/freebsd/`](deploy/freebsd) | `make jail-up` | A jail on a FreeBSD host, which cannot run Docker |
 
-```bash
-docker run --privileged --rm tonistiigi/binfmt --install all
-```
+Full instructions for both, including prerequisites and Apple Silicon notes, are
+in **[docs/deployment.md](docs/deployment.md)**.
 
-The `Makefile` targets (like `make compose-up`) will attempt to run this for you.
+### Docker, in short
 
-## Setup Instructions
-
-This project uses a **Local Build & Bundled Transfer** workflow to support deployment to remote Docker hosts while processing data locally on macOS.
-
-### 1. Prerequisites
-
-- Docker Desktop (macOS)
-- Remote Docker Host (e.g., Linux VM at `10.211.55.28`)
-- `make`
-
-### 2. Data Acquisition & Local Processing
-
-Extract and process the Costa Rica OSM data locally. This process bundles the data into your local `./data` folder using a Docker-based "No-Mount" builder.
+Data is processed into an image on your machine and bundled into the runtime
+image by the multi-stage `deploy/docker/Dockerfile.osrm`, so nothing is
+bind-mounted and the stack can be deployed to a remote Docker host as-is.
 
 ```bash
-# Download the latest Costa Rica map data
-make download-data
+make download-data              # fetch the Costa Rica extract into ./data
+make process-osrm PROFILE=car   # extract / partition / customize
 
-# Process the data locally for a specific profile (car, bicycle, foot)
-# Defaults to car if PROFILE is omitted
-make process-osrm PROFILE=car
-```
-
-### 3. Remote Deployment
-
-Deploy the API and the OSRM engine to the remote host. The processed data is bundled directly from the builder image into the OSRM runtime image via a multi-stage `Dockerfile.osrm`.
-
-`osrm/osrm-backend` supports multiple architectures (amd64, arm64). Confirm your active Docker daemon architecture before starting services.
-
-```bash
-# Target the remote host
-export DOCKER_HOST=tcp://10.211.55.28:2375
-
-# Check Docker target and architecture
-make compose-doctor
-
-# Build and start services with safe sequencing + health checks
-# (this command auto-builds `osrm-data-builder` first)
-make compose-up
-
-# Tail service logs
+export DOCKER_HOST=tcp://10.211.55.28:2375   # optional: target a remote daemon
+make compose-doctor             # show the active Docker host and architecture
+make compose-up                 # build and start, with sequencing and health checks
 make compose-logs
-
-# Stop services
 make compose-down
 ```
 
-Avoid running `docker compose down & docker compose up --build`; `&` backgrounds the first command and can trigger race conditions.
+Avoid `docker compose down & docker compose up --build`; the `&` backgrounds the
+first command and the two race.
+
+### FreeBSD jail, in short
+
+A jail cannot run Docker — jails share the FreeBSD kernel, Docker needs Linux
+namespaces and cgroups — so the same services run natively from packages and rc.d
+scripts. See [docs/deployment_freebsd.md](docs/deployment_freebsd.md).
+
+```bash
+make jail-doctor      # check the target and how to escalate
+make jail-bootstrap   # packages and service user
+make jail-data        # build OSRM data in the jail
+make jail-up          # deploy the gateway and start all services
+```
 
 ## Core Services
 
@@ -188,6 +174,75 @@ uv run examples/src/benchmarking/compare_tsp.py
 ```
 
 Maps are saved as interactive HTML files (`map.html`, `comparison_map.html`).
+
+## Load Testing
+
+`loadtest/run.py` drives a running gateway at a fixed **arrival rate** — requests
+are launched on a schedule rather than after the previous one returns, so a slow
+server shows up as rising latency instead of a quietly lower rate. Payloads are
+randomised per request, which also keeps the L1/Redis caches from answering
+everything. It uses `httpx`, already a project dependency; nothing to install.
+
+Every endpoint has a scenario — `health`, `metrics`, `route`, `nearest`,
+`matrix`, `matrix-graph`, `trip`, `match`, `tile`, `vrp`, `vrp-allocate` — and
+the default `mixed` fires a weighted blend of all of them concurrently, which is
+what a real client population looks like. Mixed runs print a per-endpoint
+breakdown.
+
+```sh
+make loadtest                                              # mixed @ 25/s for 30s, localhost
+make loadtest LOADTEST_URL=http://10.211.55.33:8000        # against a deployed jail
+make loadtest LOADTEST_SCENARIO=matrix LOADTEST_RATE=5
+make loadtest LOADTEST_SCENARIO=vrp LOADTEST_RATE=1 LOADTEST_ARGS="--size 500"
+```
+
+```
+mixed @ 30.0/s for 25.0s -> http://10.211.55.33:8000
+  requests   751 in 25.1s (29.9/s completed)
+  latency    p50=53ms p95=91ms p99=177ms max=366ms
+  endpoint                 n     p50     p95     p99   err%  statuses
+  /route                 272     53m     85m     89m   0.0%  200=272
+  /nearest               123     53m     86m    145m   0.0%  200=123
+  /vrp                    18    150m    177m    366m   0.0%  200=18
+  ...
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LOADTEST_URL` | `http://127.0.0.1:8000` | Target gateway |
+| `LOADTEST_SCENARIO` | `mixed` | Any single endpoint, or `mixed` for the blend |
+| `LOADTEST_RATE` | `25` | Requests launched per second |
+| `LOADTEST_DURATION` | `30` | Seconds |
+| `LOADTEST_ARGS` | — | Passed through, e.g. `--size 500 --seed 42` |
+
+Thresholds turn a run into a pass/fail gate — the target exits non-zero when one
+is exceeded:
+
+```sh
+make loadtest LOADTEST_ARGS="--max-p95 0.5 --max-error-rate 0.01"
+```
+
+Four things to keep in mind when reading the numbers:
+
+- **Rate limits are per client IP** (`RATE_LIMIT_ROUTE` 600/min, `RATE_LIMIT_VRP`
+  100/min) and use fixed windows, so a short run can straddle two windows and
+  never trip. Measured: 100/s for 8s → 547×200 and 254×429. Sustained runs above
+  the limit measure the rate limiter, not capacity — a single-source run cannot
+  exceed one bucket. Use `--forwarded-for-pool N` against a gateway configured
+  with a matching trusted-proxy list to measure the service instead.
+  Behind a reverse proxy the client IP is the *proxy's*, so all clients share one
+  bucket until the deployment names its proxies — see
+  [docs/deployment.md](docs/deployment.md), "Scaling".
+- **`/matrix` is capped at 100 coordinates** by `osrm-routed`'s
+  `--max-table-size` default, whatever the schema allows. The generator clamps
+  to that.
+- **One uvicorn worker by default**, on both deployments. VRP work is CPU-bound,
+  so concurrency is not parallelism; raise `API_WORKERS` (Docker) or
+  `JAIL_API_WORKERS` (jail) before drawing conclusions.
+- **Memory scales with payload size, not request count.** Measured on a 2 GB
+  jail: flat RSS across 400 sequential `/route` calls, but roughly +70 MB per
+  1000 VRP stops in flight. Bound the jail with
+  `rctl -a jail:api:memoryuse:deny=1g` before pushing a shared host hard.
 
 ## Configuration
 

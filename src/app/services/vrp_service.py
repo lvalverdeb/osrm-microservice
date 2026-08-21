@@ -1,14 +1,22 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Union
+
 import logging
 import math
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
+
+from app.config import settings
 from app.models.schemas import (
-    VrpRequest, VrpResponse, VrpAllocationResponse, VehicleRoute, TripRequest, Coordinate
+    Coordinate,
+    TripRequest,
+    VehicleRoute,
+    VrpAllocationResponse,
+    VrpRequest,
+    VrpResponse,
 )
 from app.services.osrm_client import OSRMClient
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +42,8 @@ class AllocationOptions:
     """Location-Allocation tuning knobs, grouped into one object to keep _allocate_stops's parameter count down."""
     mode: str = MODE_TRAVEL_TIME
     hysteresis_m: float = 2000.0
-    max_radius_m: Optional[float] = None
-    sanity_limit_m: Optional[float] = None
+    max_radius_m: float | None = None
+    sanity_limit_m: float | None = None
 
 
 @dataclass
@@ -43,10 +51,10 @@ class _TspChunkRequest:
     """Everything needed to solve one vehicle's TSP chunk, grouped to keep _solve_tsp_chunk's parameter count down."""
     depot_idx: int
     depot: Coordinate
-    stops: List[Coordinate]
-    original_indices: List[int]
-    stop_ids: Optional[List[Union[str, int]]] = None
-    vehicle_id: Union[str, int] = 0
+    stops: list[Coordinate]
+    original_indices: list[int]
+    stop_ids: list[str | int] | None = None
+    vehicle_id: str | int = 0
     roundtrip: bool = True
 
 
@@ -68,7 +76,7 @@ class VrpService:
         allocation_result = await self._get_allocation_data(request)
         depot_assignments = allocation_result["allocations"]
 
-        vehicle_routes: List[VehicleRoute] = []
+        vehicle_routes: list[VehicleRoute] = []
         for depot_idx, stop_indices in depot_assignments.items():
             if not stop_indices:
                 continue
@@ -81,8 +89,8 @@ class VrpService:
         return VrpResponse(routes=vehicle_routes, total_distance=total_dist, total_duration=total_dur)
 
     async def _solve_depot_routes(
-        self, request: VrpRequest, depot_idx: int, stop_indices: List[int], vehicle_offset: int
-    ) -> List[VehicleRoute]:
+        self, request: VrpRequest, depot_idx: int, stop_indices: list[int], vehicle_offset: int
+    ) -> list[VehicleRoute]:
         """Split one depot's assigned stops into TSP-sized chunks and solve each as a vehicle route."""
         current_depot = request.depots[depot_idx]
         depot_id = getattr(current_depot, "id", None)
@@ -91,7 +99,7 @@ class VrpService:
         chunk_size = min(settings.VRP_CHUNK_SIZE, request.capacity)
         num_chunks = (len(stop_indices) + chunk_size - 1) // chunk_size
 
-        routes: List[VehicleRoute] = []
+        routes: list[VehicleRoute] = []
         for i in range(0, len(stop_indices), chunk_size):
             chunk = stop_indices[i:i + chunk_size]
 
@@ -156,13 +164,13 @@ class VrpService:
         return VrpAllocationResponse(allocations=id_allocations, unreachable_stops=id_unreachable)
 
     @staticmethod
-    def _map_index_to_id(idx: int, ids: List[Union[str, int]], kind: str) -> Union[str, int]:
+    def _map_index_to_id(idx: int, ids: list[str | int], kind: str) -> str | int:
         """Map a raw allocation index back to its caller-supplied ID, falling back to the index itself."""
         if idx < 0 or idx >= len(ids):
             raise ValueError(f"Allocation {kind} index {idx} out of range for {len(ids)} {kind}s")
         return ids[idx] if ids[idx] is not None else idx
 
-    async def _get_allocation_data(self, request: VrpRequest) -> Dict[str, Any]:
+    async def _get_allocation_data(self, request: VrpRequest) -> dict[str, Any]:
         """Internal helper to get raw allocation indices for both allocate and solve phases."""
         # 1. Measure durations AND distances from all depots to all stops
         matrix_data = await self._get_depot_to_stop_matrix(request.depots, request.stops)
@@ -214,7 +222,7 @@ class VrpService:
         )
 
     @staticmethod
-    def _reorder_waypoints(waypoints: List[Dict[str, Any]], chunk_request: _TspChunkRequest):
+    def _reorder_waypoints(waypoints: list[dict[str, Any]], chunk_request: _TspChunkRequest):
         """Reorder OSRM's TSP waypoints and map them back to original stop indices/IDs/coordinates."""
         # sorted_input_indices will be [0, opt_idx1, opt_idx2, ...] where 0 is the depot
         sorted_input_indices = sorted(
@@ -246,7 +254,7 @@ class VrpService:
 
         return optimized_indices, optimized_ids, optimized_coords
 
-    async def _get_depot_to_stop_matrix(self, depots: List[Coordinate], stops: List[Coordinate]) -> Dict[str, Any]:
+    async def _get_depot_to_stop_matrix(self, depots: list[Coordinate], stops: list[Coordinate]) -> dict[str, Any]:
         """Fetch the duration and distance matrix from OSRM with batching support."""
         from app.models.schemas import MatrixRequest
 
@@ -290,12 +298,12 @@ class VrpService:
 
     def _allocate_stops(
         self,
-        durations: List[List[float]],
-        distances: List[List[float]],
-        depots: List[Coordinate],
-        stops: List[Coordinate],
+        durations: list[list[float]],
+        distances: list[list[float]],
+        depots: list[Coordinate],
+        stops: list[Coordinate],
         options: AllocationOptions = AllocationOptions(),
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Location-Allocation logic.
         Assigns each stop to the depot based on the selected mode:
@@ -333,21 +341,21 @@ class VrpService:
         return {"allocations": assignments, "unreachable_stops": unreachable}
 
     @staticmethod
-    def _prepare_cost_matrices(durations: List[List[float]], distances: List[List[float]]):
+    def _prepare_cost_matrices(durations: list[list[float]], distances: list[list[float]]):
         """Convert raw OSRM matrices to NumPy float arrays, mapping null/unreachable entries to UNREACHABLE."""
         # `== None` (not `is None`) is intentional: these are object-dtype NumPy arrays
         # (OSRM returns JSON null for unreachable pairs) and the comparison must broadcast
         # elementwise to build the replacement mask, which `is None` would not do.
         dist_np = np.array(distances)
-        dist_np = np.where(dist_np == None, UNREACHABLE, dist_np).astype(float)  # noqa: E711
+        dist_np = np.where(dist_np == None, UNREACHABLE, dist_np).astype(float)
 
         dur_np = np.array(durations)
-        dur_np = np.where(dur_np == None, UNREACHABLE, dur_np).astype(float)  # noqa: E711
+        dur_np = np.where(dur_np == None, UNREACHABLE, dur_np).astype(float)
 
         return dist_np, dur_np
 
     @staticmethod
-    def _euclidean_distances_m(stop: Coordinate, depots: List[Coordinate], lon_scale: float) -> np.ndarray:
+    def _euclidean_distances_m(stop: Coordinate, depots: list[Coordinate], lon_scale: float) -> np.ndarray:
         """Vectorized straight-line distance (meters) from one stop to every depot."""
         lat_diffs_m = np.array([d.latitude - stop.latitude for d in depots]) * DEG_TO_M
         lon_diffs_m = np.array([d.longitude - stop.longitude for d in depots]) * DEG_TO_M * lon_scale

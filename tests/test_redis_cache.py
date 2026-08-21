@@ -1,6 +1,7 @@
 import pytest
-from app.services.redis_cache import RedisCache
+
 from app.services.cache import build_cache_key
+from app.services.redis_cache import RedisCache
 
 
 class TestRedisCacheUnit:
@@ -61,8 +62,9 @@ class TestRedisCacheUnit:
 
 @pytest.mark.asyncio
 async def test_redis_cache_graceful_fallback():
-    from app.services.osrm_client import OSRMClient
     from unittest.mock import AsyncMock, patch
+
+    from app.services.osrm_client import OSRMClient
 
     client = OSRMClient()
     client.redis_cache = RedisCache(url="redis://nonexistent:6379/0", ttl=900, maxsize=1024)
@@ -76,8 +78,9 @@ async def test_redis_cache_graceful_fallback():
 
 @pytest.mark.asyncio
 async def test_main_app_starts_without_redis():
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
-    from httpx import AsyncClient, ASGITransport
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/health")
     assert resp.status_code == 200

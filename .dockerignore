@@ -1,3 +1,9 @@
+# Secrets -- the build context is the repository root, and .env holds the PyPI
+# publish token. No Dockerfile copies it today; this keeps it that way.
+.env
+.env.local
+.env.publish
+
 # Git
 .git/
 .gitignore
@@ -26,7 +32,11 @@ README.md
 .DS_Store
 Thumbs.db
 
+# This file stays at the repository root even though the Dockerfiles live in
+# deploy/docker/: Docker reads .dockerignore from the root of the build context,
+# and every context in deploy/docker/docker-compose.yml is the repository root.
+
 # Large source files not needed in final bundle
-# Note: DO NOT ignore the 'data/' folder itself, as Dockerfile.osrm needs it.
+# Note: DO NOT ignore the 'data/' folder itself, as deploy/docker/Dockerfile.osrm needs it.
 # We only ignore the raw OSM file if it's already processed.
 # data/*.osm.pbf
