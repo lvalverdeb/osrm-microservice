@@ -91,3 +91,35 @@ services:
       redis:
         condition: service_healthy
     restart: always
+
+  # Rust evaluation spike -- a benchmark target, not a second gateway. Two of
+  # eleven endpoints, no rate limiting, metrics, tracing, retry or L2 cache.
+  # Behind a profile so it never starts with a plain `make compose-up`; bring it
+  # up with `make spike-compose-up`, which drives the head-to-head documented in
+  # rust-spike/README.md against the same engine the api service uses.
+  spike:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.spike
+    container_name: osrm-gateway-spike
+    profiles:
+      - spike
+    ports:
+      - "${SPIKE_PORT:-8081}:8001"
+    # Same shared app settings the api service loads, so cache sizing and the
+    # matrix cell budget match rather than merely resembling each other. Keys the
+    # spike does not read (rate limits, tracing, VRP knobs) are simply ignored.
+    env_file:
+      - ../env/app.env
+    environment:
+      - OSRM_BASE_URL=http://osrm-backend:5000
+      - HOST=0.0.0.0
+      - PORT=8001
+      # Match the api service's WORKERS for a fair comparison: this is tokio
+      # worker threads against uvicorn worker processes. Raising one without the
+      # other measures the configuration, not the gateway.
+      - WORKERS=${API_WORKERS:-1}
+    depends_on:
+      osrm:
+        condition: service_healthy
+    restart: "no"

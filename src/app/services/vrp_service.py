@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from dataclasses import dataclass
@@ -58,6 +59,64 @@ class _TspChunkRequest:
     roundtrip: bool = True
 
 
+def _build_chunk_requests(
+    request: VrpRequest, depot_idx: int, stop_indices: list[int], vehicle_offset: int
+) -> list[_TspChunkRequest]:
+    """Partition one depot's stops into TSP-sized chunks.
+
+    Args:
+        request: The originating VRP request.
+        depot_idx: Index of the depot these stops were allocated to.
+        stop_indices: Indices into `request.stops` assigned to this depot.
+        vehicle_offset: Number of routes already built for earlier depots.
+
+    Returns:
+        One chunk request per vehicle load, in partition order.
+    """
+    current_depot = request.depots[depot_idx]
+    depot_id = getattr(current_depot, "id", None)
+
+    # Sub-partition if stops > 100 (OSRM /trip limit) or request.capacity
+    chunk_size = min(settings.VRP_CHUNK_SIZE, request.capacity)
+    num_chunks = (len(stop_indices) + chunk_size - 1) // chunk_size
+
+    chunk_requests: list[_TspChunkRequest] = []
+    for position, i in enumerate(range(0, len(stop_indices), chunk_size)):
+        chunk = stop_indices[i:i + chunk_size]
+
+        # Determine vehicle_id for this route. If there's more than one vehicle
+        # from this depot, add a suffix. Without depot IDs the label counts
+        # routes built so far, which is this chunk's position once earlier
+        # depots are accounted for -- the fan-out must not read it off a
+        # partially filled result list.
+        if depot_id is not None:
+            vehicle_label = f"{depot_id}-{position + 1}" if num_chunks > 1 else depot_id
+        else:
+            vehicle_label = vehicle_offset + position
+
+        # Ensure we pass simplified Coordinates to the TSP solver
+        current_stops = [
+            Coordinate(latitude=request.stops[idx].latitude, longitude=request.stops[idx].longitude)
+            for idx in chunk
+        ]
+
+        # Extract IDs for this chunk if they exist
+        chunk_ids = [request.stops[idx].id for idx in chunk]
+        has_ids = any(cid is not None for cid in chunk_ids)
+
+        chunk_requests.append(_TspChunkRequest(
+            depot_idx=int(depot_idx),
+            depot=current_depot,
+            stops=current_stops,
+            original_indices=chunk,
+            stop_ids=chunk_ids if has_ids else None,
+            vehicle_id=vehicle_label,
+            roundtrip=request.roundtrip,
+        ))
+
+    return chunk_requests
+
+
 class VrpService:
     """
     Main service for coordinating Location-Allocation and Multi-Vehicle Routing.
@@ -91,47 +150,36 @@ class VrpService:
     async def _solve_depot_routes(
         self, request: VrpRequest, depot_idx: int, stop_indices: list[int], vehicle_offset: int
     ) -> list[VehicleRoute]:
-        """Split one depot's assigned stops into TSP-sized chunks and solve each as a vehicle route."""
-        current_depot = request.depots[depot_idx]
-        depot_id = getattr(current_depot, "id", None)
+        """Solve one depot's TSP chunks concurrently and return them in chunk order.
 
-        # Sub-partition if stops > 100 (OSRM /trip limit) or request.capacity
-        chunk_size = min(settings.VRP_CHUNK_SIZE, request.capacity)
-        num_chunks = (len(stop_indices) + chunk_size - 1) // chunk_size
+        Each chunk is an independent `/trip` round trip, so awaiting them one at
+        a time made a large solve as slow as the sum of its parts. They fan out
+        under `VRP_CHUNK_CONCURRENCY` instead, which keeps a single solve from
+        saturating the engine. A `TaskGroup` rather than `gather` so the first
+        failure cancels its siblings instead of leaving them running against
+        OSRM for a response nobody will read.
 
-        routes: list[VehicleRoute] = []
-        for i in range(0, len(stop_indices), chunk_size):
-            chunk = stop_indices[i:i + chunk_size]
+        Args:
+            request: The originating VRP request.
+            depot_idx: Index of the depot these stops were allocated to.
+            stop_indices: Indices into `request.stops` assigned to this depot.
+            vehicle_offset: Number of routes already built for earlier depots,
+                used to number vehicles when depots carry no IDs.
 
-            # Determine vehicle_id for this route. If there's more than one vehicle
-            # from this depot, add a suffix.
-            if depot_id is not None:
-                vehicle_label = f"{depot_id}-{i // chunk_size + 1}" if num_chunks > 1 else depot_id
-            else:
-                vehicle_label = vehicle_offset + len(routes)
+        Returns:
+            One route per chunk, ordered as the chunks were partitioned.
+        """
+        chunk_requests = _build_chunk_requests(request, depot_idx, stop_indices, vehicle_offset)
+        slots = asyncio.Semaphore(settings.VRP_CHUNK_CONCURRENCY)
 
-            # Ensure we pass simplified Coordinates to the TSP solver
-            current_stops = [
-                Coordinate(latitude=request.stops[idx].latitude, longitude=request.stops[idx].longitude)
-                for idx in chunk
-            ]
+        async def solve(chunk_request: _TspChunkRequest) -> VehicleRoute:
+            async with slots:
+                return await self._solve_tsp_chunk(chunk_request)
 
-            # Extract IDs for this chunk if they exist
-            chunk_ids = [request.stops[idx].id for idx in chunk]
-            has_ids = any(cid is not None for cid in chunk_ids)
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(solve(chunk)) for chunk in chunk_requests]
+        return [task.result() for task in tasks]
 
-            chunk_request = _TspChunkRequest(
-                depot_idx=int(depot_idx),
-                depot=current_depot,
-                stops=current_stops,
-                original_indices=chunk,
-                stop_ids=chunk_ids if has_ids else None,
-                vehicle_id=vehicle_label,
-                roundtrip=request.roundtrip,
-            )
-            routes.append(await self._solve_tsp_chunk(chunk_request))
-
-        return routes
 
     async def allocate_products(self, request: VrpRequest) -> VrpAllocationResponse:
         """
@@ -258,10 +306,13 @@ class VrpService:
         """Fetch the duration and distance matrix from OSRM with batching support."""
         from app.models.schemas import MatrixRequest
 
-        # OSRM Matrix often limits sources*destinations. We batch stops (destinations).
-        BATCH_SIZE = settings.MATRIX_BATCH_SIZE
         num_depots = len(depots)
         num_stops = len(stops)
+        # Each iteration below is one /table request, so it has to fit the same
+        # sources x destinations budget the engine enforces: num_depots sources
+        # against this many destinations. MATRIX_BATCH_SIZE is the ceiling; the
+        # cell budget is what binds once there is more than a handful of depots.
+        BATCH_SIZE = max(1, min(settings.MATRIX_BATCH_SIZE, settings.MATRIX_MAX_CELLS // num_depots))
 
         # Result matrices: [num_depots x num_stops]
         full_durations = [[] for _ in range(num_depots)]

@@ -62,3 +62,7 @@ Thumbs.db
 # NOTE: .fenceline-baseline.json is a committed config file, not a report. It does
 # not match this pattern; do not widen the pattern so that it would.
 *_report.json
+
+# Rust evaluation spike build artifacts (255 MB). Cargo.lock stays tracked:
+# it is a binary crate, and pinning keeps the benchmark reproducible.
+rust-spike/target/

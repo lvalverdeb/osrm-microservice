@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -47,6 +48,48 @@ osrm_client = OSRMClient()
 redis_cache = RedisCache(url=settings.REDIS_URL, ttl=settings.REDIS_TTL, maxsize=settings.REDIS_MAXSIZE)
 osrm_client.redis_cache = redis_cache
 vrp_service = VrpService(osrm_client)
+
+# The schema cap bounds one request; this bounds how many run at once, because
+# peak memory is the product of the two. A 2000-stop solve peaks near 277 MB, so
+# concurrent large solves are what actually exhausts a 2 GB host. Admission
+# control belongs next to the rate limiter for the same reason: both decide
+# whether a request may proceed, and both are per process -- node-wide
+# concurrency is WORKERS x VRP_MAX_CONCURRENCY.
+_vrp_slots = asyncio.Semaphore(settings.VRP_MAX_CONCURRENCY)
+
+
+@asynccontextmanager
+async def _vrp_slot() -> AsyncIterator[None]:
+    """Hold one bounded solve slot for the duration of the block.
+
+    Waits up to `VRP_QUEUE_TIMEOUT` seconds for a slot so that a burst queues
+    instead of multiplying peak memory, and sheds the request rather than
+    risking an out-of-memory kill once the wait is exhausted.
+
+    Yields:
+        None: once a slot has been acquired.
+
+    Raises:
+        HTTPException: 503 with `Retry-After` when no slot frees up in time.
+    """
+    try:
+        async with asyncio.timeout(settings.VRP_QUEUE_TIMEOUT):
+            await _vrp_slots.acquire()
+    except TimeoutError:
+        logger.warning(
+            "No VRP slot after %.1fs (limit %d per worker); shedding request",
+            settings.VRP_QUEUE_TIMEOUT,
+            settings.VRP_MAX_CONCURRENCY,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Optimization capacity exhausted, retry shortly",
+            headers={"Retry-After": str(max(1, int(settings.VRP_QUEUE_TIMEOUT)))},
+        )
+    try:
+        yield
+    finally:
+        _vrp_slots.release()
 
 
 @asynccontextmanager
@@ -229,12 +272,23 @@ async def solve_vrp(request: Request, payload: VrpRequest) -> VrpResponse:
     """
     Solve multi-vehicle Vehicle Routing Problem using Location-Allocation.
     Assigns stops to the logistically closest warehouse before routing.
+
+    Args:
+        request: Incoming request, used by the rate limiter.
+        payload: Depots, stops, and clustering options for the solve.
+
+    Returns:
+        VrpResponse: One optimized route per vehicle.
+
+    Raises:
+        HTTPException: 503 when solve capacity is exhausted, 500 on failure.
     """
-    try:
-        return await vrp_service.solve_vrp(payload)
-    except Exception:
-        logger.exception("Unexpected error on /vrp")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    async with _vrp_slot():
+        try:
+            return await vrp_service.solve_vrp(payload)
+        except Exception:
+            logger.exception("Unexpected error on /vrp")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/vrp/allocate", tags=["Optimization"], summary="Cluster Products to Warehouses", response_model=VrpAllocationResponse)
 @limiter.limit(settings.RATE_LIMIT_VRP)
@@ -243,12 +297,23 @@ async def allocate_vrp(request: Request, payload: VrpRequest) -> VrpAllocationRe
     Cluster products to warehouses using Location-Allocation.
     This is the first phase of the VRP solving process.
     Useful for seeing product-to-depot assignments before routing.
+
+    Args:
+        request: Incoming request, used by the rate limiter.
+        payload: Depots, stops, and clustering options for the allocation.
+
+    Returns:
+        VrpAllocationResponse: Depot-to-stop assignments and unreachable stops.
+
+    Raises:
+        HTTPException: 503 when solve capacity is exhausted, 500 on failure.
     """
-    try:
-        return await vrp_service.allocate_products(payload)
-    except Exception:
-        logger.exception("Unexpected error on /vrp/allocate")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    async with _vrp_slot():
+        try:
+            return await vrp_service.allocate_products(payload)
+        except Exception:
+            logger.exception("Unexpected error on /vrp/allocate")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
     import uvicorn

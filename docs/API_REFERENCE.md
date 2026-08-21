@@ -280,6 +280,21 @@ Calculates travel times/distances between all supplied locations.
 
 **Response Body:** Passes through the OSRM `/table` output containing `code`, `durations`, `distances`, `sources`, and `destinations`.
 
+**Size limit (applies to `/matrix` and `/matrix-graph`):** the engine charges
+`sources x destinations` cells, not coordinates, and refuses anything above
+`MATRIX_MAX_CELLS` (default **10,000**). Requests past it get a 422 naming the
+limit rather than an opaque upstream 400.
+
+| Request | Cells | Result |
+|---------|-------|--------|
+| 100 coordinates, no `sources`/`destinations` | 10,000 | accepted |
+| 101 coordinates, no `sources`/`destinations` | 10,201 | 422 |
+| 4 `sources` x 2500 `destinations` (2504 coordinates) | 10,000 | accepted |
+
+Omitting `sources` or `destinations` means "all coordinates", so a symmetric
+matrix is capped at 100x100 while an asymmetric one may carry far more
+coordinates. Split larger jobs, or narrow them with `sources`/`destinations`.
+
 ---
 
 #### `POST /matrix-graph`
@@ -386,6 +401,18 @@ Solves multi-vehicle Vehicle Routing Problems using location-allocation clusteri
   "total_duration": 920.0
 }
 ```
+
+**Capacity limits (both `/vrp` and `/vrp/allocate`):**
+
+| Status | Cause | Tuned by |
+|--------|-------|----------|
+| `422` | More than `VRP_MAX_STOPS` stops in one request (default 2000). | `VRP_MAX_STOPS` |
+| `503` | No solve slot free within `VRP_QUEUE_TIMEOUT` seconds. Includes a `Retry-After` header. | `VRP_MAX_CONCURRENCY`, `VRP_QUEUE_TIMEOUT` |
+
+Peak memory is stops x concurrent solves, so both bounds matter: a 2000-stop
+solve peaks near 277 MB. `VRP_MAX_CONCURRENCY` applies per worker process, so a
+node admits `WORKERS x VRP_MAX_CONCURRENCY` solves at once. See
+[configuration.md](configuration.md#vrp--matrix-tuning).
 
 ---
 

@@ -1,6 +1,8 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.config import settings
 
 
 class Coordinate(BaseModel):
@@ -134,6 +136,32 @@ class MatrixRequest(CommonRoutingOptions):
     fallback_coordinate: Literal["input", "snapped"] | None = Field(None, description="Which coordinate to use when a pair falls back to speed estimate")
     scale_factor: float | None = Field(None, gt=0, description="Multiply all durations by this factor (useful for congestion modelling)")
 
+    @model_validator(mode="after")
+    def check_cell_budget(self) -> "MatrixRequest":
+        """Reject matrices the engine would refuse, using the engine's own rule.
+
+        osrm-routed compares `sources x destinations` against
+        `--max-table-size` squared, treating an omitted list as every
+        coordinate. Mirroring that here turns an opaque pass-through 400 into a
+        422 naming the limit, and keeps asymmetric requests -- a handful of
+        sources against many destinations -- available at their real cost.
+
+        Returns:
+            MatrixRequest: The validated request.
+
+        Raises:
+            ValueError: If the requested matrix exceeds `MATRIX_MAX_CELLS`.
+        """
+        total = len(self.coordinates)
+        cells = len(self.sources or range(total)) * len(self.destinations or range(total))
+        if cells > settings.MATRIX_MAX_CELLS:
+            raise ValueError(
+                f"Matrix of {cells} cells (sources x destinations) exceeds the "
+                f"{settings.MATRIX_MAX_CELLS}-cell limit; narrow it with "
+                f"'sources'/'destinations' or split the request"
+            )
+        return self
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -214,7 +242,14 @@ class NearestResponse(BaseModel):
 class VrpRequest(BaseModel):
     """Request model for Vehicle Routing Problem (VRP)."""
     depots: list[Stop] = Field(..., min_length=1, max_length=500, description="List of warehouse/depot locations")
-    stops: list[Stop] = Field(..., min_length=1, max_length=10000, description="List of delivery points")
+    # Bounded by setting rather than a literal: peak memory scales with this list,
+    # so the ceiling belongs to the deployment that has to survive it.
+    stops: list[Stop] = Field(
+        ...,
+        min_length=1,
+        max_length=settings.VRP_MAX_STOPS,
+        description=f"List of delivery points (max {settings.VRP_MAX_STOPS})",
+    )
     vehicle_count: int | None = Field(None, gt=0, description="Total vehicles available. Defaults to one per depot.")
     capacity: int = Field(35, gt=0, le=10000, description="Maximum packages a single vehicle can carry")
     max_radius_km: float | None = Field(None, gt=0, description="Optional maximum road distance from depot (km)")

@@ -1,0 +1,97 @@
+#!/bin/sh
+#
+# PROVIDE: osrm_gateway_spike
+# REQUIRE: LOGIN osrm_routed
+# KEYWORD: shutdown
+#
+# Rust evaluation spike (rust-spike/). A benchmark target, not a second
+# gateway: two of the eleven endpoints, and no rate limiting, metrics, tracing,
+# retry or L2 cache. It runs alongside osrm_api_gateway on its own port so the
+# head-to-head in rust-spike/README.md can be re-run on this hardware, where
+# the published numbers came from a development laptop instead.
+#
+# Structure follows osrm-api-gateway deliberately -- same daemon(8)
+# supervision, same pidfile handling, same precmd ordering. Two knobs that
+# script needs are absent here rather than defaulted: there is no metrics
+# directory (no Prometheus client to shard) and no forwarded-allow-ips (no rate
+# limiter whose bucket key could collapse).
+#
+# Add the following lines to /etc/rc.conf to enable it:
+#
+# osrm_gateway_spike_enable (bool):  Set to NO by default. Set to YES to enable.
+# osrm_gateway_spike_user (str):     Unprivileged user to run as.
+#                                    Default: osrmapi
+# osrm_gateway_spike_dir (str):      Application directory. Must contain the
+#                                    binary and .env.
+#                                    Default: /usr/local/www/osrm-gateway-spike
+# osrm_gateway_spike_host (str):     Bind address. Default: 0.0.0.0
+# osrm_gateway_spike_port (int):     Bind port. Default: 8001
+# osrm_gateway_spike_logfile (str):  Log file.
+#                                    Default: /var/log/osrm-gateway-spike.log
+# osrm_gateway_spike_workers (int):  tokio worker threads. Default: 1 -- match
+#                                    osrm_api_gateway_workers, or a comparison
+#                                    measures the configuration, not the gateway.
+
+. /etc/rc.subr
+
+name="osrm_gateway_spike"
+rcvar=${name}_enable
+
+load_rc_config $name
+
+: ${osrm_gateway_spike_enable:="NO"}
+: ${osrm_gateway_spike_user:="osrmapi"}
+: ${osrm_gateway_spike_dir:="/usr/local/www/osrm-gateway-spike"}
+: ${osrm_gateway_spike_host:="0.0.0.0"}
+: ${osrm_gateway_spike_port:="8001"}
+: ${osrm_gateway_spike_logfile:="/var/log/osrm-gateway-spike.log"}
+: ${osrm_gateway_spike_workers:="1"}
+
+_binary="${osrm_gateway_spike_dir}/osrm-gateway-spike"
+_child_pidfile="/var/run/${name}.child.pid"
+
+case "$osrm_gateway_spike_workers" in
+    ''|*[!0-9]*)
+        warn "osrm_gateway_spike_workers=\"${osrm_gateway_spike_workers}\" is not a number; using 1"
+        osrm_gateway_spike_workers=1
+        ;;
+esac
+
+# The binary reads HOST/PORT/WORKERS from its environment and everything else
+# from the .env in its working directory, the same file and the same precedence
+# the Python gateway uses (a real variable beats the file). Only these three go
+# through ${name}_env, which rc.subr expands unquoted into an `env ...` prefix:
+# the shared settings must not travel this way, because HEALTH_CHECK_COORDS is
+# 0,0;0,0 and that semicolon would terminate the command.
+osrm_gateway_spike_env="HOST=${osrm_gateway_spike_host} PORT=${osrm_gateway_spike_port} WORKERS=${osrm_gateway_spike_workers}${osrm_gateway_spike_env:+ ${osrm_gateway_spike_env}}"
+
+# Tracked pid is daemon(8) itself, the supervisor -- see osrm-api-gateway for
+# why there is no -u here.
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+command_args="-r -t ${name} \
+    -P ${pidfile} -p ${_child_pidfile} -o ${osrm_gateway_spike_logfile} \
+    ${_binary}"
+
+# The .env is resolved relative to the working directory, so running from the
+# app directory is what makes the deployed settings take effect.
+osrm_gateway_spike_chdir="${osrm_gateway_spike_dir}"
+
+start_precmd="${name}_precmd"
+
+osrm_gateway_spike_precmd()
+{
+    if [ ! -x "${_binary}" ]; then
+        err 1 "${_binary} not found -- run 'make jail-spike-up' first."
+    fi
+    if [ ! -f "${osrm_gateway_spike_dir}/.env" ]; then
+        warn "no .env in ${osrm_gateway_spike_dir}; falling back to the binary's built-in defaults"
+    fi
+    # Last thing that runs as root: daemon(8) is unprivileged by the time it
+    # opens these, and /var/run is not writable by the service user.
+    install -o "${osrm_gateway_spike_user}" -m 644 /dev/null "${pidfile}"
+    install -o "${osrm_gateway_spike_user}" -m 644 /dev/null "${_child_pidfile}"
+    install -o "${osrm_gateway_spike_user}" -m 644 /dev/null "${osrm_gateway_spike_logfile}"
+}
+
+run_rc_command "$1"

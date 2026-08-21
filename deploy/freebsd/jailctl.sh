@@ -59,6 +59,9 @@ jail_env() {
          "JAIL_API_PORT=${JAIL_API_PORT:-8000}" \
          "JAIL_API_WORKERS=${JAIL_API_WORKERS:-1}" \
          "JAIL_FORWARDED_ALLOW_IPS=${JAIL_FORWARDED_ALLOW_IPS:-}" \
+         "JAIL_SPIKE_DIR=${JAIL_SPIKE_DIR:-/usr/local/www/osrm-gateway-spike}" \
+         "JAIL_SPIKE_HOST=${JAIL_SPIKE_HOST:-0.0.0.0}" \
+         "JAIL_SPIKE_PORT=${JAIL_SPIKE_PORT:-8001}" \
          "JAIL_REDIS_URL=${JAIL_REDIS_URL:-redis://127.0.0.1:6379/0}" \
          "JAIL_OSRM_URL=${JAIL_OSRM_URL:-http://127.0.0.1:5000}" \
          "PROFILE=${PROFILE:-car}" \

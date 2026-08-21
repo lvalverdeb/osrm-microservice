@@ -25,7 +25,9 @@ Read together: the service is healthy and fast at its current scale, request
 
 P0 is done and verified on the jail deployment (2026-08-20). P1 is implemented
 and unit-tested but its jail acceptance (stop the engine, watch `/ready` flip to
-503 and back) has not been run yet. P2 is open.
+503 and back) has not been run yet. P2-1 and P2-3 are implemented and
+unit-tested, P2-1 with its own jail acceptance still to run. P2-2 was measured
+and withdrawn: the block it was written to remove does not exist.
 
 Verifying P0-2 turned up a defect this plan had not predicted: Redis was
 unreachable from the jail, so both the L2 cache and the limiter's shared storage
@@ -40,9 +42,10 @@ had been silently inert. See "Redis needs the jail to have a real loopback" in
 | P1 readiness | done | `/ready` implemented; all three probes use it (`Makefile`, `Dockerfile`, `install.sh`) |
 | Proxy-aware limits | done | `--forwarded-allow-ips` on both paths; without it every client behind a balancer shares one bucket |
 | Docker workers | done | `WORKERS` via `deploy/docker/entrypoint.sh`; P0-1/2/3 previously applied to the jail only |
-| P2-1 payload caps | open | |
-| P2-2 executor | open | |
-| P2-3 matrix bound | open | |
+| P2-1 payload caps | implemented | `VRP_MAX_STOPS` 422 and per-worker semaphore 503, `tests/test_vrp_capacity.py`; jail RSS ceiling not measured yet |
+| P2-2 executor | withdrawn | measured 8-10 ms of CPU per 2000-stop solve, not 1.6 s; see below |
+| P2-3 matrix bound | implemented | `MATRIX_MAX_CELLS` mirrors the engine's own rule, `tests/test_matrix_capacity.py` |
+| TSP chunk fan-out | implemented | came out of the P2-2 measurement; 1293 ms -> 364 ms on a 2000-stop solve, `tests/test_vrp_fanout.py` |
 
 ## Ordering
 
@@ -143,6 +146,15 @@ the memory that implies, and every solve runs to completion inside the request.
 LOADTEST_ARGS="--size 2000"` keeps gateway RSS under a stated ceiling and
 returns 422/503 rather than dying; the single-request path is unchanged.
 
+**Implemented** as `VRP_MAX_STOPS` (2000, enforced by `VrpRequest.stops` so the
+OpenAPI maximum and the enforced maximum cannot drift) and an
+`asyncio.Semaphore(VRP_MAX_CONCURRENCY)` in `app/main.py` guarding both
+optimization endpoints, with `VRP_QUEUE_TIMEOUT` seconds of queueing before a
+503 carrying `Retry-After`. The semaphore is per process, so the node-wide bound
+is `WORKERS x VRP_MAX_CONCURRENCY` -- the default of 1 pairs with the two
+workers from P0-3 for roughly 550 MB of worst-case solve memory. Covered by
+`tests/test_vrp_capacity.py`; the jail run above is still outstanding.
+
 ## P2-2 — CPU-bound solves block the event loop
 
 **Breaks when:** VRP traffic and routing traffic share a worker. A 1.6 s solve
@@ -158,6 +170,52 @@ The process pool is the smaller change and keeps one deployment artefact.
 **Acceptance:** under `mixed` load with `--size 2000` VRP requests present,
 `/route` p95 stays within 2× of its no-VRP baseline.
 
+**Withdrawn — the premise was wrong.** This item assumed the 1.6 s solve is 1.6 s
+of CPU. It is not. Timing the synchronous stages directly (2026-08-21, on the
+development host, synthetic matrices at production sizes):
+
+| Stage | 2000 stops | Notes |
+|---|---|---|
+| `_prepare_cost_matrices` + `_allocate_stops` | **8.5 ms** (1 depot), 10.1 ms (5), 160 ms (500 depots) | the numpy work this item targeted |
+| Response serialisation | **0.8 ms** | 0.39 MB across 25 routes, via pydantic-core |
+| `GraphBuilder.build_from_matrix` + dump | **14.7 ms** | 100x100, the largest matrix P2-3 now allows |
+| Whole `/vrp` request, OSRM stubbed out | **1.2 ms** | ASGI + validation + serialisation, no upstream |
+
+Roughly **10 ms** of event-loop CPU for a 2000-stop `/vrp`, two orders of
+magnitude short of what a process pool would need to justify pickling matrices
+to a per-worker pool — and that pool would multiply the memory P2-1 just bounded.
+
+Serialisation is cheap for a reason worth recording: every endpoint here
+annotates a return type, so FastAPI builds a pydantic field for it and serialises
+through pydantic-core (Rust). The slow `jsonable_encoder` + `json.dumps` path —
+13 ms and 4.8 ms respectively on this same response — is never reached. Dropping
+a return annotation would silently move an endpoint onto it.
+
+The `/vrp` p99 366 ms this plan cited as evidence of blocking has a different
+cause: `_solve_depot_routes` awaits its TSP chunks **one at a time**, so 2000
+stops is ~25 sequential `/trip` round trips. That is latency inside one request,
+not a stalled event loop — other requests interleave with it normally, which is
+exactly why the `mixed` run showed 0 errors and `/route` p95 at 91 ms *while*
+VRP traffic was present. The acceptance criterion above was most likely already
+satisfied before the item was written.
+
+**The real optimisation — done.** Those chunk calls now fan out under
+`VRP_CHUNK_CONCURRENCY` (default 4) instead of being awaited one at a time. With
+a 50 ms `/trip` stub standing in for the engine, a 2000-stop solve went from
+**1293 ms to 364 ms** (3.6x) and a 500-stop solve from 358 ms to 103 ms — the
+bound, not the chunk count, is what caps the gain.
+
+It uses `asyncio.TaskGroup` rather than `gather` so the first failing chunk
+cancels its siblings; `gather` would leave them running against OSRM for a
+response nobody reads. Callers see an `ExceptionGroup`, which `/vrp` already maps
+to 500. Results stay in chunk order, and vehicle numbering now derives from chunk
+position rather than the length of a partially filled result list — that read
+would have been wrong the moment chunks stopped completing in order.
+
+This is still a trade: concurrent `/trip` calls raise load on a 2-core engine, so
+node-wide concurrency is `WORKERS x VRP_MAX_CONCURRENCY x VRP_CHUNK_CONCURRENCY`.
+Covered by `tests/test_vrp_fanout.py`.
+
 ## P2-3 — `/matrix` advertises 50× what the engine accepts
 
 **Breaks when:** a client trusts the schema. `MatrixRequest.coordinates` allows
@@ -171,6 +229,28 @@ to match and reject early with 422. Decide which, then make both paths agree.
 **Acceptance:** the documented maximum and the enforced maximum are the same
 number, and `make loadtest LOADTEST_SCENARIO=matrix LOADTEST_ARGS="--size 200"`
 returns a consistent result rather than a pass-through 400.
+
+**Correction to the diagnosis above.** The engine's limit is not on the
+coordinate count. `TablePlugin` rejects when `sources × destinations` exceeds
+`--max-table-size` *squared*, treating an omitted list as every coordinate, so
+the default 100 is a **10 000-cell budget**. That is why a symmetric
+101-coordinate request fails while this gateway's own 1-depot × 500-stop VRP
+batches have always passed. Capping `coordinates` at 100, as this plan
+originally suggested, would have broken the VRP path.
+
+**Implemented** as `MATRIX_MAX_CELLS` (10 000) enforced by a `MatrixRequest`
+validator applying the engine's own rule, so `/matrix` and `/matrix-graph`
+return 422 naming the limit instead of a pass-through 400, and asymmetric
+requests stay available at their real cost. The engine flag is unchanged, which
+keeps this from re-inflating the memory P2-1 just bounded; raising it later
+means setting `--max-table-size` to the square root of this value on both deploy
+paths, as documented in `../configuration.md`.
+
+Batching in `_get_depot_to_stop_matrix` now derives its chunk size from the same
+budget rather than using `MATRIX_BATCH_SIZE` flat. This fixed a latent defect:
+with more than 20 depots a 500-stop chunk had always exceeded 10 000 cells, so
+`/vrp` returned 500 against a default-configured engine for any request with 21
+or more depots. Measurements in this plan used a single depot and never hit it.
 
 ---
 

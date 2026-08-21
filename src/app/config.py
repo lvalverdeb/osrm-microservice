@@ -49,6 +49,35 @@ class Settings(BaseSettings):
     VRP_HYSTERESIS_M: float = 2000.0
     VRP_SANITY_LIMIT_M: float = 50000.0
 
+    # Peak memory for an optimization request is stops x concurrent solves: one
+    # 2000-stop solve peaked at 277 MB and four together reached 615 MB on a 2 GB
+    # host. VRP_MAX_STOPS bounds the first factor (422 beyond it) and
+    # VRP_MAX_CONCURRENCY the second -- but the semaphore lives in one process, so
+    # node-wide concurrency is WORKERS x VRP_MAX_CONCURRENCY. Raise either one only
+    # against a measured RSS ceiling for the target host.
+    VRP_MAX_STOPS: int = 2000
+    VRP_MAX_CONCURRENCY: int = 1
+    VRP_QUEUE_TIMEOUT: float = 10.0
+
+    # osrm-routed rejects a table request when sources x destinations exceeds
+    # --max-table-size squared (default 100, so 10 000 cells) -- the budget is on
+    # the product, not the coordinate count, which is why a 1 x 500 depot-to-stop
+    # batch passes while a 101-coordinate symmetric matrix does not. Enforcing the
+    # same number here turns a pass-through 400 into a 422 that names the limit.
+    # Changing it means passing --max-table-size to osrm-routed in BOTH
+    # deploy/docker/docker-compose.yml and deploy/freebsd/osrm-routed, as the
+    # square root of this value.
+    MATRIX_MAX_CELLS: int = 10000
+
+    # A 2000-stop solve is ~25 sequential /trip round trips, and that serialised
+    # I/O -- not CPU -- is what made /vrp p99 366 ms against /route p95 91 ms.
+    # The chunks fan out instead, bounded so one solve cannot saturate a 2-core
+    # engine. Concurrent /trip calls against osrm-routed node-wide are
+    # WORKERS x VRP_MAX_CONCURRENCY x VRP_CHUNK_CONCURRENCY: raise this only
+    # against measured engine latency, since past roughly twice the engine's core
+    # count the calls just queue there instead of here.
+    VRP_CHUNK_CONCURRENCY: int = 4
+
     # Metrics
     METRICS_ENDPOINT: str = "/metrics"
 

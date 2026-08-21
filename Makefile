@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -60,6 +60,11 @@ help:
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
 	@echo "  capacity       - Full capacity assessment with an OOM guard (LOADTEST_URL, CAPACITY_ARGS)"
+	@echo ""
+	@echo "  Rust evaluation spike (rust-spike/) -- a benchmark target, not a gateway:"
+	@echo "  compose-spike-up/-down/-logs/-health - Run the spike beside the Docker api service"
+	@echo "  jail-spike-up/-down/-logs/-health    - Build and run it in the jail (needs jail-bootstrap)"
+	@echo "  spike-bench    - Same loadtest scenario against both gateways (LOADTEST_URL, SPIKE_URL)"
 
 download-data:
 	mkdir -p $(DATA_DIR)
@@ -100,6 +105,62 @@ compose-health:
 		sleep 1; \
 	done
 	@echo "Compose health checks passed."
+
+# --- Rust evaluation spike (rust-spike/) -----------------------------------
+# A benchmark target, not a second gateway: two of eleven endpoints, no rate
+# limiting, metrics, tracing, retry or L2 cache. Both paths run it beside the
+# Python gateway against the same engine, so the head-to-head in
+# rust-spike/README.md can be reproduced on real hardware.
+
+COMPOSE_SPIKE = $(COMPOSE) --profile spike
+
+compose-spike-up:
+	$(COMPOSE_SPIKE) up -d --build spike
+	$(MAKE) compose-spike-health
+
+compose-spike-down:
+	$(COMPOSE_SPIKE) rm -sf spike
+
+compose-spike-logs:
+	$(COMPOSE_SPIKE) logs --tail=100 spike
+
+# Probes from inside the container, like compose-health: the spike's own
+# HEALTHCHECK runs there too, and this avoids depending on published ports.
+compose-spike-health:
+	$(COMPOSE_SPIKE) ps spike
+	@i=0; until $(COMPOSE_SPIKE) exec -T spike curl -fsS http://localhost:8001/ready >/dev/null; do \
+		i=$$((i+1)); \
+		if [ $$i -ge 30 ]; then echo "Spike readiness failed after 30 attempts (spike or OSRM engine down)"; exit 1; fi; \
+		sleep 1; \
+	done
+	@echo "Spike health checks passed."
+
+jail-spike-up: jail-stage
+	$(JAIL_SSH) '$(JAILCTL) spike'
+
+jail-spike-down: jail-stage
+	$(JAIL_SSH) '$(JAILCTL) spike-stop'
+
+jail-spike-logs: jail-stage
+	@$(JAIL_SSH) 'tail -n 100 /var/log/osrm-gateway-spike.log' || \
+		echo "no spike log yet; run 'make jail-spike-up' first"
+
+jail-spike-health:
+	@curl -fsS $(SPIKE_URL)/ready >/dev/null && echo "spike ready at $(SPIKE_URL)" || \
+		{ echo "spike not reachable at $(SPIKE_URL)"; exit 1; }
+
+# Head-to-head: the same scenario against both gateways, back to back. Keep
+# worker counts equal on the two sides or this measures the configuration.
+spike-bench:
+	@echo "=== Python gateway: $(LOADTEST_URL) ==="
+	uv run python -m loadtest.run --url $(LOADTEST_URL) \
+		--scenario $(LOADTEST_SCENARIO) --rate $(LOADTEST_RATE) \
+		--duration $(LOADTEST_DURATION) $(LOADTEST_ARGS)
+	@echo ""
+	@echo "=== Rust spike: $(SPIKE_URL) ==="
+	uv run python -m loadtest.run --url $(SPIKE_URL) \
+		--scenario $(LOADTEST_SCENARIO) --rate $(LOADTEST_RATE) \
+		--duration $(LOADTEST_DURATION) $(LOADTEST_ARGS)
 
 build-pkg:
 	@echo "Building osrm-api-gateway package..."
@@ -156,6 +217,13 @@ LOADTEST_SCENARIO ?= route
 LOADTEST_RATE     ?= 25
 LOADTEST_DURATION ?= 30
 LOADTEST_ARGS     ?=
+# The spike's URL, used by spike-bench and jail-spike-health. Mirrors
+# LOADTEST_URL's assumption -- the jail deployment reached through the host --
+# but note jail-publish only redirects JAIL_API_PORT, so reaching the spike from
+# outside needs its port forwarded too, or the bench run from the jail host:
+#
+#   make spike-bench SPIKE_URL=http://127.0.0.1:8081   # Docker path
+SPIKE_URL         ?= http://127.0.0.1:$(JAIL_SPIKE_PORT)
 
 loadtest:
 	uv run python -m loadtest.run --url $(LOADTEST_URL) \
@@ -197,6 +265,8 @@ JAIL_API_WORKERS ?= 1
 JAIL_FORWARDED_ALLOW_IPS ?=
 JAIL_API_HOST  ?= 0.0.0.0
 JAIL_API_PORT  ?= 8000
+# Spike port, forwarded across the jail boundary by jailctl.sh's jail_env.
+JAIL_SPIKE_PORT ?= 8001
 JAIL_REDIS_URL ?= redis://127.0.0.1:6379/0
 JAIL_OSRM_URL  ?= http://127.0.0.1:5000
 JAIL_SSH_OPTS  ?= -o StrictHostKeyChecking=accept-new
@@ -217,9 +287,10 @@ JAILCTL = $(JAIL_ENV) sh $(HOST_STAGE)/deploy/freebsd/jailctl.sh
 
 jail-stage:
 	@echo "Staging sources to $(JAIL_HOST):$(HOST_STAGE)"
-	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy && \
+	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy $(HOST_STAGE)/rust-spike && \
 		mkdir -p $(HOST_STAGE)/data'
-	@tar -cf - src/app pyproject.toml deploy/freebsd deploy/env README.md | \
+	@tar -cf - src/app pyproject.toml deploy/freebsd deploy/env README.md \
+		rust-spike/Cargo.toml rust-spike/Cargo.lock rust-spike/src | \
 		$(JAIL_SSH) 'tar -xf - -C $(HOST_STAGE)'
 	@if [ ! -f $(DATA_DIR)/$(OSM_FILE) ]; then \
 		echo "No local $(OSM_FILE); the jail will fetch it from Geofabrik"; \

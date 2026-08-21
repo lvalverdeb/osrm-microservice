@@ -253,6 +253,65 @@ because only it knows where its engine and cache live. Everything else is shared
 so changing a rate limit or cache TTL in `deploy/env/app.env` changes both
 deployments. Full precedence rules are in [configuration.md](configuration.md).
 
+## Optional — the Rust evaluation spike
+
+`rust-spike/` reimplements `/route` and `/matrix` in axum. It is a **benchmark
+target, not a third deployment**: two of the eleven endpoints, and no rate
+limiting, metrics, tracing, retry or Redis L2. Never put it in front of traffic.
+
+It exists because the published Python-vs-Rust numbers in
+[`../rust-spike/README.md`](../rust-spike/README.md) came from a development
+laptop, and the interesting question — whether the gateway is ever the
+bottleneck — depends on the 2-core jail this project actually runs on. Both
+paths therefore run it *beside* the Python gateway, against the same engine, on
+its own port.
+
+```bash
+# Docker: behind a compose profile, so a plain `make compose-up` never starts it
+make compose-spike-up          # publishes SPIKE_PORT (default 8081) -> 8001
+make compose-spike-health
+make compose-spike-down
+
+# FreeBSD jail: needs `make jail-bootstrap` first (it installs the rust package
+# the Python path already requires for pydantic-core)
+make jail-spike-up             # builds with cargo, installs, starts on 8001
+make jail-spike-health
+make jail-spike-down
+
+# Same scenario against both, back to back
+make spike-bench LOADTEST_SCENARIO=route LOADTEST_RATE=200 \
+    LOADTEST_URL=http://127.0.0.1:8000 SPIKE_URL=http://127.0.0.1:8001
+```
+
+Two things make a comparison meaningless if you get them wrong. **Keep the
+worker counts equal** — `WORKERS` on the Docker side, `osrm_gateway_spike_workers`
+against `osrm_api_gateway_workers` in the jail; a 1-worker uvicorn against a
+4-thread tokio measures the configuration, not the gateway. And **remember the
+spike is missing features the Python side is paying for** during the run; some
+of any gap you measure is those features, not the language.
+
+The jail build uses a dedicated `jail` cargo profile (thin LTO, 16 codegen
+units) rather than the default release profile, whose fat LTO in a single
+codegen unit is the most memory-hungry way to build and can meet the OOM killer
+on a 2 GB box shared with two other jails. The first build also fetches crates,
+so it needs working DNS in the jail — that is what `make jail-host` arranges.
+
+### What is in the spike's deployment
+
+| File | Role |
+|---|---|
+| `deploy/docker/Dockerfile.spike` | Multi-stage build; non-root; `HEALTHCHECK` on `/ready` |
+| `docker-compose.yml` `spike:` service | Behind the `spike` profile; loads the same `deploy/env/app.env` |
+| `deploy/freebsd/osrm-gateway-spike` | rc.d script under `daemon(8)`, mirroring `osrm-api-gateway` |
+| `install.sh` `spike` / `spike-stop` phases | Build, install, enable, start; nothing in `all` depends on them |
+
+The spike reads `deploy/env/app.env` the same way the Python gateway does —
+including *last duplicate wins*, so the deployment overlay `install.sh` appends
+overrides the shared block, and a real environment variable still beats the
+file. That parser is hand-written rather than a crate precisely because the
+obvious crate (`dotenvy`) keeps the *first* occurrence and would have silently
+ignored the overlay.
+
 ## Keeping the two in step
 
 The jail path deliberately mirrors the Docker path — `make jail-data` follows

@@ -1,0 +1,30 @@
+[package]
+name = "osrm-gateway-spike"
+version = "0.1.0"
+edition = "2021"
+description = "Evaluation spike: /route and /matrix in Rust, for head-to-head benchmarking against the FastAPI gateway"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "signal"] }
+# "rc" lets a cached Arc<Value> serialise straight into the response, so a cache
+# hit never clones the payload -- the fast path the comparison is measuring.
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+# No TLS: the gateway talks plain HTTP to osrm-routed on localhost, and dropping
+# the TLS stack keeps the build honest about what is actually exercised.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+moka = { version = "0.12", features = ["future"] }
+sha2 = "0.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+# For the 2-core/2 GB jail, where fat LTO with a single codegen unit is the most
+# memory-hungry way to build and risks the OOM killer on a box already shared
+# with two other jails. Runtime difference is immaterial for an I/O-bound proxy.
+[profile.jail]
+inherits = "release"
+lto = "thin"
+codegen-units = 16

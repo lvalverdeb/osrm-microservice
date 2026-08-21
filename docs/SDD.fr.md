@@ -348,11 +348,11 @@ Le système fonctionne comme une passerelle entre les clients et le backend C++ 
 | RouteRequest | steps | bool | default true | Instructions pas à pas |
 | RouteRequest | alternatives | bool\|int | default false | Itinéraires alternatifs |
 | MatchRequest | breadcrumbs | List[GPSBreadcrumb] | [2, 5000] | Points de trace GPS |
-| MatrixRequest | coordinates | List[Coordinate] | [2, 5000] | Points pour la matrice |
+| MatrixRequest | coordinates | List[Coordinate] | [2, 5000], sources x destinations <= MATRIX_MAX_CELLS | Points pour la matrice |
 | MatrixRequest | annotations | enum | duration/distance/les deux | Métriques de coût |
 | TripRequest | coordinates | List[Coordinate] | [2, 200] | Points à optimiser |
 | VrpRequest | depots | List[Stop] | [1, 500] | Emplacements des entrepôts |
-| VrpRequest | stops | List[Stop] | [1, 10000] | Points de livraison |
+| VrpRequest | stops | List[Stop] | [1, VRP_MAX_STOPS] | Points de livraison |
 | VrpRequest | capacity | int | [1, 10000], default 35 | Capacité par véhicule |
 | VrpRequest | clustering_mode | enum | distance/travel_time/radial | Stratégie d'allocation |
 | VehicleRoute | route_geometry | Dict | GeoJSON | Itinéraire optimisé |

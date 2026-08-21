@@ -377,11 +377,11 @@ The system operates as a gateway between clients and the OSRM C++ backend. Clien
 | RouteRequest | steps | bool | default true | Turn-by-turn instructions |
 | RouteRequest | alternatives | bool\|int | default false | Alternate routes |
 | MatchRequest | breadcrumbs | List[GPSBreadcrumb] | [2, 5000] | GPS trace points |
-| MatrixRequest | coordinates | List[Coordinate] | [2, 5000] | Points for matrix |
+| MatrixRequest | coordinates | List[Coordinate] | [2, 5000], sources x destinations <= MATRIX_MAX_CELLS | Points for matrix |
 | MatrixRequest | annotations | enum | duration/distance/both | Cost metrics |
 | TripRequest | coordinates | List[Coordinate] | [2, 200] | Points to optimize |
 | VrpRequest | depots | List[Stop] | [1, 500] | Warehouse locations |
-| VrpRequest | stops | List[Stop] | [1, 10000] | Delivery points |
+| VrpRequest | stops | List[Stop] | [1, VRP_MAX_STOPS] | Delivery points |
 | VrpRequest | capacity | int | [1, 10000], default 35 | Per-vehicle capacity |
 | VrpRequest | clustering_mode | enum | distance/travel_time/radial | Allocation strategy |
 | VehicleRoute | route_geometry | Dict | GeoJSON | Optimized route path |

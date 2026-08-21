@@ -281,6 +281,24 @@ Calcule les durées et distances de voyage entre toutes les localisations fourni
 
 **Corps de la Réponse :** Renvoie directement la réponse du service `/table` d'OSRM contenant `code`, `durations`, `distances`, `sources` et `destinations`.
 
+
+**Limite de taille (`/matrix` et `/matrix-graph`) :** le moteur facture des
+cellules `sources x destinations`, et non des coordonnées, et refuse toute
+valeur supérieure à `MATRIX_MAX_CELLS` (par défaut **10 000**). Les requêtes qui
+la dépassent reçoivent un 422 nommant la limite plutôt qu'un 400 opaque du
+moteur.
+
+| Requête | Cellules | Résultat |
+|---------|----------|----------|
+| 100 coordonnées, sans `sources`/`destinations` | 10 000 | acceptée |
+| 101 coordonnées, sans `sources`/`destinations` | 10 201 | 422 |
+| 4 `sources` x 2500 `destinations` (2504 coordonnées) | 10 000 | acceptée |
+
+Omettre `sources` ou `destinations` signifie « toutes les coordonnées » : une
+matrice symétrique est donc plafonnée à 100x100 alors qu'une matrice asymétrique
+peut porter bien plus de coordonnées. Découpez les travaux plus grands ou
+restreignez-les avec `sources`/`destinations`.
+
 ---
 
 #### `POST /matrix-graph`
@@ -387,6 +405,19 @@ Résout des problèmes de tournées de véhicules (VRP) multi-véhicules en util
   "total_duration": 920.0
 }
 ```
+
+**Limites de capacité (`/vrp` et `/vrp/allocate`) :**
+
+| Statut | Cause | Réglé par |
+|--------|-------|-----------|
+| `422` | Plus de `VRP_MAX_STOPS` arrêts dans une requête (2000 par défaut). | `VRP_MAX_STOPS` |
+| `503` | Aucun créneau de calcul libre dans un délai de `VRP_QUEUE_TIMEOUT` secondes. Inclut un en-tête `Retry-After`. | `VRP_MAX_CONCURRENCY`, `VRP_QUEUE_TIMEOUT` |
+
+La mémoire maximale est arrêts x calculs concurrents, donc les deux limites
+comptent : un calcul de 2000 arrêts atteint environ 277 Mo. `VRP_MAX_CONCURRENCY`
+s'applique par processus de travail, un nœud admet donc
+`WORKERS x VRP_MAX_CONCURRENCY` calculs à la fois. Voir
+[configuration.md](configuration.md#vrp--matrix-tuning).
 
 ---
 

@@ -348,11 +348,11 @@ El sistema opera como una puerta de enlace entre los clientes y el backend C++ d
 | RouteRequest | steps | bool | default true | Instrucciones paso a paso |
 | RouteRequest | alternatives | bool\|int | default false | Rutas alternativas |
 | MatchRequest | breadcrumbs | List[GPSBreadcrumb] | [2, 5000] | Puntos de traza GPS |
-| MatrixRequest | coordinates | List[Coordinate] | [2, 5000] | Puntos para la matriz |
+| MatrixRequest | coordinates | List[Coordinate] | [2, 5000], sources x destinations <= MATRIX_MAX_CELLS | Puntos para la matriz |
 | MatrixRequest | annotations | enum | duration/distance/ambas | Métricas de costo |
 | TripRequest | coordinates | List[Coordinate] | [2, 200] | Puntos a optimizar |
 | VrpRequest | depots | List[Stop] | [1, 500] | Ubicaciones de almacenes |
-| VrpRequest | stops | List[Stop] | [1, 10000] | Puntos de entrega |
+| VrpRequest | stops | List[Stop] | [1, VRP_MAX_STOPS] | Puntos de entrega |
 | VrpRequest | capacity | int | [1, 10000], default 35 | Capacidad por vehículo |
 | VrpRequest | clustering_mode | enum | distance/travel_time/radial | Estrategia de asignación |
 | VehicleRoute | route_geometry | Dict | GeoJSON | Ruta optimizada |

@@ -1,0 +1,56 @@
+# Docker image for the Rust evaluation spike (rust-spike/).
+#
+# This is a benchmark target, not a second production gateway: it serves two of
+# the eleven endpoints and has no rate limiting, metrics, tracing, retry or L2
+# cache. It exists so the head-to-head in rust-spike/README.md can be re-run on
+# the same host as the Python gateway. The compose service that uses it sits
+# behind the `spike` profile so a normal `make compose-up` never starts it.
+#
+# Structure deliberately mirrors deploy/docker/Dockerfile -- same UID handling,
+# same HOST/PORT contract, same /ready health check -- so the two are
+# comparable rather than merely similar.
+
+FROM rust:1-slim-bookworm AS builder
+
+WORKDIR /build
+
+# Cargo.lock is committed and --locked is used, so the image builds the exact
+# dependency versions the benchmark was measured with.
+COPY rust-spike/Cargo.toml rust-spike/Cargo.lock ./
+COPY rust-spike/src ./src
+
+RUN cargo build --release --locked
+
+
+FROM debian:bookworm-slim
+
+ARG UID=1000
+ARG HOST=0.0.0.0
+ARG PORT=8001
+
+ENV HOST=${HOST}
+ENV PORT=${PORT}
+
+# curl is here for the HEALTHCHECK only, exactly as in the Python image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u ${UID} appuser
+
+COPY --from=builder /build/target/release/osrm-gateway-spike /usr/local/bin/osrm-gateway-spike
+
+USER appuser
+
+EXPOSE ${PORT}
+
+# /ready, not /health: /health answers 200 even when the engine is down, so the
+# container would always report healthy. Same reasoning as the Python image.
+HEALTHCHECK --interval=30s --timeout=8s --start-period=10s --retries=3 \
+    CMD curl -f http://${HOST}:${PORT}/ready || exit 1
+
+# No entrypoint script: the binary reads HOST/PORT/WORKERS and the cache and
+# engine settings straight from the environment, and there is no metrics
+# directory or proxy-header handling to arrange first. exec form so the binary
+# is PID 1 and receives SIGTERM from `docker stop` directly.
+CMD ["osrm-gateway-spike"]
