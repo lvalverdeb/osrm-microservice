@@ -2,12 +2,19 @@
 
 [English](https://github.com/lvalverde/osrm-microservice/blob/main/README.md) | [Español](https://github.com/lvalverde/osrm-microservice/blob/main/README.es.md) | [Français](https://github.com/lvalverde/osrm-microservice/blob/main/README.fr.md)
 
+> **El paquete `osrm-api-gateway` de PyPI ya no recibe mantenimiento.**
+> [0.2.1](https://pypi.org/project/osrm-api-gateway/0.2.1/) es su última versión.
+> La pasarela era una aplicación FastAPI; ahora es un binario Rust construido
+> desde [`gateway/`](gateway) y no se distribuye en PyPI. Las instalaciones
+> existentes siguen funcionando, pero no habrá más versiones.
+
+
 Enrutamiento de alto rendimiento y emparejamiento de mapas (map-matching) para Costa Rica.
 
 ## Despliegue
 
 El proyecto admite **dos** opciones de despliegue. Ambas ejecutan los mismos tres
-servicios — el motor OSRM, una caché Redis y la pasarela FastAPI — y todo lo que
+servicios — el motor OSRM, une caché Redis y la pasarela — y todo lo que
 cualquiera de las dos necesita vive en [`deploy/`](deploy).
 
 | Opción | Archivos | Empezar con | Cuándo |
@@ -55,7 +62,7 @@ make jail-up          # desplegar la pasarela e iniciar todos los servicios
 
 ## Servicios Principales
 
-La aplicación encapsula la lógica de enrutamiento compleja en varios servicios clave ubicados en `src/app/services/`:
+La aplicación encapsula la lógica de enrutamiento compleja en varios servicios clave ubicados en [`gateway/src/`](gateway/src):
 
 ### 1. Cliente OSRM (`osrm_client.py`)
 Un cliente HTTP asíncrono que interactúa directamente con el backend OSRM en C++. Formatea las consultas y estandariza las respuestas.
@@ -71,7 +78,7 @@ Un solucionador integral de Problemas de Enrutamiento de Vehículos (VRP). Imple
 
 ## Ejemplos de Uso para Aplicaciones Cliente
 
-A continuación se muestran ejemplos de cómo una aplicación cliente puede interactuar con el microservicio FastAPI utilizando la biblioteca `requests` de Python:
+A continuación se muestran ejemplos de cómo una aplicación cliente puede interactuar con la pasarela utilizando la biblioteca `requests` de Python:
 
 ```python
 import requests
@@ -202,6 +209,6 @@ Para una guía detallada para desarrolladores, consulte:
 ## Componentes
 
 - **Motor OSRM**: Potencia de enrutamiento en C++ que ejecuta el algoritmo MLD.
-- **FastAPI Gateway**: API de Python asíncrona que proporciona endpoints especializados para el emparejamiento de mapas, la generación de grafos y Problemas de Enrutamiento de Vehículos (VRP).
+- **Pasarela**: servicio Rust asíncrono (axum) que proporciona endpoints especializados para el emparejamiento de mapas, la generación de grafos y Problemas de Enrutamiento de Vehículos (VRP).
 - **Resoledor VRP**: Motor de Localización-Asignación para la agrupación multivehículo con soporte para IDs personalizados y división de rutas basada en capacidad.
 - **Integración con NetworkX**: Convierte de forma transparente las salidas de la matriz en grafos serializables.

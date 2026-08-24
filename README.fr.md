@@ -2,12 +2,20 @@
 
 [English](https://github.com/lvalverde/osrm-microservice/blob/main/README.md) | [Español](https://github.com/lvalverde/osrm-microservice/blob/main/README.es.md) | [Français](https://github.com/lvalverde/osrm-microservice/blob/main/README.fr.md)
 
+> **Le paquet PyPI `osrm-api-gateway` n'est plus maintenu.**
+> [0.2.1](https://pypi.org/project/osrm-api-gateway/0.2.1/) en est la dernière
+> version. La passerelle était une application FastAPI ; c'est désormais un
+> binaire Rust construit depuis [`gateway/`](gateway), non distribué sur PyPI.
+> Les installations existantes continuent de fonctionner, mais aucune nouvelle
+> version ne sera publiée.
+
+
 Routage haute performance et appariement de cartes (map-matching) pour le Costa Rica.
 
 ## Déploiement
 
 Le projet prend en charge **deux** options de déploiement. Les deux exécutent les
-mêmes trois services — le moteur OSRM, un cache Redis et la passerelle FastAPI —
+mêmes trois services — le moteur OSRM, un cache Redis et la passerelle —
 et tout ce dont l'une ou l'autre a besoin se trouve dans [`deploy/`](deploy).
 
 | Option | Fichiers | Commencer par | Quand |
@@ -55,7 +63,7 @@ make jail-up          # déployer la passerelle et démarrer tous les services
 
 ## Services Principaux
 
-L'application encapsule la logique de routage complexe dans plusieurs services clés situés dans `src/app/services/` :
+L'application encapsule la logique de routage complexe dans plusieurs services clés situés dans [`gateway/src/`](gateway/src) :
 
 ### 1. Client OSRM (`osrm_client.py`)
 Un client HTTP asynchrone qui interagit directement avec le backend OSRM en C++. Il formate les requêtes et normalise les réponses.
@@ -71,7 +79,7 @@ Un solveur complet de Problèmes de Tournées de Véhicules (VRP). Il implément
 
 ## Exemples d'Utilisation pour les Applications Clientes
 
-Voici des exemples montrant comment une application cliente peut interagir avec le microservice FastAPI en utilisant la bibliothèque `requests` de Python :
+Voici des exemples montrant comment une application cliente peut interagir avec la passerelle en utilisant la bibliothèque `requests` de Python :
 
 ```python
 import requests
@@ -202,6 +210,6 @@ Pour un guide détaillé pour les développeurs, voir :
 ## Composants
 
 - **Moteur OSRM** : Moteur de routage C++ utilisant l'algorithme MLD.
-- **FastAPI Gateway** : API Python asynchrone fournissant des points de terminaison spécialisés pour l'appariement de cartes, la génération de graphes et Problèmes de Tournées de Véhicules (VRP).
+- **Passerelle** : service Rust asynchrone (axum) fournissant des points de terminaison spécialisés pour l'appariement de cartes, la génération de graphes et Problèmes de Tournées de Véhicules (VRP).
 - **Résolveur VRP** : Moteur de Localisation-Attribution pour le regroupement multi-véhicules avec prise en charge des identifiants personnalisés et division d'itinéraires basée sur la capacité.
 - **Intégration NetworkX** : Convertit de manière transparente les sorties de matrice en graphes sérialisables.
