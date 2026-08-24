@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "body_b64": "eyJjb2RlIjoiT2siLCJyb3V0ZXMiOlt7Imdlb21ldHJ5Ijp7InR5cGUiOiJMaW5lU3RyaW5nIiwiY29vcmRpbmF0ZXMiOltbLTgzLjI5MzQsMTAuNzI2Nl0sWy04My4yODM0LDEwLjczNjZdXX0sImRpc3RhbmNlIjo3OTY1LjksImR1cmF0aW9uIjoxNTkzLjE4LCJsZWdzIjpbXX1dLCJ3YXlwb2ludHMiOlt7ImxvY2F0aW9uIjpbLTg0LjA5LDkuOTNdLCJuYW1lIjoicm9hZC0wIn0seyJsb2NhdGlvbiI6Wy04NC4wOSw5LjkzXSwibmFtZSI6InJvYWQtMSJ9XX0=",
+  "request": {
+    "method": "GET",
+    "path": "/route/v1/driving/-84.086944,9.92625;-84.066581,9.952664",
+    "query": "overview=simplified&geometries=geojson&steps=false&waypoints=0%3B1&alternatives=false&annotations=distance%2Cduration"
+  }
+}

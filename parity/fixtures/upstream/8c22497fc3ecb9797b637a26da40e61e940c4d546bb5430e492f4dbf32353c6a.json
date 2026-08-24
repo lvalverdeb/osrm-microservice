@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "body_b64": "eyJjb2RlIjoiT2siLCJtYXRjaGluZ3MiOlt7Imdlb21ldHJ5Ijp7InR5cGUiOiJMaW5lU3RyaW5nIiwiY29vcmRpbmF0ZXMiOltbLTg0LjAwMzEsMTAuMDE2OV0sWy04My45OTMxLDEwLjAyNjldXX0sImRpc3RhbmNlIjo4NjkuNCwiZHVyYXRpb24iOjE3My44OCwiY29uZmlkZW5jZSI6MC44NywibGVncyI6W119XSwidHJhY2Vwb2ludHMiOlt7ImxvY2F0aW9uIjpbLTg0LjA5LDkuOTNdfV19",
+  "request": {
+    "method": "GET",
+    "path": "/match/v1/driving/-84.090292,9.928583;-84.089605,9.92843;-84.089239,9.929913;-84.088539,9.929664;-84.086066,9.929715;-84.084363,9.929849;-84.084187,9.933751",
+    "query": "timestamps=1700000000%3B1700000015%3B1700000030%3B1700000045%3B1700000060%3B1700000075%3B1700000090&radiuses=5.0%3B5.0%3B5.0%3B5.0%3B5.0%3B5.0%3B5.0&overview=full&geometries=geojson&steps=false"
+  }
+}

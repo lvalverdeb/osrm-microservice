@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "body_b64": "eyJjb2RlIjoiT2siLCJ3YXlwb2ludHMiOlt7ImxvY2F0aW9uIjpbLTg0LjA5LDkuOTNdLCJkaXN0YW5jZSI6NzExLjA4LCJuYW1lIjoicm9hZC0wIn1dfQ==",
+  "request": {
+    "method": "GET",
+    "path": "/nearest/v1/driving/-84.088719,9.97797",
+    "query": "number=1"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "body_b64": "eyJjb2RlIjoiT2siLCJ0cmlwcyI6W3siZ2VvbWV0cnkiOnsidHlwZSI6IkxpbmVTdHJpbmciLCJjb29yZGluYXRlcyI6W1stODQuMDQ2OCw5Ljk3MzJdLFstODQuMDM2OCw5Ljk4MzJdXX0sImRpc3RhbmNlIjo0MzIuMCwiZHVyYXRpb24iOjg2LjQsImxlZ3MiOltdfV0sIndheXBvaW50cyI6W3sidHJpcHNfaW5kZXgiOjAsIndheXBvaW50X2luZGV4IjowfSx7InRyaXBzX2luZGV4IjowLCJ3YXlwb2ludF9pbmRleCI6MX0seyJ0cmlwc19pbmRleCI6MCwid2F5cG9pbnRfaW5kZXgiOjJ9LHsidHJpcHNfaW5kZXgiOjAsIndheXBvaW50X2luZGV4IjozfSx7InRyaXBzX2luZGV4IjowLCJ3YXlwb2ludF9pbmRleCI6NH1dfQ==",
+  "request": {
+    "method": "GET",
+    "path": "/trip/v1/driving/-84.061582,9.989403;-84.112697,9.948238;-84.036787,9.975457;-84.019147,9.914073;-84.10775,9.918228",
+    "query": "source=first&destination=last&roundtrip=true&overview=full&geometries=geojson&steps=true&annotations=distance%2Cduration"
+  }
+}

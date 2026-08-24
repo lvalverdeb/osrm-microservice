@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-python-up compose-python-down compose-python-logs compose-python-health openapi-snapshot parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -61,10 +61,19 @@ help:
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
 	@echo "  capacity       - Full capacity assessment with an OOM guard (LOADTEST_URL, CAPACITY_ARGS)"
 	@echo ""
+	@echo "  FastAPI rollback (the implementation the Rust gateway replaced):"
+	@echo "  compose-python-up/-down/-logs/-health - Run it beside the Rust gateway"
+	@echo ""
 	@echo "  Rust evaluation spike (rust-spike/) -- a benchmark target, not a gateway:"
 	@echo "  compose-spike-up/-down/-logs/-health - Run the spike beside the Docker api service"
 	@echo "  jail-spike-up/-down/-logs/-health    - Build and run it in the jail (needs jail-bootstrap)"
 	@echo "  spike-bench    - Same loadtest scenario against both gateways (LOADTEST_URL, SPIKE_URL)"
+	@echo ""
+	@echo "  Differential parity (parity/):"
+	@echo "  parity           - Diff both gateways' responses over a seeded corpus"
+	@echo "  parity-selfcheck - Validate the harness itself; offline, no engine needed"
+	@echo "  parity-record    - Engine proxy that records upstream responses to fixtures"
+	@echo "  parity-replay    - Serve recorded fixtures instead of a real engine"
 
 download-data:
 	mkdir -p $(DATA_DIR)
@@ -105,6 +114,31 @@ compose-health:
 		sleep 1; \
 	done
 	@echo "Compose health checks passed."
+
+# --- FastAPI rollback (deploy/docker/Dockerfile.python) ---------------------
+# The implementation the Rust gateway replaced, kept runnable. Behind a profile
+# so a plain `make compose-up` never starts it. It publishes PYTHON_API_PORT
+# and uses a separate Redis database, so it can run beside the Rust gateway for
+# a parity run without the two sharing a warm L2 -- see parity/.
+COMPOSE_PYTHON = $(COMPOSE) --profile python
+
+compose-python-up:
+	$(COMPOSE_PYTHON) up -d --build api-python
+	$(MAKE) compose-python-health
+
+compose-python-down:
+	$(COMPOSE_PYTHON) rm -sf api-python
+
+compose-python-logs:
+	$(COMPOSE_PYTHON) logs --tail=100 api-python
+
+compose-python-health:
+	$(COMPOSE_PYTHON) ps api-python
+	@i=0; until $(COMPOSE_PYTHON) exec -T api-python curl -fsS http://localhost:8000/ready >/dev/null; do \
+		i=$$((i+1)); \
+		if [ $$i -ge 30 ]; then echo "FastAPI gateway readiness failed after 30 attempts"; exit 1; fi; \
+		sleep 2; \
+	done; echo "FastAPI gateway ready"
 
 # --- Rust evaluation spike (rust-spike/) -----------------------------------
 # A benchmark target, not a second gateway: two of eleven endpoints, no rate
@@ -161,6 +195,62 @@ spike-bench:
 	uv run python -m loadtest.run --url $(SPIKE_URL) \
 		--scenario $(LOADTEST_SCENARIO) --rate $(LOADTEST_RATE) \
 		--duration $(LOADTEST_DURATION) $(LOADTEST_ARGS)
+
+# The Rust gateway serves FastAPI's generated OpenAPI schema rather than
+# re-describing every model in utoipa annotations: the pydantic models stay the
+# single source of truth, and there is no third description to drift. The binary
+# embeds this file at build time, so regenerate it whenever the models change --
+# tests/test_openapi_snapshot.py fails if you forget.
+openapi-snapshot:
+	uv run python -c "import json, sys; sys.path.insert(0, 'src'); \
+		from app.main import app; \
+		json.dump(app.openapi(), open('gateway/openapi.json', 'w'), indent=2, sort_keys=True)"
+	@echo "wrote gateway/openapi.json"
+
+# --- Differential parity (parity/) ------------------------------------------
+# Replays a seeded corpus against both gateways and diffs the responses, with
+# per-endpoint tolerance: exact for /matrix and /tile, float-tolerant for the
+# pass-throughs, quality-based for /vrp. Both gateways MUST point at the same
+# osrm-routed or this measures the map data instead of the port.
+#
+# Exit codes: 0 clean, 1 the candidate diverged, 2 the run was misconfigured
+# (rate-limited, half-down, unreachable) -- a distinction worth keeping, since
+# a harness that cries wolf stops being run.
+PARITY_REFERENCE ?= $(LOADTEST_URL)
+PARITY_CANDIDATE ?= $(SPIKE_URL)
+PARITY_SEED      ?= 20260822
+PARITY_CASES     ?= 10
+PARITY_ARGS      ?=
+
+parity:
+	uv run python -m parity --reference $(PARITY_REFERENCE) \
+		--candidate $(PARITY_CANDIDATE) --seed $(PARITY_SEED) \
+		--cases $(PARITY_CASES) --report-json parity-report.json \
+		--report-dir parity-diffs $(PARITY_ARGS)
+
+# Record upstream responses once, replay them forever. Start one of these, point
+# a gateway's OSRM_BASE_URL at it, and run `make parity` as usual.
+#
+#   parity-record   forwards to a real engine and saves what it returns
+#   parity-replay   serves only what was recorded; anything else gets a 404
+#                   naming the URL, which is how a gateway that builds a
+#                   different upstream request gets caught
+PARITY_ENGINE      ?= http://127.0.0.1:5000
+PARITY_ENGINE_PORT ?= 5599
+
+parity-record:
+	uv run python -m parity.engine --mode record --engine $(PARITY_ENGINE) \
+		--port $(PARITY_ENGINE_PORT)
+
+parity-replay:
+	uv run python -m parity.engine --mode replay --port $(PARITY_ENGINE_PORT)
+
+# The harness's own acceptance test: the Python gateway against itself, in
+# process, engine stubbed. It must come back clean -- a dirty self-diff means
+# the harness is broken, not the port. Runs offline, so CI already covers it.
+parity-selfcheck:
+	uv run python -m pytest tests/test_parity_selfdiff.py tests/test_parity_compare.py \
+		tests/test_parity_corpus.py tests/test_parity_quality.py -q
 
 build-pkg:
 	@echo "Building osrm-api-gateway package..."
@@ -287,9 +377,13 @@ JAILCTL = $(JAIL_ENV) sh $(HOST_STAGE)/deploy/freebsd/jailctl.sh
 
 jail-stage:
 	@echo "Staging sources to $(JAIL_HOST):$(HOST_STAGE)"
-	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy $(HOST_STAGE)/rust-spike && \
-		mkdir -p $(HOST_STAGE)/data'
+	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy $(HOST_STAGE)/gateway \
+		$(HOST_STAGE)/rust-spike && mkdir -p $(HOST_STAGE)/data'
+	@# gateway/ is what gets built and deployed. src/app and pyproject.toml
+	@# still travel because the FastAPI implementation is the rollback target
+	@# (`install.sh python`); target/ is excluded so the jail builds its own.
 	@tar -cf - src/app pyproject.toml deploy/freebsd deploy/env README.md \
+		gateway/Cargo.toml gateway/Cargo.lock gateway/src gateway/openapi.json \
 		rust-spike/Cargo.toml rust-spike/Cargo.lock rust-spike/src | \
 		$(JAIL_SSH) 'tar -xf - -C $(HOST_STAGE)'
 	@if [ ! -f $(DATA_DIR)/$(OSM_FILE) ]; then \

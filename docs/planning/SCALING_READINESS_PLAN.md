@@ -10,7 +10,7 @@ Everything here was measured against the FreeBSD jail deployment (2 cores,
 
 | Workload | Result |
 |---|---|
-| `mixed` @ 30/s for 25s, all 11 endpoints | 751 requests, **0 errors**, p50 53 ms, p95 91 ms |
+| `mixed` @ 30/s for 25s, all 11 endpoints | 751 requests, **0 errors**, p50 53 ms, p95 91 ms — but see the note below |
 | `route` uncached, 20-way concurrency | ~150 req/s, p50 82 ms |
 | `route` cached (same payload) | 1–9 ms — a 10–40× multiplier |
 | `route` @ 100/s for 8s | 547×200, 254×429 — rate limiter engages correctly |
@@ -20,6 +20,17 @@ Everything here was measured against the FreeBSD jail deployment (2 cores,
 
 Read together: the service is healthy and fast at its current scale, request
 *count* costs nothing, and the danger is payload size × concurrency.
+
+**The 53 ms figure is not comparable to later runs.** Re-measuring the same
+scenario on the same jail on 2026-08-24 gave p50 4 ms for the same FastAPI
+gateway — a 13× difference from a row that reads like a baseline. The cause is
+almost certainly `net.inet.tcp.delayed_ack=0`, which `jailctl.sh` applies and
+which is documented there as worth p50 67 ms → 9 ms on pooled keep-alive
+connections; 53 ms sits in the *before* regime and nowhere near the *after* one.
+Treat this row as pre-tunable and do not use it as the comparison point for
+anything. The measurements under "Rewriting the gateway" below were taken with
+both gateways on the same host under the same tunables, which is the only way
+this number means anything.
 
 ## Status
 
@@ -265,3 +276,46 @@ list.
 **Horizontal deployment** — replicating the read-only `.osrm.*` data across
 nodes, a balancer tier, shared Redis. That work is straightforward once P0 and
 P1 are done, and pointless before.
+
+**Rewriting the gateway in a faster language.** Done, and measured on the jail
+rather than argued about. `gateway/` is a complete Rust port; the FastAPI
+implementation remains as the rollback target. The measurement below is the one
+that matters: both gateways running on the same jail against the same engine,
+driven over loopback from inside it, same seed, same tunables.
+
+| Workload | FastAPI | Rust | |
+|---|---|---|---|
+| `mixed` @ 30/s for 25s | 751 req, 0 errors, p50 4 ms, p95 45 ms, mean 10 ms | 751 req, 0 errors, p50 3 ms, p95 35 ms, mean 11 ms | no meaningful difference |
+| `route` cache hits @ 9/s | p50 8 ms, p95 11 ms, mean 7 ms | p50 4 ms, p95 6 ms, mean 4 ms | **~2×** |
+| RSS under load | 221 MB | 57 MB | **~3.8×** |
+
+FreeBSD 15.1 arm64 jail, 2 cores, 2 GB shared with two other jails, 2026-08-24.
+
+**On ordinary traffic the port changes nothing measurable**, and Python's mean
+was marginally lower. That is this plan's original conclusion holding up: the
+engine is the constraint at this scale, and a faster gateway in front of it
+queues on the same engine. The ~3× per-worker throughput ceiling measured on a
+laptop is real and remains unspendable while that is true.
+
+Where it does pay:
+
+- **Cache-hit traffic, ~2×** — 4 ms against 8 ms. Exactly the condition this
+  section previously named as the one that would overturn the verdict, and for
+  the predicted reason: on a hit the gateway *is* the whole request. Measure
+  your own hit rate before valuing it, since 4 ms saved matters only if hits
+  dominate. `loadtest/run.py --distinct-payloads N` drives that regime.
+- **Memory, ~3.8×** — the most defensible number here, on a box where
+  `/vrp` concurrency is already bounded by RSS (see P2-1).
+- **Deployment cost**, unquantified but visible: the FreeBSD bootstrap no longer
+  compiles numpy and pydantic-core from source, because PyPI publishes no
+  FreeBSD wheels. Five packages left the dependency list and the artifact is one
+  binary rather than a venv.
+
+What was *not* observed: any throughput or user-visible latency improvement at
+current load. Anyone citing this port as a performance win should cite the
+memory and the cache-hit row, not the laptop benchmark.
+
+Full method, the harness that established behavioural equivalence, and the
+laptop-against-a-stub figures that motivated the work in
+[`../../rust-spike/README.md`](../../rust-spike/README.md) and
+[`../../parity/README.md`](../../parity/README.md).

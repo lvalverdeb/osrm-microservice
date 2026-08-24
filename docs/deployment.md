@@ -1,8 +1,14 @@
 # Deployment
 
 The project supports **two** deployment options, and no others. Both run the same
-three services — the OSRM engine, a Redis cache, and the FastAPI gateway — and both
+three services — the OSRM engine, a Redis cache, and the API gateway — and both
 are driven from the `Makefile`.
+
+**The deployed gateway is the Rust implementation in [`gateway/`](../gateway).**
+The FastAPI implementation it replaced is still in the tree as the parity
+reference and the rollback target; see [Rolling back](#rolling-back-to-fastapi).
+Neither is the `rust-spike/` benchmark target, which remains what it always was —
+two endpoints, no production features, and never in front of traffic.
 
 | | **Docker** | **FreeBSD jail** |
 |---|---|---|
@@ -14,9 +20,9 @@ are driven from the `Makefile`.
 | Reachable on | The published container port | Jail-local loopback; `make jail-publish` to expose |
 | Detail | Below | [deployment_freebsd.md](deployment_freebsd.md) |
 
-They share no state and can be used side by side. Nothing in `src/` differs
-between them — `OSRM_BASE_URL` in `app/config.py` is the only thing that changes,
-and it is already a setting.
+They share no state and can be used side by side. Nothing in the gateway differs
+between them — `OSRM_BASE_URL` is the only thing that changes, and it is already a
+setting.
 
 **Which one?** Use Docker unless the target is a FreeBSD jail. A jail cannot run
 Docker — jails share the FreeBSD kernel, and Docker needs Linux namespaces and
@@ -112,10 +118,20 @@ the Dockerfile.
 
 | File | Role |
 |---|---|
-| `Dockerfile` | The FastAPI gateway image |
+| `Dockerfile` | The gateway image — builds `gateway/` and runs the binary |
+| `Dockerfile.python` | The FastAPI gateway, kept as the rollback target |
 | `Dockerfile.builder` | Runs extract/partition/customize, exports `/data` |
 | `Dockerfile.osrm` | OSRM runtime, with the built data copied in from the builder |
-| `docker-compose.yml` | The three services plus the `build`-profile data builder |
+| `Dockerfile.spike` | The two-endpoint benchmark target, unchanged |
+| `entrypoint.sh` | Used by `Dockerfile.python` only — see below |
+| `docker-compose.yml` | The three services plus the `build`, `python` and `spike` profiles |
+
+`entrypoint.sh` exists because the FastAPI image needs work done before uvicorn
+starts: create and wipe `PROMETHEUS_MULTIPROC_DIR` so N worker *processes*
+aggregate their metrics, and translate `FORWARDED_ALLOW_IPS` into a uvicorn
+flag. The Rust image has no entrypoint script — `WORKERS` is tokio threads
+inside one process sharing one registry, and the binary reads
+`FORWARDED_ALLOW_IPS` itself, so there is nothing left to arrange.
 
 ---
 
@@ -253,6 +269,43 @@ because only it knows where its engine and cache live. Everything else is shared
 so changing a rate limit or cache TTL in `deploy/env/app.env` changes both
 deployments. Full precedence rules are in [configuration.md](configuration.md).
 
+## Rolling back to FastAPI
+
+The FastAPI gateway is kept installable so a rollback needs no checkout surgery.
+It is the same implementation the parity harness diffs against, so its behaviour
+is the behaviour the port was validated to reproduce.
+
+```bash
+# Docker: behind the `python` profile, on its own port and its own Redis
+# database, so it can also run beside the Rust gateway for a parity run.
+make compose-python-up
+make compose-python-down
+
+# FreeBSD jail: three phases, none of which `all` runs.
+make jail-shell   # or ssh + jexec, then:
+#   install.sh python-deps      # python313, uv, pkgconf, openblas, ninja
+#   install.sh python           # build the venv (numpy and pydantic-core
+#                               # compile from source; this is the slow part)
+#   install.sh python-services  # swap the rc.d script and restart
+# `install.sh services` switches back to the Rust gateway.
+```
+
+Two things worth knowing before a rollback.
+
+**The cache survives it.** Both implementations compute identical cache keys, so
+a rollback inherits a warm L2 rather than starting cold. They store the same JSON
+with different whitespace, though — Python writes `json.dumps` of the decoded
+body, the Rust gateway writes the engine's bytes — so a response served from an
+entry the other wrote differs cosmetically. No JSON client can tell; a byte-exact
+comparison can.
+
+**Do not run both against one Redis database for a parity run.** A response
+served from a shared warm cache never exercises the gateway's upstream URL
+construction, so the run can pass while the two build entirely different queries.
+The compose profile already points the FastAPI service at database 1.
+
+---
+
 ## Optional — the Rust evaluation spike
 
 `rust-spike/` reimplements `/route` and `/matrix` in axum. It is a **benchmark
@@ -273,7 +326,7 @@ make compose-spike-health
 make compose-spike-down
 
 # FreeBSD jail: needs `make jail-bootstrap` first (it installs the rust package
-# the Python path already requires for pydantic-core)
+# the gateway itself is built with)
 make jail-spike-up             # builds with cargo, installs, starts on 8001
 make jail-spike-health
 make jail-spike-down

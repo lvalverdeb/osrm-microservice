@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "body_b64": "eyJjb2RlIjoiT2siLCJyb3V0ZXMiOlt7Imdlb21ldHJ5Ijp7InR5cGUiOiJMaW5lU3RyaW5nIiwiY29vcmRpbmF0ZXMiOltbLTg0LjA4ODEsOS45MzE4OTk5OTk5OTk5OTldLFstODQuMDc4MDk5OTk5OTk5OTksOS45NDE4OTk5OTk5OTk5OTldXX0sImRpc3RhbmNlIjoxOS40LCJkdXJhdGlvbiI6My44OCwibGVncyI6W119XSwid2F5cG9pbnRzIjpbeyJsb2NhdGlvbiI6Wy04NC4wOSw5LjkzXSwibmFtZSI6InJvYWQtMCJ9LHsibG9jYXRpb24iOlstODQuMDksOS45M10sIm5hbWUiOiJyb2FkLTEifV19",
+  "request": {
+    "method": "GET",
+    "path": "/route/v1/driving/0,0;0,0",
+    "query": ""
+  }
+}

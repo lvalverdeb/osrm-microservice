@@ -4,6 +4,19 @@
 replace an inference about the gateway's cost with a measurement. It is not a
 port and not a deployment candidate.
 
+> **The port this motivated now exists, and has been measured on the jail.**
+> Everything below was measured on a laptop against a constant-time stub, which
+> is the right way to isolate gateway cost and the wrong way to predict what a
+> deployment will do. On real hardware, with both complete gateways on the same
+> jail against the same engine, ordinary traffic showed **no meaningful latency
+> difference** — the engine is the constraint, exactly as
+> [the scaling plan](../docs/planning/SCALING_READINESS_PLAN.md) predicted. The
+> port pays on cache hits (~2×) and memory (~3.8×), not on throughput. Cite
+> those numbers, not the 3× below.
+>
+> The figures here remain valid for what they measure: this two-endpoint spike,
+> against a stub, with none of the features either real gateway carries.
+
 ## Running it
 
 ```sh
@@ -97,11 +110,22 @@ and today it is not the gateway. The jail measured ~150 req/s uncached against
 `osrm-routed` on 2 cores — below even Python's ceiling. A faster gateway in
 front of that engine queues on the same engine.
 
+That held up. When the full port was measured on the jail on 2026-08-24, mixed
+traffic at 30/s came out p50 3 ms for Rust against 4 ms for Python, with
+Python's *mean* marginally lower — no meaningful difference, and none of the 3×
+ceiling reachable. The throughput headroom below is real and, at this scale,
+unspendable. The measurement, and the two places the port does pay, are recorded
+under "Not in this plan" in
+[the scaling readiness plan](../docs/planning/SCALING_READINESS_PLAN.md).
+
 The places where the gap would show up are narrower than the table suggests:
 
 - **Cache-hit traffic**, where the gateway is the entire request. The load test
   measured 1-9 ms cached against 82 ms uncached, a 10-40x multiplier, so hits
   can dominate a real workload — and every one of them is pure gateway cost.
+  The tables above are *all* cache misses: `loadtest/run.py` randomises every
+  payload by design. Drive that regime with `--distinct-payloads N`, which
+  cycles N fixed payloads instead, against either gateway.
 - **CPU contention on a shared box**, where gateway and engine compete for the
   same 2 cores. At 150 req/s and ~3 ms of CPU per request, the Python gateway
   spends roughly half a core; the spike would spend a fraction of that, and the
