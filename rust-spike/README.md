@@ -95,13 +95,18 @@ gateway-only figure measured separately (0.34 ms for `/route` through
 Which of those two numbers matters depends entirely on what the bottleneck is,
 and today it is not the gateway. The jail measured ~150 req/s uncached against
 `osrm-routed` on 2 cores — below even Python's ceiling. A faster gateway in
-front of that engine queues on the same engine.
+front of that engine queues on the same engine. That conclusion, and what would
+overturn it, is recorded under "Not in this plan" in
+[the scaling readiness plan](../docs/planning/SCALING_READINESS_PLAN.md).
 
 The places where the gap would show up are narrower than the table suggests:
 
 - **Cache-hit traffic**, where the gateway is the entire request. The load test
   measured 1-9 ms cached against 82 ms uncached, a 10-40x multiplier, so hits
   can dominate a real workload — and every one of them is pure gateway cost.
+  The tables above are *all* cache misses: `loadtest/run.py` randomises every
+  payload by design. Drive that regime with `--distinct-payloads N`, which
+  cycles N fixed payloads instead, against either gateway.
 - **CPU contention on a shared box**, where gateway and engine compete for the
   same 2 cores. At 150 req/s and ~3 ms of CPU per request, the Python gateway
   spends roughly half a core; the spike would spend a fraction of that, and the

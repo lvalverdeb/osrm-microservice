@@ -6,7 +6,10 @@ request rate -- the coordinated-omission trap that closed-loop tools like `ab`
 and `wrk` fall into.
 
 Every payload is randomised, which also defeats the gateway's L1/Redis caches:
-replaying one payload measures the cache, not the service.
+replaying one payload measures the cache, not the service. That is the right
+default, but cache hits are a real workload too -- and the one where the gateway
+is the whole request rather than a thin wrapper around the engine. Draw from a
+small fixed set of payloads instead with `--distinct-payloads N`.
 
 Every endpoint the gateway exposes has a scenario, and `mixed` fires a weighted
 blend of them concurrently, which is what a real client population looks like.
@@ -220,6 +223,31 @@ def _build(rng: random.Random, scenario: str, size: int) -> Request:
     return BUILDERS[name](rng, DEFAULT_SIZE[name])
 
 
+def _payload_source(rng: random.Random, plan: Plan) -> Callable[[int], Request]:
+    """Return the function that supplies each request's payload.
+
+    With `plan.distinct_payloads` at 0 every request is freshly randomised, so
+    the gateway's caches never hit and the run measures the engine path. Above
+    0, a pool of that many payloads is built once and cycled deterministically:
+    after the first pass every request is a cache hit, which measures the
+    gateway alone. Cycling rather than sampling keeps the pool's entries equally
+    warm, so none expires out of an LRU while others are hammered.
+
+    Args:
+        rng: Seeded source for payload contents.
+        plan: The phase being run; supplies scenario, size and pool size.
+
+    Returns:
+        A callable taking the request's index within the phase and returning
+        the request to send.
+    """
+    if plan.distinct_payloads <= 0:
+        return lambda issued: _build(rng, plan.scenario, plan.size)
+    pool = [_build(rng, plan.scenario, plan.size)
+            for _ in range(plan.distinct_payloads)]
+    return lambda issued: pool[issued % len(pool)]
+
+
 async def _fire(client: httpx.AsyncClient, request: Request, out: list[Sample],
                 headers: dict[str, str] | None = None) -> None:
     """Send one request and record its path, status and wall-clock duration.
@@ -288,6 +316,10 @@ class Plan:
     # that many synthetic X-Forwarded-For values, which the gateway honours only
     # when it was started with a matching --forwarded-allow-ips.
     forwarded_for_pool: int = 0
+    # 0 randomises every payload, so nothing is ever served from cache. N > 0
+    # cycles N fixed payloads, turning the run into cache-hit traffic once the
+    # pool is warm -- the regime where gateway cost is the entire request.
+    distinct_payloads: int = 0
 
 
 async def generate(plan: Plan, out: list[Sample],
@@ -305,6 +337,7 @@ async def generate(plan: Plan, out: list[Sample],
         True if the phase ran to completion, False if the guard stopped it.
     """
     rng = random.Random(plan.seed)
+    payload = _payload_source(rng, plan)
     interval = 1.0 / plan.rate
     limits = httpx.Limits(max_connections=plan.max_connections)
     completed = True
@@ -321,7 +354,7 @@ async def generate(plan: Plan, out: list[Sample],
             if delay > 0:
                 await asyncio.sleep(delay)
             tasks.append(asyncio.create_task(
-                _fire(client, _build(rng, plan.scenario, plan.size), out,
+                _fire(client, payload(issued), out,
                       _forwarded_for(plan.forwarded_for_pool, issued))))
             issued += 1
         if completed:
@@ -339,7 +372,8 @@ async def _drive(args: argparse.Namespace, out: list[Sample]) -> None:
                         duration=args.duration, size=args.size,
                         timeout=args.timeout,
                         max_connections=args.max_connections, seed=args.seed,
-                        forwarded_for_pool=args.forwarded_for_pool),
+                        forwarded_for_pool=args.forwarded_for_pool,
+                        distinct_payloads=args.distinct_payloads),
                    out)
 
 
@@ -424,6 +458,9 @@ def _report(args: argparse.Namespace, samples: list[Sample], elapsed: float) -> 
 
     print(f"\n{args.scenario} @ {args.rate}/s for {args.duration}s -> {args.url}")
     print(f"  seed       {args.seed} (pass --seed to replay this payload sequence)")
+    if args.distinct_payloads > 0:
+        print(f"  payloads   {args.distinct_payloads} distinct, cycled "
+              f"(cache-hit traffic after the first {args.distinct_payloads})")
     print(f"  requests   {len(samples)} in {elapsed:.1f}s "
           f"({len(samples) / elapsed:.1f}/s completed)")
     print("  statuses   " + status_summary(samples))
@@ -456,6 +493,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "X-Forwarded-For, so the per-client rate limiter does "
                              "not cap the run; requires the gateway to trust this "
                              "source (--forwarded-allow-ips). 0 disables")
+    parser.add_argument("--distinct-payloads", type=int, default=0, metavar="N",
+                        help="cycle N fixed payloads instead of randomising each "
+                             "one, so the run measures cache hits rather than the "
+                             "engine. Small N warms in the first N requests; 0 "
+                             "(default) never hits the cache")
     parser.add_argument("--seed", type=int, default=None,
                         help="fix the payload sequence; random each run by default, "
                              "because replaying a previous run's payloads measures "

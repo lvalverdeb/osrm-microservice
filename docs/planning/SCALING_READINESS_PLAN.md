@@ -265,3 +265,25 @@ list.
 **Horizontal deployment** — replicating the read-only `.osrm.*` data across
 nodes, a balancer tier, shared Redis. That work is straightforward once P0 and
 P1 are done, and pointless before.
+
+**Rewriting the gateway in a faster language.** Measured rather than argued:
+`rust-spike/` reimplements `/route` and `/matrix` in axum, and per-worker
+throughput is roughly 3× apart — Python saturates near 250–280 req/s, the spike
+was still flat at 797 req/s with its ceiling never found. That gap does not pay
+for itself at this scale. The jail measured ~150 req/s uncached against
+`osrm-routed` on 2 cores — below even Python's ceiling — so a faster gateway in
+front of that engine queues on the same engine, and below saturation the two are
+1–2 ms apart. The engine is the constraint; the gateway is not.
+
+Two things would make it worth revisiting. **Cache-heavy traffic**, where the
+gateway *is* the whole request: the baseline above shows cached `/route` at
+1–9 ms against 82 ms uncached, so hits can dominate a real workload, and
+`loadtest/run.py --distinct-payloads N` measures that regime specifically.
+And **CPU contention**, once gateway and engine compete for the same 2 cores.
+
+Two caveats before anyone cites the 3×. The spike's numbers came from a laptop
+against a constant-time stub, not the jail — `make spike-bench` reproduces them
+on real hardware. And the spike carries no rate limiting, metrics, tracing,
+Redis L2 or retry, all of which the Python side was paying for during the run,
+so some of the gap is those features rather than the language. Full method,
+results and caveats in [`../../rust-spike/README.md`](../../rust-spike/README.md).
