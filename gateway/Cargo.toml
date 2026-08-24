@@ -1,0 +1,54 @@
+[package]
+name = "osrm-api-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "OSRM API Gateway -- Rust port of the FastAPI gateway in src/app"
+
+# The binary name is load-bearing: deploy/freebsd/osrm-api-gateway invokes it by
+# this name under daemon(8), and deploy/docker's CMD does the same. Renaming it
+# means editing both deployment paths.
+[[bin]]
+name = "osrm-api-gateway"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "signal", "sync", "time"] }
+serde = { version = "1", features = ["derive", "rc"] }
+# raw_value lets the VRP solver embed the engine's route geometry verbatim
+# instead of decoding and re-encoding its coordinates.
+serde_json = { version = "1", features = ["raw_value"] }
+# No TLS: the gateway talks plain HTTP to osrm-routed, and dropping the TLS
+# stack keeps the FreeBSD build honest about what is actually exercised.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+moka = { version = "0.12", features = ["future"] }
+sha2 = "0.10"
+# Exposition format, histogram bucketing and label handling are not worth
+# hand-rolling, and the text format is a contract scrapers depend on.
+prometheus = { version = "0.13", default-features = false }
+# L2 cache. No TLS, matching the deployments: Redis is reached over the jail's
+# loopback or the compose network, never across the internet.
+redis = { version = "0.27", default-features = false, features = ["tokio-comp"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# OTLP over HTTP rather than gRPC: reqwest is already here, and the gRPC stack
+# would add tonic and prost to a build that has to fit a 2 GB jail.
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["http-proto", "reqwest-client", "trace"] }
+tracing-opentelemetry = "0.28"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+# For the 2-core/2 GB jail, where fat LTO with a single codegen unit is the most
+# memory-hungry way to build and risks the OOM killer on a box already shared
+# with two other jails. Runtime difference is immaterial for an I/O-bound proxy.
+[profile.jail]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
