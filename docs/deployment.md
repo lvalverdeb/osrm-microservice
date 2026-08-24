@@ -287,7 +287,32 @@ make jail-shell   # or ssh + jexec, then:
 #   install.sh python           # build the venv (numpy and pydantic-core
 #                               # compile from source; this is the slow part)
 #   install.sh python-services  # swap the rc.d script and restart
-# `install.sh services` switches back to the Rust gateway.
+# `install.sh gateway-services` switches back -- gateway only, so the engine
+# is not restarted and the return takes seconds rather than a map reload.
+```
+
+**Any phase that restarts a service looks like it has hung when run over ssh.**
+`daemon(8)` starts the new child with the ssh session's stdout still attached,
+so ssh does not return until that child exits -- which, for a service, is never.
+The work has already finished by then; interrupting it is the only way to cause
+damage. Detach the output and poll for readiness instead:
+
+```bash
+ssh "$JAIL_HOST" 'doas jexec api sh -c "cd /usr/local/www/osrm-api-gateway && \
+    nohup sh deploy/freebsd/install.sh gateway-services > /tmp/install.log 2>&1 &"'
+# Wait for the phase, not for readiness -- see below.
+until ssh "$JAIL_HOST" 'doas jexec api grep -q "done: " /tmp/install.log'; do sleep 5; done
+```
+
+The `make jail-*` targets already do this.
+
+**Do not poll `/ready` to decide a phase has finished.** When the service is
+already running, `/ready` is answered by the *old* process throughout, so it
+returns immediately and tells you nothing about whether your change landed. Wait
+for `done:` in the phase log, then confirm the pid actually changed:
+
+```bash
+ssh "$JAIL_HOST" 'doas jexec api cat /var/run/osrm_api_gateway.pid'
 ```
 
 Two things worth knowing before a rollback.
