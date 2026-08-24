@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
+use utoipa::ToSchema;
 use serde_json::value::RawValue;
 use serde_json::Value;
 use tokio::sync::Semaphore;
@@ -29,16 +30,58 @@ pub struct ChunkRequest {
 }
 
 /// One solved vehicle route.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, ToSchema)]
 pub struct VehicleRoute {
+    /// The depot's own id when it has one, `<id>-<n>` when it needs more than
+    /// one vehicle, otherwise a running integer.
+    #[schema(value_type = String)]
     pub vehicle_id: Value,
     pub depot_index: usize,
     pub stops_indices: Vec<usize>,
+    #[schema(value_type = Option<Vec<String>>)]
     pub stop_ids: Option<Vec<Value>>,
     pub stop_coordinates: Option<Vec<Coordinate>>,
+    /// GeoJSON LineString, relayed from the engine unchanged.
+    #[schema(value_type = Object)]
     pub route_geometry: Box<RawValue>,
     pub distance_meters: f64,
     pub duration_seconds: f64,
+}
+
+/// The `/vrp` response.
+///
+/// A real struct rather than an ad-hoc `json!`, so the OpenAPI document is
+/// generated from the type that serialises the response rather than from a
+/// second description of it.
+#[derive(Debug, serde::Serialize, ToSchema)]
+pub struct VrpResponse {
+    pub code: String,
+    pub routes: Vec<VehicleRoute>,
+    pub total_distance: f64,
+    pub total_duration: f64,
+}
+
+impl VrpResponse {
+    /// Build the response, summing the totals from the routes themselves.
+    pub fn new(routes: Vec<VehicleRoute>) -> Self {
+        Self {
+            total_distance: routes.iter().map(|r| r.distance_meters).sum(),
+            total_duration: routes.iter().map(|r| r.duration_seconds).sum(),
+            code: "Ok".to_string(),
+            routes,
+        }
+    }
+}
+
+/// The `/vrp/allocate` response.
+#[derive(Debug, serde::Serialize, ToSchema)]
+pub struct VrpAllocationResponse {
+    pub code: String,
+    /// Depot id (or index, when no ids were supplied) to the stops it serves.
+    #[schema(value_type = Object)]
+    pub allocations: serde_json::Map<String, Value>,
+    #[schema(value_type = Vec<String>)]
+    pub unreachable_stops: Vec<Value>,
 }
 
 #[derive(Deserialize)]

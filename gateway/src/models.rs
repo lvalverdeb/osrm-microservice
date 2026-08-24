@@ -16,11 +16,12 @@
 //! and `/trip` default them to true and `"distance,duration"`.
 
 use serde::Deserialize;
+use utoipa::ToSchema;
 
 use crate::pyfloat::python_float;
 
 /// One validation failure, shaped like a pydantic error entry.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ToSchema)]
 pub struct ValidationError {
     /// Pydantic's error type slug, e.g. `greater_than_equal`.
     #[serde(rename = "type")]
@@ -46,7 +47,7 @@ pub trait Validate {
 
 macro_rules! literal_enum {
     ($name:ident { $( $variant:ident => $wire:literal ),* $(,)? }) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
         pub enum $name {
             $( #[serde(rename = $wire)] $variant, )*
         }
@@ -88,7 +89,7 @@ fn default_capacity() -> i64 { 35 }
 fn hysteresis() -> f64 { 2000.0 }
 
 /// A longitude/latitude pair.
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, ToSchema)]
 pub struct Coordinate {
     pub longitude: f64,
     pub latitude: f64,
@@ -157,7 +158,7 @@ fn length_errors(len: usize, field: &str, min: usize, max: usize) -> Vec<Validat
 ///
 /// Flattened into each request so the wire format matches Python's, where these
 /// are inherited fields rather than a nested object.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct CommonRoutingOptions {
     pub bearings: Option<Vec<Option<String>>>,
     pub radiuses: Option<Vec<Option<f64>>>,
@@ -170,7 +171,7 @@ pub struct CommonRoutingOptions {
 
 /// `alternatives` accepts either a flag or a count, and serialises differently
 /// for each: `true`/`false` for the flag, the bare number for a count.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum Alternatives {
     Flag(bool),
@@ -194,7 +195,7 @@ impl Alternatives {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct RouteRequest {
     pub origin: Coordinate,
     pub destination: Coordinate,
@@ -239,7 +240,7 @@ impl Validate for RouteRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct MatrixRequest {
     pub coordinates: Vec<Coordinate>,
     #[serde(default)]
@@ -321,7 +322,7 @@ impl Validate for MatrixRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GpsBreadcrumb {
     pub longitude: f64,
     pub latitude: f64,
@@ -354,7 +355,7 @@ impl GpsBreadcrumb {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct MatchRequest {
     pub breadcrumbs: Vec<GpsBreadcrumb>,
     #[serde(default = "driving")]
@@ -411,7 +412,7 @@ impl Validate for MatchRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct TripRequest {
     pub coordinates: Vec<Coordinate>,
     #[serde(default = "yes")]
@@ -471,7 +472,7 @@ impl Validate for TripRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct NearestRequest {
     pub coordinate: Coordinate,
     /// No upper bound, matching the Python schema.
@@ -495,7 +496,7 @@ impl Validate for NearestRequest {
 }
 
 /// A stop or depot: a coordinate that may carry a caller-supplied identifier.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct Stop {
     pub longitude: f64,
     pub latitude: f64,
@@ -509,7 +510,7 @@ impl Stop {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct VrpRequest {
     pub depots: Vec<Stop>,
     pub stops: Vec<Stop>,

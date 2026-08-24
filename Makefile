@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-python-up compose-python-down compose-python-logs compose-python-health openapi-snapshot parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-python-up compose-python-down compose-python-logs compose-python-health openapi-reference parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -196,16 +196,18 @@ spike-bench:
 		--scenario $(LOADTEST_SCENARIO) --rate $(LOADTEST_RATE) \
 		--duration $(LOADTEST_DURATION) $(LOADTEST_ARGS)
 
-# The Rust gateway serves FastAPI's generated OpenAPI schema rather than
-# re-describing every model in utoipa annotations: the pydantic models stay the
-# single source of truth, and there is no third description to drift. The binary
-# embeds this file at build time, so regenerate it whenever the models change --
-# tests/test_openapi_snapshot.py fails if you forget.
-openapi-snapshot:
+# The gateway now generates its own OpenAPI document from the Rust types that
+# serve the requests (see gateway/src/openapi.rs). This target refreshes the
+# FastAPI schema it is checked against, which exists only while the FastAPI
+# implementation is still in the tree as the rollback target: a Rust test
+# asserts the two describe the same API, so a drift in either is caught. When
+# FastAPI goes, delete the reference file, that test, and this target.
+openapi-reference:
 	uv run python -c "import json, sys; sys.path.insert(0, 'src'); \
 		from app.main import app; \
-		json.dump(app.openapi(), open('gateway/openapi.json', 'w'), indent=2, sort_keys=True)"
-	@echo "wrote gateway/openapi.json"
+		json.dump(app.openapi(), open('gateway/fastapi-openapi.reference.json', 'w'), \
+			indent=2, sort_keys=True)"
+	@echo "wrote gateway/fastapi-openapi.reference.json"
 
 # --- Differential parity (parity/) ------------------------------------------
 # Replays a seeded corpus against both gateways and diffs the responses, with

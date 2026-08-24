@@ -17,7 +17,7 @@ use crate::models::{
 };
 use crate::osrm::client::OsrmClient;
 use crate::osrm::params;
-use crate::vrp::solve::{self, VehicleRoute};
+use crate::vrp::solve::{self, VehicleRoute, VrpAllocationResponse, VrpResponse};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -45,6 +45,17 @@ fn accept<T: for<'de> serde::Deserialize<'de> + Validate>(body: &[u8]) -> Result
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/route",
+    tag = "Routing",
+    request_body = RouteRequest,
+    responses(
+        (status = 200, description = "Calculate a route through an ordered list of points.", body = Object),
+        (status = 422, description = "Request failed validation"),
+        (status = 429, description = "Rate limit exceeded"),
+    )
+)]
 pub async fn route(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let request: RouteRequest = accept(&body)?;
     let coordinates = request.coordinates();
@@ -54,6 +65,17 @@ pub async fn route(State(state): State<AppState>, body: Bytes) -> Result<Respons
     Ok(proxy(state.client.get(&endpoint, &params).await?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/matrix",
+    tag = "Routing",
+    request_body = MatrixRequest,
+    responses(
+        (status = 200, description = "Duration and distance matrix between coordinates.", body = Object),
+        (status = 422, description = "Request failed validation"),
+        (status = 429, description = "Rate limit exceeded"),
+    )
+)]
 pub async fn matrix(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let request: MatrixRequest = accept(&body)?;
     check_budget(&state, &request)?;
@@ -62,6 +84,17 @@ pub async fn matrix(State(state): State<AppState>, body: Bytes) -> Result<Respon
 }
 
 /// The same upstream call as `/matrix`, reshaped into a node-link graph.
+#[utoipa::path(
+    post,
+    path = "/matrix-graph",
+    tag = "Routing",
+    request_body = MatrixRequest,
+    responses(
+        (status = 200, description = "The same matrix, returned as a node-link graph.", body = Object),
+        (status = 422, description = "Request failed validation"),
+        (status = 429, description = "Rate limit exceeded"),
+    )
+)]
 pub async fn matrix_graph(State(state): State<AppState>, body: Bytes)
     -> Result<Response, ApiError> {
     let request: MatrixRequest = accept(&body)?;
@@ -133,6 +166,17 @@ fn build_graph(data: &Value, request: &MatrixRequest) -> Value {
     json!({"directed": true, "multigraph": false, "graph": {}, "nodes": nodes, "edges": edges})
 }
 
+#[utoipa::path(
+    post,
+    path = "/match",
+    tag = "Routing",
+    request_body = MatchRequest,
+    responses(
+        (status = 200, description = "Snap a noisy GPS trace to the road network.", body = Object),
+        (status = 422, description = "Request failed validation"),
+        (status = 429, description = "Rate limit exceeded"),
+    )
+)]
 pub async fn match_trace(State(state): State<AppState>, body: Bytes)
     -> Result<Response, ApiError> {
     let request: MatchRequest = accept(&body)?;
@@ -141,6 +185,17 @@ pub async fn match_trace(State(state): State<AppState>, body: Bytes)
     Ok(proxy(state.client.get(&endpoint, &params::match_trace(&request)).await?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/trip",
+    tag = "Routing",
+    request_body = TripRequest,
+    responses(
+        (status = 200, description = "Optimise the visiting order of a set of coordinates.", body = Object),
+        (status = 422, description = "Request failed validation"),
+        (status = 429, description = "Rate limit exceeded"),
+    )
+)]
 pub async fn trip(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let request: TripRequest = accept(&body)?;
     let endpoint = format!("/trip/v1/{}/{}", request.profile.as_str(),
@@ -148,6 +203,17 @@ pub async fn trip(State(state): State<AppState>, body: Bytes) -> Result<Response
     Ok(proxy(state.client.get(&endpoint, &params::trip(&request)).await?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/nearest",
+    tag = "Routing",
+    request_body = NearestRequest,
+    responses(
+        (status = 200, description = "Snap a coordinate to the nearest road segment.", body = Object),
+        (status = 422, description = "Request failed validation"),
+        (status = 429, description = "Rate limit exceeded"),
+    )
+)]
 pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let request: NearestRequest = accept(&body)?;
     let endpoint = format!("/nearest/v1/{}/{}", request.profile.as_str(),
@@ -156,6 +222,18 @@ pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Respo
 }
 
 /// Vector tiles: raw protobuf, no cache, no retry.
+#[utoipa::path(
+    get,
+    path = "/tile/{profile}/{z}/{x}/{y}",
+    tag = "Routing",
+    params(
+        ("profile" = String, Path, description = "Routing profile"),
+        ("z" = i64, Path, description = "Zoom level; OSRM serves tiles from 12 up"),
+        ("x" = i64, Path, description = "Tile column"),
+        ("y" = String, Path, description = "Tile row, with the .mvt suffix"),
+    ),
+    responses((status = 200, description = "Mapbox Vector Tile", content_type = "application/x-protobuf"))
+)]
 pub async fn tile(State(state): State<AppState>,
                   Path((profile, z, x, y)): Path<(String, i64, i64, String)>)
     -> Result<Response, ApiError> {
@@ -165,23 +243,14 @@ pub async fn tile(State(state): State<AppState>,
     Ok(([(header::CONTENT_TYPE, "application/x-protobuf")], bytes).into_response())
 }
 
-/// The OpenAPI schema, as FastAPI generates it.
+/// The OpenAPI schema, generated from the types that serve the requests.
 ///
-/// Served from a snapshot rather than generated here. FastAPI derives its
-/// schema from the same pydantic models that enforce validation, so it cannot
-/// disagree with the Python gateway's behaviour; annotating the Rust models
-/// instead would create a third description of every field -- alongside the
-/// serde types and the hand-written `validate()` -- free to drift from both.
-/// While the Python gateway remains in-tree as the parity reference, taking its
-/// output verbatim is exact and costs nothing to keep in step.
-///
-/// `make openapi-snapshot` regenerates it; `tests/test_openapi_snapshot.py`
-/// fails when it drifts. Revisit when Python is removed.
+/// See `crate::openapi` for why this is generated rather than served from a
+/// snapshot of FastAPI's output.
 pub async fn openapi() -> Response {
     // Embedded rather than read at runtime, so the binary stays a single file
     // and neither deployment path grows an extra artifact to install.
-    ([(header::CONTENT_TYPE, "application/json")], include_str!("../openapi.json"))
-        .into_response()
+    ([(header::CONTENT_TYPE, "application/json")], crate::openapi::document()).into_response()
 }
 
 /// The interactive docs page.
@@ -207,6 +276,10 @@ pub async fn docs(State(state): State<AppState>) -> Response {
 }
 
 /// Prometheus exposition. Never rate limited, so a scrape is never shed.
+#[utoipa::path(
+    get, path = "/metrics", tag = "Infrastructure",
+    responses((status = 200, description = "Prometheus exposition", content_type = "text/plain"))
+)]
 pub async fn metrics(State(state): State<AppState>) -> Response {
     ([(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
      state.metrics.encode()).into_response()
@@ -216,6 +289,10 @@ pub async fn metrics(State(state): State<AppState>) -> Response {
 ///
 /// A dashboard reads the body for detail; `/ready` is what a balancer probes,
 /// and both deployment health checks use that instead.
+#[utoipa::path(
+    get, path = "/health", tag = "Infrastructure",
+    responses((status = 200, description = "Always 200, even when the engine is down; read the body for detail", body = Object))
+)]
 pub async fn health(State(state): State<AppState>) -> Json<Value> {
     let up = state.client.ping().await;
     Json(json!({
@@ -226,6 +303,13 @@ pub async fn health(State(state): State<AppState>) -> Json<Value> {
 }
 
 /// 503 when the engine is down, so a balancer drains this node.
+#[utoipa::path(
+    get, path = "/ready", tag = "Infrastructure",
+    responses(
+        (status = 200, description = "Engine reachable", body = Object),
+        (status = 503, description = "Engine unreachable; a balancer should drain this node"),
+    )
+)]
 pub async fn ready(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     let up = state.client.ping().await;
     let body = json!({
@@ -311,6 +395,17 @@ fn accept_vrp(state: &AppState, body: &[u8]) -> Result<VrpRequest, ApiError> {
 }
 
 /// Allocate stops to depots, then solve one TSP per vehicle load.
+#[utoipa::path(
+    post,
+    path = "/vrp",
+    tag = "Optimisation",
+    request_body = VrpRequest,
+    responses(
+        (status = 200, description = "Routes, one per vehicle load", body = VrpResponse),
+        (status = 422, description = "Request failed validation"),
+        (status = 503, description = "Optimisation capacity exhausted; retry after the given interval"),
+    )
+)]
 pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let request = accept_vrp(&state, &body)?;
     let _permit = vrp_slot(&state).await?;
@@ -330,15 +425,21 @@ pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response,
                                                 state.settings.vrp_chunk_concurrency).await?);
     }
 
-    let total_distance: f64 = routes.iter().map(|r| r.distance_meters).sum();
-    let total_duration: f64 = routes.iter().map(|r| r.duration_seconds).sum();
-    Ok(Json(json!({
-        "code": "Ok", "routes": routes,
-        "total_distance": total_distance, "total_duration": total_duration
-    })).into_response())
+    Ok(Json(VrpResponse::new(routes)).into_response())
 }
 
 /// The allocation phase alone, with caller IDs mapped back on.
+#[utoipa::path(
+    post,
+    path = "/vrp/allocate",
+    tag = "Optimisation",
+    request_body = VrpRequest,
+    responses(
+        (status = 200, description = "Stops assigned to depots", body = VrpAllocationResponse),
+        (status = 422, description = "Request failed validation"),
+        (status = 503, description = "Optimisation capacity exhausted; retry after the given interval"),
+    )
+)]
 pub async fn vrp_allocate(State(state): State<AppState>, body: Bytes)
     -> Result<Response, ApiError> {
     let request = accept_vrp(&state, &body)?;
@@ -362,9 +463,12 @@ pub async fn vrp_allocate(State(state): State<AppState>, body: Bytes)
         .map(|&i| if any_ids { id_or_index(i, &stop_ids) } else { Value::from(i) })
         .collect();
 
-    Ok(Json(json!({
-        "code": "Ok", "allocations": allocations, "unreachable_stops": unreachable
-    })).into_response())
+    Ok(Json(VrpAllocationResponse {
+        code: "Ok".to_string(),
+        allocations,
+        unreachable_stops: unreachable,
+    })
+    .into_response())
 }
 
 /// A caller-supplied ID, falling back to the raw index.

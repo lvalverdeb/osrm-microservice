@@ -10,6 +10,7 @@ mod error;
 mod handlers;
 mod metrics;
 mod models;
+mod openapi;
 mod osrm;
 mod pyfloat;
 mod ratelimit;
