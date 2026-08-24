@@ -2,12 +2,21 @@
 
 [English](https://github.com/lvalverde/osrm-microservice/blob/main/README.md) | [Español](https://github.com/lvalverde/osrm-microservice/blob/main/README.es.md) | [Français](https://github.com/lvalverde/osrm-microservice/blob/main/README.fr.md)
 
+> **The `osrm-api-gateway` PyPI package is no longer maintained.**
+> [0.2.1](https://pypi.org/project/osrm-api-gateway/0.2.1/) is its final release.
+> The gateway was a FastAPI application; it is now a Rust binary built from
+> [`gateway/`](gateway) and is not distributed on PyPI. Existing installs keep
+> working, but no further releases will be made — see
+> [docs/planning/SCALING_READINESS_PLAN.md](docs/planning/SCALING_READINESS_PLAN.md)
+> for what changed and what it was measured to be worth.
+
+
 High-performance routing and map-matching microservice for Costa Rica.
 
 ## Deployment
 
 The project supports **two** deployment options. Both run the same three services
-— the OSRM engine, a Redis cache and the FastAPI gateway — and everything either
+— the OSRM engine, a Redis cache and the gateway — and everything either
 one needs lives under [`deploy/`](deploy).
 
 | Option | Files | Start with | When |
@@ -53,7 +62,7 @@ make jail-up          # deploy the gateway and start all services
 
 ## Core Services
 
-The application encapsulates complex routing logic into several key services located in `src/app/services/`:
+The gateway encapsulates its routing logic in several modules under [`gateway/src/`](gateway/src):
 
 ### 1. OSRM Client (`osrm_client.py`)
 An asynchronous HTTP client that interacts directly with the C++ OSRM backend. It formats queries and standardizes responses.
@@ -69,7 +78,7 @@ A comprehensive Vehicle Routing Problem (VRP) solver. It implements a Location-A
 
 ## Client Application Usage Examples
 
-Here are some examples of how a client application can interact with the FastAPI microservice using Python's `requests` library:
+Here are some examples of how a client application can interact with the gateway using Python's `requests` library:
 
 ```python
 import requests
@@ -273,6 +282,6 @@ For a detailed developer guide, see:
 ## Components
 
 - **OSRM Engine**: C++ routing powerhouse running the MLD algorithm.
-- **FastAPI Gateway**: Asynchronous Python API providing specialized endpoints for map matching, graph generation, and Vehicle Routing Problems (VRP).
+- **Gateway**: An async Rust service (axum) providing specialised endpoints for map matching, graph generation, and Vehicle Routing Problems (VRP).
 - **VRP Solver**: Location-Allocation engine for multi-vehicle clustering with support for custom IDs and capacity-based route splitting.
 - **NetworkX Integration**: Transparently converts matrix outputs into serializable graphs.
