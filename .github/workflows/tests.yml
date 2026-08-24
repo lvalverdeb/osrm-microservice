@@ -28,3 +28,39 @@ jobs:
 
       - name: Test with pytest
         run: make test
+
+      - name: Lint
+        run: make lint
+
+  # The gateway that both deployments actually run. Without this job a change to
+  # gateway/ can merge with a compile error and nothing notices -- the Python
+  # job above passes regardless, because it never touches the crate.
+  rust:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu-latest ships a stable Rust toolchain, so no toolchain action is
+      # needed. Cargo output is cached because the gateway pulls ~160 crates and
+      # a cold build dominates the job.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            gateway/target
+            rust-spike/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('gateway/Cargo.lock', 'rust-spike/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # --locked so CI builds the dependency versions that were tested, rather
+      # than resolving newer ones and failing somewhere unrelated.
+      - name: Test the gateway
+        run: cargo test --locked --manifest-path gateway/Cargo.toml
+
+      # The spike has no tests -- it is a benchmark target -- but it has to keep
+      # compiling, or the comparison it exists to reproduce quietly rots.
+      - name: Check the spike still builds
+        run: cargo check --locked --manifest-path rust-spike/Cargo.toml
