@@ -5,11 +5,22 @@
 # Runs inside the target jail (or on a plain FreeBSD host) and is invoked over
 # SSH by the Makefile's jail-* targets. Every phase is safe to re-run.
 #
-# Usage: install.sh [deps|sync|app|data|services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]
+# Usage: install.sh [deps|sync|app|data|services|gateway-services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]
 #
 # Sources are staged into JAIL_STAGE by the Makefile as the login user, then
 # placed into JAIL_DIR here with escalated privileges -- the login user has no
 # write access to /usr/local/www.
+#
+# Any phase that restarts a service appears to hang when run over ssh: daemon(8)
+# starts the new child with the ssh session's stdout still attached, so ssh does
+# not return until that child exits -- which is never, for a service. The work
+# has already finished. Detach the output and poll instead:
+#
+#   ssh host 'doas jexec api sh -c "cd DIR && nohup sh deploy/freebsd/install.sh \
+#       services > /tmp/install.log 2>&1 &"'
+#   until curl -fsS http://HOST:8000/ready >/dev/null; do sleep 5; done
+#
+# The Makefile's jail-* targets already run this way.
 #
 # Configuration arrives via the environment; see the defaults below.
 
@@ -235,7 +246,7 @@ phase_python_services() {
     # Knobs the FastAPI script needs and the Rust one does not.
     run sysrc osrm_api_gateway_forwarded_allow_ips="$FORWARDED_ALLOW_IPS" >/dev/null
     run service osrm_api_gateway restart
-    log "rolled back to FastAPI; 'install.sh services' switches back"
+    log "rolled back to FastAPI; 'install.sh gateway-services' switches back"
 }
 
 phase_data() {
@@ -277,11 +288,6 @@ phase_services() {
     [ -f "$OSRM_BUILT" ] || \
         die "no routing data at ${OSRM_DATA}; run the data phase first ('make jail-data')."
     log "installing rc.d scripts and configuring services"
-    # Installed with underscores: service(8) resolves by filename, so
-    # /usr/local/etc/rc.d/osrm-api-gateway would be invisible to
-    # `service osrm_api_gateway`.
-    run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-api-gateway" \
-        /usr/local/etc/rc.d/osrm_api_gateway
     run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-routed" \
         /usr/local/etc/rc.d/osrm_routed
     run install -m 644 "${APP_DIR}/deploy/freebsd/redis-cache.conf" \
@@ -300,22 +306,52 @@ phase_services() {
     run sysrc osrm_routed_base="$OSRM_DATA" >/dev/null
     run sysrc redis_enable=YES >/dev/null
     run sysrc redis_config=/usr/local/etc/redis-osrm-cache.conf >/dev/null
+
+    for svc in redis osrm_routed; do
+        log "restarting ${svc}"
+        run service "$svc" restart
+    done
+
+    phase_gateway_services
+}
+
+# The gateway alone: no engine, no redis, no data check.
+#
+# Split out of phase_services because returning from a rollback only needs the
+# gateway swapped, and going through the full phase restarts osrm_routed --
+# which reloads the map data and turns a seconds-long swap into minutes, during
+# an incident, for no reason. `install.sh python-services` is the mirror of this
+# one and has always been gateway-only.
+phase_gateway_services() {
+    [ -f "${APP_DIR}/deploy/freebsd/osrm-api-gateway" ] || \
+        die "rc.d script osrm-api-gateway missing; run the sync phase first."
+    [ -x "${APP_DIR}/osrm-api-gateway" ] || \
+        die "no gateway binary at ${APP_DIR}; run the app phase first ('make jail-up')."
+
+    log "installing the gateway rc.d script"
+    # Installed with underscores: service(8) resolves by filename, so
+    # /usr/local/etc/rc.d/osrm-api-gateway would be invisible to
+    # `service osrm_api_gateway`.
+    run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-api-gateway" \
+        /usr/local/etc/rc.d/osrm_api_gateway
+
     run sysrc osrm_api_gateway_enable=YES >/dev/null
     run sysrc osrm_api_gateway_dir="$APP_DIR" >/dev/null
     run sysrc osrm_api_gateway_user="$APP_USER" >/dev/null
     run sysrc osrm_api_gateway_host="$API_HOST" >/dev/null
     run sysrc osrm_api_gateway_port="$API_PORT" >/dev/null
     run sysrc osrm_api_gateway_workers="$API_WORKERS" >/dev/null
-    # No forwarded_allow_ips knob and no metrics_dir: the binary reads
+    # Neither knob belongs to this implementation: the binary reads
     # FORWARDED_ALLOW_IPS from .env (a `*` would glob through ${name}_env), and
     # workers are threads in one process, so there is no multiprocess metrics
-    # directory to maintain. Clear them if a FastAPI install left them behind.
+    # directory. Cleared rather than left behind, because `python-services`
+    # sets forwarded_allow_ips and a rollback cycle would otherwise leave it
+    # stale in rc.conf.
     run sysrc -x osrm_api_gateway_metrics_dir >/dev/null 2>&1 || true
+    run sysrc -x osrm_api_gateway_forwarded_allow_ips >/dev/null 2>&1 || true
 
-    for svc in redis osrm_routed osrm_api_gateway; do
-        log "restarting ${svc}"
-        run service "$svc" restart
-    done
+    log "restarting osrm_api_gateway"
+    run service osrm_api_gateway restart
 }
 
 phase_health() {
@@ -434,6 +470,7 @@ case "${1:-all}" in
     deps)     phase_deps ;;
     sync)     phase_sync ;;
     app)      phase_app ;;
+    gateway-services) phase_gateway_services ;;
     python-deps)     phase_python_deps ;;
     python)          phase_python ;;
     python-services) phase_python_services ;;
@@ -446,7 +483,7 @@ case "${1:-all}" in
     all)      phase_deps; phase_sync; phase_app; phase_data; phase_services ;;
     spike)      phase_spike ;;
     spike-stop) phase_spike_stop ;;
-    *)        die "usage: $0 [deps|sync|app|data|services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]" ;;
+    *)        die "usage: $0 [deps|sync|app|data|services|gateway-services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]" ;;
 esac
 
 log "done: ${1:-all}"
