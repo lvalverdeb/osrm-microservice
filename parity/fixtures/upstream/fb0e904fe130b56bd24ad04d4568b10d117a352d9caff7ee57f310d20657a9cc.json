@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "content_type": "application/x-protobuf",
+  "body_b64": "dGlsZTpjYXI6dGlsZSgyMTgxLDM4NjgsMTMpLm12dA==",
+  "request": {
+    "method": "GET",
+    "path": "/tile/v1/car/tile(2181,3868,13).mvt",
+    "query": ""
+  }
+}

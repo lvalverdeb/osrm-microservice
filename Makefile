@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish openapi-snapshot parity parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish openapi-snapshot parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -69,6 +69,8 @@ help:
 	@echo "  Differential parity (parity/):"
 	@echo "  parity           - Diff both gateways' responses over a seeded corpus"
 	@echo "  parity-selfcheck - Validate the harness itself; offline, no engine needed"
+	@echo "  parity-record    - Engine proxy that records upstream responses to fixtures"
+	@echo "  parity-replay    - Serve recorded fixtures instead of a real engine"
 
 download-data:
 	mkdir -p $(DATA_DIR)
@@ -197,6 +199,23 @@ parity:
 		--candidate $(PARITY_CANDIDATE) --seed $(PARITY_SEED) \
 		--cases $(PARITY_CASES) --report-json parity-report.json \
 		--report-dir parity-diffs $(PARITY_ARGS)
+
+# Record upstream responses once, replay them forever. Start one of these, point
+# a gateway's OSRM_BASE_URL at it, and run `make parity` as usual.
+#
+#   parity-record   forwards to a real engine and saves what it returns
+#   parity-replay   serves only what was recorded; anything else gets a 404
+#                   naming the URL, which is how a gateway that builds a
+#                   different upstream request gets caught
+PARITY_ENGINE      ?= http://127.0.0.1:5000
+PARITY_ENGINE_PORT ?= 5599
+
+parity-record:
+	uv run python -m parity.engine --mode record --engine $(PARITY_ENGINE) \
+		--port $(PARITY_ENGINE_PORT)
+
+parity-replay:
+	uv run python -m parity.engine --mode replay --port $(PARITY_ENGINE_PORT)
 
 # The harness's own acceptance test: the Python gateway against itself, in
 # process, engine stubbed. It must come back clean -- a dirty self-diff means
