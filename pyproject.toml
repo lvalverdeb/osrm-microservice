@@ -46,6 +46,10 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The repo root, so tests can import the dev-tree packages that are not part of
+# the wheel: `loadtest` (payload builders) and `parity` (the differential
+# harness). Without it pytest puts only `tests/` on sys.path.
+pythonpath = ["."]
 
 [build-system]
 requires = ["hatchling"]

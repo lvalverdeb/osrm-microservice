@@ -215,12 +215,17 @@ MIXED_WEIGHTS: dict[str, int] = {
 SCENARIOS = sorted(BUILDERS) + ["mixed"]
 
 
-def _build(rng: random.Random, scenario: str, size: int) -> Request:
+def build_request(rng: random.Random, scenario: str, size: int) -> Request:
     """Build one request for `scenario`, choosing an endpoint when mixed."""
     if scenario != "mixed":
         return BUILDERS[scenario](rng, size)
     name = rng.choices(list(MIXED_WEIGHTS), weights=list(MIXED_WEIGHTS.values()))[0]
     return BUILDERS[name](rng, DEFAULT_SIZE[name])
+
+
+# The parity harness builds its corpus from the same factories, so a change to
+# any builder moves the load corpus and the differential corpus together.
+_build = build_request
 
 
 def _payload_source(rng: random.Random, plan: Plan) -> Callable[[int], Request]:
