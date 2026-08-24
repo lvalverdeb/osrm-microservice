@@ -5,7 +5,7 @@
 # Runs inside the target jail (or on a plain FreeBSD host) and is invoked over
 # SSH by the Makefile's jail-* targets. Every phase is safe to re-run.
 #
-# Usage: install.sh [deps|sync|app|data|services|gateway-services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]
+# Usage: install.sh [deps|sync|app|data|services|gateway-services|stop|status|health|logs|all|spike|spike-stop]
 #
 # Sources are staged into JAIL_STAGE by the Makefile as the login user, then
 # placed into JAIL_DIR here with escalated privileges -- the login user has no
@@ -47,8 +47,6 @@ SPIKE_PORT="${JAIL_SPIKE_PORT:-8001}"
 # Shared app settings, staged from deploy/env/ alongside deploy/freebsd/.
 SHARED_ENV="${STAGE}/deploy/env/app.env"
 
-PYTHON="/usr/local/bin/python3.13"
-VENV="${APP_DIR}/.venv"
 PROFILE_LUA="/usr/local/share/osrm/profiles/${PROFILE}.lua"
 # OSRM_DATA is a base path, not a file: osrm-extract/partition/customize strip
 # the .osrm suffix and read and write ${OSRM_DATA}.<suffix> siblings. Nothing in
@@ -123,14 +121,8 @@ phase_sync() {
     log "placing sources into ${APP_DIR}"
     run mkdir -p "$APP_DIR"
     # Replace outright rather than merge, so deleted modules do not linger.
-    run rm -rf "${APP_DIR}/app" "${APP_DIR}/deploy"
+    run rm -rf "${APP_DIR}/deploy"
     run cp -R "${STAGE}/deploy" "${APP_DIR}/deploy"
-    # The FastAPI sources travel too: they are the rollback target, and nothing
-    # here builds or runs them unless `install.sh python` is asked for.
-    if [ -d "${STAGE}/src/app" ]; then
-        run cp -R "${STAGE}/src/app" "${APP_DIR}/app"
-        run cp "${STAGE}/pyproject.toml" "${APP_DIR}/pyproject.toml"
-    fi
     if [ -f "${STAGE}/README.md" ]; then
         run cp "${STAGE}/README.md" "${APP_DIR}/README.md"
     fi
@@ -190,63 +182,6 @@ ENVEOF"
     run chown -R "root:${APP_USER}" "$APP_DIR"
     run chmod 750 "$APP_DIR"
     run chmod 640 "${APP_DIR}/.env"
-}
-
-# --- rollback path ----------------------------------------------------------
-# The FastAPI gateway, kept installable so a rollback needs no checkout surgery.
-# Nothing in `all` runs these, and installing the venv does not by itself change
-# which implementation serves traffic -- that is the rc.d script, swapped by
-# `install.sh python-services`.
-
-phase_python_deps() {
-    # Only the FastAPI path needs these. PyPI publishes no FreeBSD wheels and
-    # FreeBSD packages Python modules for the default interpreter (3.12) only,
-    # so a 3.13 venv compiles every extension module itself:
-    #   pkgconf, openblas - numpy's meson build and its BLAS backend
-    #   ninja             - meson-python requests the PyPI `ninja` sdist only
-    #                       when no system ninja is on PATH, and that sdist
-    #                       builds CMake from source, which fails here
-    #   rust              - pydantic-core is a Rust extension; already installed
-    #                       by the deps phase, which builds the gateway with it
-    install_pkgs python313 uv pkgconf openblas ninja
-}
-
-phase_python() {
-    [ -x "$PYTHON" ] || die "${PYTHON} missing; run 'install.sh python-deps' first."
-    [ -f "${APP_DIR}/pyproject.toml" ] || die "no pyproject.toml in ${APP_DIR}; run the sync phase first."
-    # Fail now rather than tens of minutes into a build that cannot finish.
-    for _tool in cargo ninja; do
-        command -v "$_tool" >/dev/null 2>&1 || \
-            die "${_tool} missing; run 'install.sh python-deps' first."
-    done
-
-    if [ ! -x "${VENV}/bin/python" ]; then
-        log "creating venv at ${VENV} (python3.13)"
-        # Never `uv python install`: python-build-standalone ships no FreeBSD
-        # builds, so the pkg interpreter is the only option.
-        run uv venv --python "$PYTHON" "$VENV"
-    fi
-
-    # numpy and pydantic-core are compiled here. No BLAS fallback: numpy >= 2.0
-    # already defaults to allow-noblas=true, and `-C setup-args=` would apply to
-    # every package in the resolution, breaking backends that reject the option.
-    log "installing Python dependencies (numpy and pydantic-core are compiled from source; this is slow)"
-    run uv pip install --python "${VENV}/bin/python" -r "${APP_DIR}/pyproject.toml"
-
-    run chown -R "root:${APP_USER}" "$APP_DIR"
-    run chmod 750 "$APP_DIR"
-    log "venv installed; 'install.sh python-services' switches the service over to it"
-}
-
-phase_python_services() {
-    [ -x "${VENV}/bin/uvicorn" ] || die "no venv at ${VENV}; run 'install.sh python' first."
-    log "switching osrm_api_gateway to the FastAPI implementation"
-    run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-api-gateway.python" \
-        /usr/local/etc/rc.d/osrm_api_gateway
-    # Knobs the FastAPI script needs and the Rust one does not.
-    run sysrc osrm_api_gateway_forwarded_allow_ips="$FORWARDED_ALLOW_IPS" >/dev/null
-    run service osrm_api_gateway restart
-    log "rolled back to FastAPI; 'install.sh gateway-services' switches back"
 }
 
 phase_data() {
@@ -471,9 +406,6 @@ case "${1:-all}" in
     sync)     phase_sync ;;
     app)      phase_app ;;
     gateway-services) phase_gateway_services ;;
-    python-deps)     phase_python_deps ;;
-    python)          phase_python ;;
-    python-services) phase_python_services ;;
     data)     phase_data ;;
     services) phase_services ;;
     stop)     phase_stop ;;
@@ -483,7 +415,7 @@ case "${1:-all}" in
     all)      phase_deps; phase_sync; phase_app; phase_data; phase_services ;;
     spike)      phase_spike ;;
     spike-stop) phase_spike_stop ;;
-    *)        die "usage: $0 [deps|sync|app|data|services|gateway-services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]" ;;
+    *)        die "usage: $0 [deps|sync|app|data|services|gateway-services|stop|status|health|logs|all|spike|spike-stop]" ;;
 esac
 
 log "done: ${1:-all}"

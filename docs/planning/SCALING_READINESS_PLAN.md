@@ -279,7 +279,7 @@ P1 are done, and pointless before.
 
 **Rewriting the gateway in a faster language.** Done, and measured on the jail
 rather than argued about. `gateway/` is a complete Rust port; the FastAPI
-implementation remains as the rollback target. The measurement below is the one
+implementation has since been removed. The measurement below is the one
 that matters: both gateways running on the same jail against the same engine,
 driven over loopback from inside it, same seed, same tunables.
 
