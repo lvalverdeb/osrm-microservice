@@ -1,6 +1,6 @@
 # Docker deployment path. See ../../docs/deployment.md for the other one.
 #
-# Every build context is the repository root -- the API image copies src/app and
+# Every build context is the repository root -- the API image copies gateway/ and
 # pyproject.toml, the builder image copies data/ -- so the contexts below are
 # ../.. and the dockerfile: paths are root-relative. That makes this file usable
 # from any working directory:
@@ -93,35 +93,6 @@ services:
         condition: service_healthy
     restart: always
 
-  # The FastAPI gateway this port replaced, kept as the rollback target and the
-  # reference the parity harness diffs against. Behind a profile so a plain
-  # `make compose-up` never starts it; `make compose-python-up` does.
-  #
-  # It publishes a different port so both can run at once for a parity run --
-  # but point them at separate REDIS_URL databases if you do, or a shared warm
-  # L2 will serve responses neither gateway actually produced. See parity/.
-  api-python:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile.python
-    container_name: osrm-api-gateway-python
-    profiles:
-      - python
-    ports:
-      - "${PYTHON_API_PORT:-8082}:8000"
-    env_file:
-      - ../env/app.env
-    environment:
-      - OSRM_BASE_URL=http://osrm-backend:5000
-      - REDIS_URL=redis://osrm-cache:6379/1
-      - WORKERS=${API_WORKERS:-1}
-      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
-    depends_on:
-      osrm:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: "no"
 
   # Rust evaluation spike -- a benchmark target, not a second gateway. Two of
   # eleven endpoints, no rate limiting, metrics, tracing, retry or L2 cache.

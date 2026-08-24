@@ -4,11 +4,10 @@ The project supports **two** deployment options, and no others. Both run the sam
 three services — the OSRM engine, a Redis cache, and the API gateway — and both
 are driven from the `Makefile`.
 
-**The deployed gateway is the Rust implementation in [`gateway/`](../gateway).**
-The FastAPI implementation it replaced is still in the tree as the parity
-reference and the rollback target; see [Rolling back](#rolling-back-to-fastapi).
-Neither is the `rust-spike/` benchmark target, which remains what it always was —
-two endpoints, no production features, and never in front of traffic.
+**The gateway is [`gateway/`](../gateway), a Rust binary.** The FastAPI
+implementation it replaced has been removed; `git log` has it if you need to see
+what it did. Not to be confused with `rust-spike/`, which remains what it always
+was — a two-endpoint benchmark target, never in front of traffic.
 
 | | **Docker** | **FreeBSD jail** |
 |---|---|---|
@@ -119,19 +118,11 @@ the Dockerfile.
 | File | Role |
 |---|---|
 | `Dockerfile` | The gateway image — builds `gateway/` and runs the binary |
-| `Dockerfile.python` | The FastAPI gateway, kept as the rollback target |
 | `Dockerfile.builder` | Runs extract/partition/customize, exports `/data` |
 | `Dockerfile.osrm` | OSRM runtime, with the built data copied in from the builder |
 | `Dockerfile.spike` | The two-endpoint benchmark target, unchanged |
-| `entrypoint.sh` | Used by `Dockerfile.python` only — see below |
-| `docker-compose.yml` | The three services plus the `build`, `python` and `spike` profiles |
+| `docker-compose.yml` | The three services plus the `build` and `spike` profiles |
 
-`entrypoint.sh` exists because the FastAPI image needs work done before uvicorn
-starts: create and wipe `PROMETHEUS_MULTIPROC_DIR` so N worker *processes*
-aggregate their metrics, and translate `FORWARDED_ALLOW_IPS` into a uvicorn
-flag. The Rust image has no entrypoint script — `WORKERS` is tokio threads
-inside one process sharing one registry, and the binary reads
-`FORWARDED_ALLOW_IPS` itself, so there is nothing left to arrange.
 
 ---
 
@@ -190,7 +181,7 @@ Above one worker, both paths also set `PROMETHEUS_MULTIPROC_DIR` and wipe that
 directory at start. Without it `prometheus_client` counts in process memory and a
 scrape reports roughly 1/N of the traffic — plausible-looking numbers that are
 silently wrong; stale files from a previous run are double-counted for the same
-reason. `deploy/docker/entrypoint.sh` and `deploy/freebsd/osrm-api-gateway`
+reason. `deploy/freebsd/osrm-api-gateway`
 implement the same rules, so do not add `--workers` by overriding `command:`.
 
 Each worker carries its own L1 cache and httpx pool, so memory grows with the
@@ -268,68 +259,6 @@ Each deployment overrides exactly two settings, `OSRM_BASE_URL` and `REDIS_URL`,
 because only it knows where its engine and cache live. Everything else is shared,
 so changing a rate limit or cache TTL in `deploy/env/app.env` changes both
 deployments. Full precedence rules are in [configuration.md](configuration.md).
-
-## Rolling back to FastAPI
-
-The FastAPI gateway is kept installable so a rollback needs no checkout surgery.
-It is the same implementation the parity harness diffs against, so its behaviour
-is the behaviour the port was validated to reproduce.
-
-```bash
-# Docker: behind the `python` profile, on its own port and its own Redis
-# database, so it can also run beside the Rust gateway for a parity run.
-make compose-python-up
-make compose-python-down
-
-# FreeBSD jail: three phases, none of which `all` runs.
-make jail-shell   # or ssh + jexec, then:
-#   install.sh python-deps      # python313, uv, pkgconf, openblas, ninja
-#   install.sh python           # build the venv (numpy and pydantic-core
-#                               # compile from source; this is the slow part)
-#   install.sh python-services  # swap the rc.d script and restart
-# `install.sh gateway-services` switches back -- gateway only, so the engine
-# is not restarted and the return takes seconds rather than a map reload.
-```
-
-**Any phase that restarts a service looks like it has hung when run over ssh.**
-`daemon(8)` starts the new child with the ssh session's stdout still attached,
-so ssh does not return until that child exits -- which, for a service, is never.
-The work has already finished by then; interrupting it is the only way to cause
-damage. Detach the output and poll for readiness instead:
-
-```bash
-ssh "$JAIL_HOST" 'doas jexec api sh -c "cd /usr/local/www/osrm-api-gateway && \
-    nohup sh deploy/freebsd/install.sh gateway-services > /tmp/install.log 2>&1 &"'
-# Wait for the phase, not for readiness -- see below.
-until ssh "$JAIL_HOST" 'doas jexec api grep -q "done: " /tmp/install.log'; do sleep 5; done
-```
-
-The `make jail-*` targets already do this.
-
-**Do not poll `/ready` to decide a phase has finished.** When the service is
-already running, `/ready` is answered by the *old* process throughout, so it
-returns immediately and tells you nothing about whether your change landed. Wait
-for `done:` in the phase log, then confirm the pid actually changed:
-
-```bash
-ssh "$JAIL_HOST" 'doas jexec api cat /var/run/osrm_api_gateway.pid'
-```
-
-Two things worth knowing before a rollback.
-
-**The cache survives it.** Both implementations compute identical cache keys, so
-a rollback inherits a warm L2 rather than starting cold. They store the same JSON
-with different whitespace, though — Python writes `json.dumps` of the decoded
-body, the Rust gateway writes the engine's bytes — so a response served from an
-entry the other wrote differs cosmetically. No JSON client can tell; a byte-exact
-comparison can.
-
-**Do not run both against one Redis database for a parity run.** A response
-served from a shared warm cache never exercises the gateway's upstream URL
-construction, so the run can pass while the two build entirely different queries.
-The compose profile already points the FastAPI service at database 1.
-
----
 
 ## Optional — the Rust evaluation spike
 

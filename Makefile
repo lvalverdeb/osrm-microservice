@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-python-up compose-python-down compose-python-logs compose-python-health openapi-reference parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -55,14 +55,9 @@ help:
 	@echo "  clean-pkg      - Remove Python build artifacts"
 	@echo "  test           - Run the pytest suite"
 	@echo "  lint           - Run ruff checks"
-	@echo "  spaghetti      - Run the spaghetti-detector complexity/architecture scan"
-	@echo "  fenceline      - Run the fenceline vulnerability scan (fails on high severity or above)"
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
 	@echo "  capacity       - Full capacity assessment with an OOM guard (LOADTEST_URL, CAPACITY_ARGS)"
-	@echo ""
-	@echo "  FastAPI rollback (the implementation the Rust gateway replaced):"
-	@echo "  compose-python-up/-down/-logs/-health - Run it beside the Rust gateway"
 	@echo ""
 	@echo "  Rust evaluation spike (rust-spike/) -- a benchmark target, not a gateway:"
 	@echo "  compose-spike-up/-down/-logs/-health - Run the spike beside the Docker api service"
@@ -114,31 +109,6 @@ compose-health:
 		sleep 1; \
 	done
 	@echo "Compose health checks passed."
-
-# --- FastAPI rollback (deploy/docker/Dockerfile.python) ---------------------
-# The implementation the Rust gateway replaced, kept runnable. Behind a profile
-# so a plain `make compose-up` never starts it. It publishes PYTHON_API_PORT
-# and uses a separate Redis database, so it can run beside the Rust gateway for
-# a parity run without the two sharing a warm L2 -- see parity/.
-COMPOSE_PYTHON = $(COMPOSE) --profile python
-
-compose-python-up:
-	$(COMPOSE_PYTHON) up -d --build api-python
-	$(MAKE) compose-python-health
-
-compose-python-down:
-	$(COMPOSE_PYTHON) rm -sf api-python
-
-compose-python-logs:
-	$(COMPOSE_PYTHON) logs --tail=100 api-python
-
-compose-python-health:
-	$(COMPOSE_PYTHON) ps api-python
-	@i=0; until $(COMPOSE_PYTHON) exec -T api-python curl -fsS http://localhost:8000/ready >/dev/null; do \
-		i=$$((i+1)); \
-		if [ $$i -ge 30 ]; then echo "FastAPI gateway readiness failed after 30 attempts"; exit 1; fi; \
-		sleep 2; \
-	done; echo "FastAPI gateway ready"
 
 # --- Rust evaluation spike (rust-spike/) -----------------------------------
 # A benchmark target, not a second gateway: two of eleven endpoints, no rate
@@ -202,13 +172,6 @@ spike-bench:
 # implementation is still in the tree as the rollback target: a Rust test
 # asserts the two describe the same API, so a drift in either is caught. When
 # FastAPI goes, delete the reference file, that test, and this target.
-openapi-reference:
-	uv run python -c "import json, sys; sys.path.insert(0, 'src'); \
-		from app.main import app; \
-		json.dump(app.openapi(), open('gateway/fastapi-openapi.reference.json', 'w'), \
-			indent=2, sort_keys=True)"
-	@echo "wrote gateway/fastapi-openapi.reference.json"
-
 # --- Differential parity (parity/) ------------------------------------------
 # Replays a seeded corpus against both gateways and diffs the responses, with
 # per-endpoint tolerance: exact for /matrix and /tile, float-tolerant for the
@@ -254,23 +217,8 @@ parity-selfcheck:
 	uv run python -m pytest tests/test_parity_selfdiff.py tests/test_parity_compare.py \
 		tests/test_parity_corpus.py tests/test_parity_quality.py -q
 
-build-pkg:
-	@echo "Building osrm-api-gateway package..."
-	uv build
-
-publish: build-pkg
-	@echo "Publishing to PyPI..."
-	@if [ -z "$$UV_PUBLISH_TOKEN" ]; then \
-		echo "Error: UV_PUBLISH_TOKEN is not set in .env file or environment variables."; \
-		exit 1; \
-	fi
-	uv publish --token $$UV_PUBLISH_TOKEN
-
 clean:
 	rm -rf $(DATA_DIR)
-
-clean-pkg:
-	rm -rf dist/
 
 test:
 	uv run python -m pytest tests/ -q --tb=short
@@ -278,8 +226,6 @@ test:
 lint:
 	uv run ruff check .
 
-spaghetti:
-	spaghetti --package osrm-api-gateway=src/app --severity warning
 
 # --baseline suppresses only the fingerprints listed in the file, each matched on
 # [cwe_id, file, exact code line]. A suppression therefore stops applying as soon
@@ -287,8 +233,6 @@ spaghetti:
 # each entry is in the file's _comment block.
 FENCELINE_BASELINE ?= .fenceline-baseline.json
 
-fenceline:
-	fenceline --package osrm-api-gateway=src/app --baseline $(FENCELINE_BASELINE)
 
 # --- load testing ------------------------------------------------------------
 # Open-model generator: requests are launched on a fixed schedule, so a slow
@@ -379,13 +323,12 @@ JAILCTL = $(JAIL_ENV) sh $(HOST_STAGE)/deploy/freebsd/jailctl.sh
 
 jail-stage:
 	@echo "Staging sources to $(JAIL_HOST):$(HOST_STAGE)"
-	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy $(HOST_STAGE)/gateway \
+	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/deploy $(HOST_STAGE)/gateway \
 		$(HOST_STAGE)/rust-spike && mkdir -p $(HOST_STAGE)/data'
-	@# gateway/ is what gets built and deployed. src/app and pyproject.toml
-	@# still travel because the FastAPI implementation is the rollback target
-	@# (`install.sh python`); target/ is excluded so the jail builds its own.
-	@tar -cf - src/app pyproject.toml deploy/freebsd deploy/env README.md \
-		gateway/Cargo.toml gateway/Cargo.lock gateway/src gateway/openapi.json \
+	@# gateway/ is what gets built and deployed; target/ is excluded so the jail
+	@# builds its own.
+	@tar -cf - deploy/freebsd deploy/env README.md \
+		gateway/Cargo.toml gateway/Cargo.lock gateway/src \
 		rust-spike/Cargo.toml rust-spike/Cargo.lock rust-spike/src | \
 		$(JAIL_SSH) 'tar -xf - -C $(HOST_STAGE)'
 	@if [ ! -f $(DATA_DIR)/$(OSM_FILE) ]; then \
