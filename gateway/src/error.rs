@@ -71,14 +71,93 @@ impl IntoResponse for ApiError {
 }
 
 /// Decode a request body, reporting a parse failure the way pydantic would.
+///
+/// Two things matter to callers, and serde supplies neither on its own. `loc`
+/// must name the offending field, because that is what a client branches on --
+/// `serde_path_to_error` provides the path. And the message must not carry
+/// `at line 1 column 44`: a byte offset into the request is parser detail, and
+/// pydantic emits nothing like it.
+///
+/// The full pydantic taxonomy is still not reproduced: no `url`, no echoed
+/// `input`, and the `type` slugs are approximations. The two fields a client
+/// actually reads now match.
 pub fn parse_body<T: for<'de> serde::Deserialize<'de>>(body: &[u8]) -> Result<T, ApiError> {
-    serde_json::from_slice(body).map_err(|err| {
+    let deserializer = &mut serde_json::Deserializer::from_slice(body);
+    serde_path_to_error::deserialize(deserializer).map_err(|err| {
+        let parsed = classify(&err.inner().to_string());
         ApiError::Validation(vec![ValidationError {
-            kind: "model_attributes_type".to_string(),
-            loc: vec!["body".to_string()],
-            msg: err.to_string(),
+            kind: parsed.kind.to_string(),
+            loc: location(&err.path().to_string(), parsed.field.as_deref()),
+            msg: parsed.message,
         }])
     })
+}
+
+/// One serde failure, translated.
+struct ParseFailure {
+    kind: &'static str,
+    message: String,
+    /// Set when the failure names a field serde could not attribute to a path,
+    /// i.e. a missing key, which is reported against its containing object.
+    field: Option<String>,
+}
+
+/// Build pydantic's `loc`: `body`, then the path to the failing field.
+fn location(path: &str, missing_field: Option<&str>) -> Vec<String> {
+    let mut loc = vec!["body".to_string()];
+    if path != "." {
+        loc.extend(path.split('.').filter(|part| !part.is_empty()).map(str::to_string));
+    }
+    if let Some(field) = missing_field {
+        loc.push(field.to_string());
+    }
+    loc
+}
+
+/// Translate serde's wording into pydantic's for the shapes clients actually hit.
+fn classify(raw: &str) -> ParseFailure {
+    // Drop serde's position suffix before anything else.
+    let text = raw.split(" at line ").next().unwrap_or(raw).trim();
+
+    if let Some(field) = text.strip_prefix("missing field ") {
+        return ParseFailure {
+            kind: "missing",
+            message: "Field required".to_string(),
+            field: Some(field.trim().trim_matches('`').to_string()),
+        };
+    }
+    if text.starts_with("unknown variant ") {
+        if let Some(expected) = text.split("expected one of ").nth(1) {
+            return ParseFailure {
+                kind: "literal_error",
+                message: format!("Input should be {}", oxford(expected)),
+                field: None,
+            };
+        }
+    }
+    if text.starts_with("invalid type: string") {
+        return ParseFailure {
+            kind: "float_parsing",
+            message: "Input should be a valid number, unable to parse string as a number"
+                .to_string(),
+            field: None,
+        };
+    }
+    ParseFailure { kind: "model_attributes_type", message: text.to_string(), field: None }
+}
+
+/// Render serde's backtick-quoted alternatives as pydantic renders them:
+/// `'a', 'b' or 'c'`.
+fn oxford(expected: &str) -> String {
+    let options: Vec<String> = expected
+        .split(',')
+        .map(|option| format!("'{}'", option.trim().trim_matches('`')))
+        .collect();
+    match options.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, head)) => format!("{} or {last}", head.join(", ")),
+        None => String::new(),
+    }
 }
 
 #[cfg(test)]

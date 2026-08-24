@@ -102,19 +102,24 @@ impl Coordinate {
 
     fn validate_at(&self, loc: &[&str]) -> Vec<ValidationError> {
         let mut errors = Vec::new();
-        let mut check = |value: f64, field: &str, min: f64, max: f64| {
+        // Bounds are rendered as integers because the pydantic schema declares
+        // them as integers -- `Field(..., ge=-180, le=180)` -- and pydantic
+        // echoes the constraint value as given. Rendering them as floats
+        // produced "less than or equal to 180.0" against Python's "180", which
+        // an example client printing `Detail:` surfaced directly.
+        let mut check = |value: f64, field: &str, min: i64, max: i64| {
             let mut path = loc.to_vec();
             path.push(field);
-            if value < min {
+            if value < min as f64 {
                 errors.push(ValidationError::new("greater_than_equal", &path,
-                    format!("Input should be greater than or equal to {}", python_float(min))));
-            } else if value > max {
+                    format!("Input should be greater than or equal to {min}")));
+            } else if value > max as f64 {
                 errors.push(ValidationError::new("less_than_equal", &path,
-                    format!("Input should be less than or equal to {}", python_float(max))));
+                    format!("Input should be less than or equal to {max}")));
             }
         };
-        check(self.longitude, "longitude", -180.0, 180.0);
-        check(self.latitude, "latitude", -90.0, 90.0);
+        check(self.longitude, "longitude", -180, 180);
+        check(self.latitude, "latitude", -90, 90);
         errors
     }
 }
@@ -606,6 +611,9 @@ mod tests {
         assert_eq!(errors.len(), 2);
         assert_eq!(errors[0].loc, ["body", "origin", "longitude"]);
         assert_eq!(errors[1].loc, ["body", "destination", "latitude"]);
+        // Pydantic echoes the schema's integer bound, not a float.
+        assert_eq!(errors[0].msg, "Input should be greater than or equal to -180");
+        assert_eq!(errors[1].msg, "Input should be less than or equal to 90");
     }
 
     /// The one real validator in the Python schema, and its falsy-list rule:
