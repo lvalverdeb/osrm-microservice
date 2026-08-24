@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish openapi-snapshot parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean build-pkg publish clean-pkg test lint spaghetti fenceline loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish compose-python-up compose-python-down compose-python-logs compose-python-health openapi-snapshot parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -60,6 +60,9 @@ help:
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
 	@echo "  capacity       - Full capacity assessment with an OOM guard (LOADTEST_URL, CAPACITY_ARGS)"
+	@echo ""
+	@echo "  FastAPI rollback (the implementation the Rust gateway replaced):"
+	@echo "  compose-python-up/-down/-logs/-health - Run it beside the Rust gateway"
 	@echo ""
 	@echo "  Rust evaluation spike (rust-spike/) -- a benchmark target, not a gateway:"
 	@echo "  compose-spike-up/-down/-logs/-health - Run the spike beside the Docker api service"
@@ -111,6 +114,31 @@ compose-health:
 		sleep 1; \
 	done
 	@echo "Compose health checks passed."
+
+# --- FastAPI rollback (deploy/docker/Dockerfile.python) ---------------------
+# The implementation the Rust gateway replaced, kept runnable. Behind a profile
+# so a plain `make compose-up` never starts it. It publishes PYTHON_API_PORT
+# and uses a separate Redis database, so it can run beside the Rust gateway for
+# a parity run without the two sharing a warm L2 -- see parity/.
+COMPOSE_PYTHON = $(COMPOSE) --profile python
+
+compose-python-up:
+	$(COMPOSE_PYTHON) up -d --build api-python
+	$(MAKE) compose-python-health
+
+compose-python-down:
+	$(COMPOSE_PYTHON) rm -sf api-python
+
+compose-python-logs:
+	$(COMPOSE_PYTHON) logs --tail=100 api-python
+
+compose-python-health:
+	$(COMPOSE_PYTHON) ps api-python
+	@i=0; until $(COMPOSE_PYTHON) exec -T api-python curl -fsS http://localhost:8000/ready >/dev/null; do \
+		i=$$((i+1)); \
+		if [ $$i -ge 30 ]; then echo "FastAPI gateway readiness failed after 30 attempts"; exit 1; fi; \
+		sleep 2; \
+	done; echo "FastAPI gateway ready"
 
 # --- Rust evaluation spike (rust-spike/) -----------------------------------
 # A benchmark target, not a second gateway: two of eleven endpoints, no rate
@@ -349,9 +377,13 @@ JAILCTL = $(JAIL_ENV) sh $(HOST_STAGE)/deploy/freebsd/jailctl.sh
 
 jail-stage:
 	@echo "Staging sources to $(JAIL_HOST):$(HOST_STAGE)"
-	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy $(HOST_STAGE)/rust-spike && \
-		mkdir -p $(HOST_STAGE)/data'
+	@$(JAIL_SSH) 'rm -rf $(HOST_STAGE)/src $(HOST_STAGE)/deploy $(HOST_STAGE)/gateway \
+		$(HOST_STAGE)/rust-spike && mkdir -p $(HOST_STAGE)/data'
+	@# gateway/ is what gets built and deployed. src/app and pyproject.toml
+	@# still travel because the FastAPI implementation is the rollback target
+	@# (`install.sh python`); target/ is excluded so the jail builds its own.
 	@tar -cf - src/app pyproject.toml deploy/freebsd deploy/env README.md \
+		gateway/Cargo.toml gateway/Cargo.lock gateway/src gateway/openapi.json \
 		rust-spike/Cargo.toml rust-spike/Cargo.lock rust-spike/src | \
 		$(JAIL_SSH) 'tar -xf - -C $(HOST_STAGE)'
 	@if [ ! -f $(DATA_DIR)/$(OSM_FILE) ]; then \

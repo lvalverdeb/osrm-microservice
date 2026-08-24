@@ -5,7 +5,7 @@
 # Runs inside the target jail (or on a plain FreeBSD host) and is invoked over
 # SSH by the Makefile's jail-* targets. Every phase is safe to re-run.
 #
-# Usage: install.sh [deps|sync|app|data|services|stop|status|health|logs|all|spike|spike-stop]
+# Usage: install.sh [deps|sync|app|data|services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]
 #
 # Sources are staged into JAIL_STAGE by the Makefile as the login user, then
 # placed into JAIL_DIR here with escalated privileges -- the login user has no
@@ -89,17 +89,14 @@ install_pkgs() {
 
 phase_deps() {
     # osrm-backend brings the engine, its Lua profiles and its own rc.d script.
-    # The build toolchain is here only because PyPI publishes no FreeBSD wheels
-    # and FreeBSD packages Python modules for the default interpreter (3.12)
-    # only, so a 3.13 venv compiles every extension module itself:
-    #   pkgconf, openblas - numpy's meson build and its BLAS backend
-    #   ninja             - meson-python requests the PyPI `ninja` sdist only
-    #                       when no system ninja is on PATH, and that sdist
-    #                       builds CMake from source, which fails here
-    #   rust              - pydantic-core is a Rust extension; with no cargo on
-    #                       PATH maturin's sdist tries to download a rustup
-    #                       toolchain instead, and rustup has no FreeBSD target
-    install_pkgs osrm-backend redis python313 uv pkgconf openblas ninja rust
+    # rust builds the gateway itself.
+    #
+    # The Python toolchain that used to be here -- python313, uv, pkgconf,
+    # openblas, ninja -- is gone with the FastAPI gateway, and with it the slow
+    # part of a bootstrap: numpy and pydantic-core were compiled from source
+    # every time because PyPI publishes no FreeBSD wheels. The rollback path
+    # still needs them, so `install.sh python-deps` installs them on demand.
+    install_pkgs osrm-backend redis rust
 
     if ! pw usershow "$APP_USER" >/dev/null 2>&1; then
         log "creating service user ${APP_USER}"
@@ -111,26 +108,105 @@ phase_deps() {
 }
 
 phase_sync() {
-    [ -d "${STAGE}/src/app" ] || die "no staged sources at ${STAGE}; run 'make jail-stage' first."
+    [ -d "${STAGE}/gateway/src" ] || die "no staged gateway sources at ${STAGE}; run 'make jail-stage' first."
     log "placing sources into ${APP_DIR}"
     run mkdir -p "$APP_DIR"
     # Replace outright rather than merge, so deleted modules do not linger.
     run rm -rf "${APP_DIR}/app" "${APP_DIR}/deploy"
-    run cp -R "${STAGE}/src/app" "${APP_DIR}/app"
     run cp -R "${STAGE}/deploy" "${APP_DIR}/deploy"
-    run cp "${STAGE}/pyproject.toml" "${APP_DIR}/pyproject.toml"
+    # The FastAPI sources travel too: they are the rollback target, and nothing
+    # here builds or runs them unless `install.sh python` is asked for.
+    if [ -d "${STAGE}/src/app" ]; then
+        run cp -R "${STAGE}/src/app" "${APP_DIR}/app"
+        run cp "${STAGE}/pyproject.toml" "${APP_DIR}/pyproject.toml"
+    fi
     if [ -f "${STAGE}/README.md" ]; then
         run cp "${STAGE}/README.md" "${APP_DIR}/README.md"
     fi
 }
 
 phase_app() {
-    [ -x "$PYTHON" ] || die "${PYTHON} missing; run the deps phase first."
+    [ -d "${STAGE}/gateway/src" ] || \
+        die "no staged gateway sources at ${STAGE}; run 'make jail-stage' first."
+    # cargo arrives with the deps phase.
+    command -v cargo >/dev/null 2>&1 || \
+        die "cargo missing; run the deps phase first ('make jail-bootstrap')."
+
+    # The `jail` profile uses thin LTO across 16 codegen units. The default
+    # release profile is fat LTO in a single unit, which is the most
+    # memory-hungry way to build and can meet the OOM killer on a 2 GB box
+    # shared with two other jails. Fetching crates needs working DNS in the
+    # jail -- that is what 'make jail-host' arranges.
+    log "building the gateway (cargo, jail profile; first build fetches crates and is slow)"
+    run sh -c "cd '${STAGE}/gateway' && cargo build --profile jail --locked"
+
+    _built="${STAGE}/gateway/target/jail/osrm-api-gateway"
+    [ -x "${_built}" ] || die "build produced no binary at ${_built}"
+
+    log "installing the gateway into ${APP_DIR}"
+    run mkdir -p "$APP_DIR"
+    run install -m 755 "${_built}" "${APP_DIR}/osrm-api-gateway"
+
+    log "writing ${APP_DIR}/.env"
+    # Two tiers in one file. The shared block is deploy/env/app.env verbatim --
+    # the same file the Docker path loads via env_file -- so app settings are
+    # maintained in one place for both deployments. The overlay appended after it
+    # carries the values only this deployment can know; the binary's .env parser
+    # takes the last occurrence of a duplicated key, matching pydantic-settings,
+    # so the overlay wins.
+    #
+    # OSRM_API_URL stays at the shared value on purpose: it is a client-side
+    # setting (examples/ reads it to find the gateway), not a server one. The bind
+    # address is not written either -- it is not a URL a client could use, and the
+    # rc.d script passes it through ${name}_env from osrm_api_gateway_host.
+    #
+    # FORWARDED_ALLOW_IPS lives here rather than in a sysrc knob: rc.subr expands
+    # ${name}_env unquoted, and the value `*` would glob against the working
+    # directory. Change it by editing this file and restarting the service.
+    [ -f "${SHARED_ENV}" ] || \
+        die "missing ${SHARED_ENV}; run 'make jail-stage' from a checkout that has deploy/env/app.env"
+    run sh -c "cat '${SHARED_ENV}' > ${APP_DIR}/.env"
+    run sh -c "cat >> ${APP_DIR}/.env <<ENVEOF
+
+# --- generated by deploy/freebsd/install.sh; overrides the shared block above ---
+OSRM_BASE_URL=${OSRM_URL}
+REDIS_URL=${REDIS_URL}
+FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS}
+ENVEOF"
+
+    # Root owns the code, the service user only reads it: the gateway cannot
+    # rewrite its own binary or configuration at runtime.
+    run chown -R "root:${APP_USER}" "$APP_DIR"
+    run chmod 750 "$APP_DIR"
+    run chmod 640 "${APP_DIR}/.env"
+}
+
+# --- rollback path ----------------------------------------------------------
+# The FastAPI gateway, kept installable so a rollback needs no checkout surgery.
+# Nothing in `all` runs these, and installing the venv does not by itself change
+# which implementation serves traffic -- that is the rc.d script, swapped by
+# `install.sh python-services`.
+
+phase_python_deps() {
+    # Only the FastAPI path needs these. PyPI publishes no FreeBSD wheels and
+    # FreeBSD packages Python modules for the default interpreter (3.12) only,
+    # so a 3.13 venv compiles every extension module itself:
+    #   pkgconf, openblas - numpy's meson build and its BLAS backend
+    #   ninja             - meson-python requests the PyPI `ninja` sdist only
+    #                       when no system ninja is on PATH, and that sdist
+    #                       builds CMake from source, which fails here
+    #   rust              - pydantic-core is a Rust extension; already installed
+    #                       by the deps phase, which builds the gateway with it
+    install_pkgs python313 uv pkgconf openblas ninja
+}
+
+phase_python() {
+    [ -x "$PYTHON" ] || die "${PYTHON} missing; run 'install.sh python-deps' first."
     [ -f "${APP_DIR}/pyproject.toml" ] || die "no pyproject.toml in ${APP_DIR}; run the sync phase first."
     # Fail now rather than tens of minutes into a build that cannot finish.
     for _tool in cargo ninja; do
         command -v "$_tool" >/dev/null 2>&1 || \
-            die "${_tool} missing; run the deps phase first ('make jail-bootstrap')."
+            die "${_tool} missing; run 'install.sh python-deps' first."
     done
 
     if [ ! -x "${VENV}/bin/python" ]; then
@@ -140,39 +216,26 @@ phase_app() {
         run uv venv --python "$PYTHON" "$VENV"
     fi
 
-    # numpy and pydantic-core are compiled here; the deps phase installs the
-    # toolchain they need. No BLAS fallback: numpy >= 2.0 already defaults to
-    # allow-noblas=true, and `-C setup-args=` would apply to every package in
-    # the resolution, breaking build backends that reject the option.
+    # numpy and pydantic-core are compiled here. No BLAS fallback: numpy >= 2.0
+    # already defaults to allow-noblas=true, and `-C setup-args=` would apply to
+    # every package in the resolution, breaking backends that reject the option.
     log "installing Python dependencies (numpy and pydantic-core are compiled from source; this is slow)"
     run uv pip install --python "${VENV}/bin/python" -r "${APP_DIR}/pyproject.toml"
 
-    log "writing ${APP_DIR}/.env"
-    # Two tiers in one file. The shared block is deploy/env/app.env verbatim --
-    # the same file the Docker path loads via env_file -- so app settings are
-    # maintained in one place for both deployments. The overlay appended after it
-    # carries the values only this deployment can know; dotenv takes the last
-    # occurrence of a duplicated key, so the overlay wins.
-    #
-    # OSRM_API_URL stays at the shared value on purpose: it is a client-side
-    # setting (examples/ reads it to find the gateway), not a server one. The bind
-    # address is not written either -- it is not a URL a client could use, and the
-    # rc.d script passes it to uvicorn from osrm_api_gateway_host.
-    [ -f "${SHARED_ENV}" ] || \
-        die "missing ${SHARED_ENV}; run 'make jail-stage' from a checkout that has deploy/env/app.env"
-    run sh -c "cat '${SHARED_ENV}' > ${APP_DIR}/.env"
-    run sh -c "cat >> ${APP_DIR}/.env <<ENVEOF
-
-# --- generated by deploy/freebsd/install.sh; overrides the shared block above ---
-OSRM_BASE_URL=${OSRM_URL}
-REDIS_URL=${REDIS_URL}
-ENVEOF"
-
-    # Root owns the code, the service user only reads it: the gateway cannot
-    # rewrite its own source or configuration at runtime.
     run chown -R "root:${APP_USER}" "$APP_DIR"
     run chmod 750 "$APP_DIR"
-    run chmod 640 "${APP_DIR}/.env"
+    log "venv installed; 'install.sh python-services' switches the service over to it"
+}
+
+phase_python_services() {
+    [ -x "${VENV}/bin/uvicorn" ] || die "no venv at ${VENV}; run 'install.sh python' first."
+    log "switching osrm_api_gateway to the FastAPI implementation"
+    run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-api-gateway.python" \
+        /usr/local/etc/rc.d/osrm_api_gateway
+    # Knobs the FastAPI script needs and the Rust one does not.
+    run sysrc osrm_api_gateway_forwarded_allow_ips="$FORWARDED_ALLOW_IPS" >/dev/null
+    run service osrm_api_gateway restart
+    log "rolled back to FastAPI; 'install.sh services' switches back"
 }
 
 phase_data() {
@@ -214,6 +277,9 @@ phase_services() {
     [ -f "$OSRM_BUILT" ] || \
         die "no routing data at ${OSRM_DATA}; run the data phase first ('make jail-data')."
     log "installing rc.d scripts and configuring services"
+    # Installed with underscores: service(8) resolves by filename, so
+    # /usr/local/etc/rc.d/osrm-api-gateway would be invisible to
+    # `service osrm_api_gateway`.
     run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-api-gateway" \
         /usr/local/etc/rc.d/osrm_api_gateway
     run install -m 555 "${APP_DIR}/deploy/freebsd/osrm-routed" \
@@ -240,7 +306,11 @@ phase_services() {
     run sysrc osrm_api_gateway_host="$API_HOST" >/dev/null
     run sysrc osrm_api_gateway_port="$API_PORT" >/dev/null
     run sysrc osrm_api_gateway_workers="$API_WORKERS" >/dev/null
-    run sysrc osrm_api_gateway_forwarded_allow_ips="$FORWARDED_ALLOW_IPS" >/dev/null
+    # No forwarded_allow_ips knob and no metrics_dir: the binary reads
+    # FORWARDED_ALLOW_IPS from .env (a `*` would glob through ${name}_env), and
+    # workers are threads in one process, so there is no multiprocess metrics
+    # directory to maintain. Clear them if a FastAPI install left them behind.
+    run sysrc -x osrm_api_gateway_metrics_dir >/dev/null 2>&1 || true
 
     for svc in redis osrm_routed osrm_api_gateway; do
         log "restarting ${svc}"
@@ -364,6 +434,9 @@ case "${1:-all}" in
     deps)     phase_deps ;;
     sync)     phase_sync ;;
     app)      phase_app ;;
+    python-deps)     phase_python_deps ;;
+    python)          phase_python ;;
+    python-services) phase_python_services ;;
     data)     phase_data ;;
     services) phase_services ;;
     stop)     phase_stop ;;
@@ -373,7 +446,7 @@ case "${1:-all}" in
     all)      phase_deps; phase_sync; phase_app; phase_data; phase_services ;;
     spike)      phase_spike ;;
     spike-stop) phase_spike_stop ;;
-    *)        die "usage: $0 [deps|sync|app|data|services|stop|status|health|logs|all|spike|spike-stop]" ;;
+    *)        die "usage: $0 [deps|sync|app|data|services|stop|status|health|logs|all|spike|spike-stop|python-deps|python|python-services]" ;;
 esac
 
 log "done: ${1:-all}"
