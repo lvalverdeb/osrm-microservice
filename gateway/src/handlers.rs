@@ -267,9 +267,14 @@ pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Respo
     )
 )]
 pub async fn tile(State(state): State<AppState>,
-                  Path((profile, z, x, y)): Path<(String, i64, i64, String)>)
+                  Path((profile, z, x, y)): Path<(String, String, String, String)>)
     -> Result<Response, ApiError> {
-    let bytes = state.client.get_tile(&profile, z, x, tile_row(&y)?).await?;
+    // Extracted as strings and parsed here. Typing them `i64` handed rejection
+    // to axum, whose `PathRejection` is a 400 with a plain-text body, where
+    // FastAPI's `z: int` produced the same 422 JSON as any other bad input.
+    let bytes = state.client
+        .get_tile(&profile, tile_int(&z, "z")?, tile_int(&x, "x")?, tile_row(&y)?)
+        .await?;
     Ok(([(header::CONTENT_TYPE, "application/x-protobuf")], bytes).into_response())
 }
 
@@ -284,8 +289,13 @@ pub async fn tile(State(state): State<AppState>,
 /// from the wrong place -- the failure mode a caller cannot detect.
 fn tile_row(segment: &str) -> Result<i64, ApiError> {
     let row = segment.strip_suffix(".mvt").ok_or(ApiError::NotFound)?;
-    row.parse().map_err(|_| ApiError::Validation(vec![
-        ValidationError::path_param("int_parsing", "y",
+    tile_int(row, "y")
+}
+
+/// Parse one integer tile path parameter, reporting failure as pydantic does.
+fn tile_int(raw: &str, name: &str) -> Result<i64, ApiError> {
+    raw.parse().map_err(|_| ApiError::Validation(vec![
+        ValidationError::path_param("int_parsing", name,
             "Input should be a valid integer, unable to parse string as an integer")
     ]))
 }
@@ -444,6 +454,11 @@ mod tests {
         assert!(matches!(tile_row("200.png"), Err(ApiError::NotFound)));
         assert!(matches!(tile_row("abc.mvt"), Err(ApiError::Validation(_))));
         assert!(matches!(tile_row(".mvt"), Err(ApiError::Validation(_))));
+        // z and x were left to axum's Path rejection: a 400 with a plain-text
+        // body, where FastAPI's `z: int` gave the same 422 JSON as `y`.
+        assert_eq!(tile_int("12", "z").expect("a valid zoom"), 12);
+        assert!(matches!(tile_int("zz", "z"), Err(ApiError::Validation(_))));
+        assert!(matches!(tile_int("", "x"), Err(ApiError::Validation(_))));
     }
 
     #[test]

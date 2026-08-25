@@ -29,6 +29,11 @@ utoipa = { version = "5", features = ["axum_extras"] }
 # stack keeps the FreeBSD build honest about what is actually exercised.
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 moka = { version = "0.12", features = ["future"] }
+# catch-panic only. Starlette wrapped every request in ServerErrorMiddleware, so
+# an unexpected exception became a 500; without an equivalent a panic here
+# aborts the connection, the client sees a reset rather than a response, and the
+# request is never counted -- the metrics go quiet exactly when they matter.
+tower-http = { version = "0.6", default-features = false, features = ["catch-panic"] }
 sha2 = "0.10"
 # Exposition format, histogram bucketing and label handling are not worth
 # hand-rolling, and the text format is a contract scrapers depend on.

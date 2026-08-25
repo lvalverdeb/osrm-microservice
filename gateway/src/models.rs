@@ -42,6 +42,18 @@ pub mod bounds {
     pub const POSITIVE: f64 = 0.0;
 }
 
+/// Render one `loc` segment the way pydantic does.
+///
+/// A segment that is entirely digits is a list index and must serialise as a
+/// number; everything else is a field name. Field names in both schemas are
+/// Python identifiers, which cannot be all digits, so this never misreads one.
+pub fn loc_part(segment: &str) -> serde_json::Value {
+    match segment.parse::<u64>() {
+        Ok(index) => serde_json::Value::from(index),
+        Err(_) => serde_json::Value::from(segment),
+    }
+}
+
 /// One validation failure, shaped like a pydantic error entry.
 #[derive(Debug, Clone, serde::Serialize, ToSchema)]
 pub struct ValidationError {
@@ -49,7 +61,11 @@ pub struct ValidationError {
     #[serde(rename = "type")]
     pub kind: String,
     /// Path to the offending field, always starting with `body`.
-    pub loc: Vec<String>,
+    ///
+    /// List indices are JSON numbers, as pydantic emits them: a client doing
+    /// `loc[2] === 0` breaks against the quoted form.
+    #[schema(value_type = Vec<String>)]
+    pub loc: Vec<serde_json::Value>,
     pub msg: String,
 }
 
@@ -57,13 +73,13 @@ impl ValidationError {
     /// A failure on a path parameter, whose `loc` is rooted at `path`.
     pub fn path_param(kind: &str, name: &str, msg: &str) -> Self {
         Self { kind: kind.to_string(),
-               loc: vec!["path".to_string(), name.to_string()],
+               loc: vec![loc_part("path"), loc_part(name)],
                msg: msg.to_string() }
     }
 
     fn new(kind: &str, loc: &[&str], msg: String) -> Self {
-        let mut path = vec!["body".to_string()];
-        path.extend(loc.iter().map(|s| s.to_string()));
+        let mut path = vec![loc_part("body")];
+        path.extend(loc.iter().copied().map(loc_part));
         Self { kind: kind.to_string(), loc: path, msg }
     }
 }
@@ -826,7 +842,9 @@ mod tests {
             r#"{"depots":[{"longitude":0.0,"latitude":0.0}],
                 "stops":[{"longitude":-181.0,"latitude":0.0}]}"#);
         let errors = request.validate_with(2000);
-        assert_eq!(errors[0].loc, ["body", "stops", "0", "longitude"]);
+        assert_eq!(errors[0].loc, serde_json::json!(["body", "stops", 0, "longitude"])
+                              .as_array().unwrap().clone(),
+                   "list indices must be numbers, as pydantic emits them");
         assert_eq!(errors[0].msg, "Input should be greater than or equal to -180");
     }
 
@@ -913,7 +931,9 @@ mod tests {
                  {"longitude":0.0,"latitude":0.0,"timestamp":0,"accuracy_meters":0.0},
                  {"longitude":1.0,"latitude":1.0,"timestamp":1}]}"#);
         let errors = request.validate();
-        assert_eq!(errors[0].loc, ["body", "breadcrumbs", "0", "accuracy_meters"]);
+        assert_eq!(errors[0].loc,
+                   serde_json::json!(["body", "breadcrumbs", 0, "accuracy_meters"])
+                       .as_array().unwrap().clone());
         assert_eq!(errors[0].kind, "greater_than");
     }
 
@@ -922,7 +942,9 @@ mod tests {
         let request: VrpRequest = parse(
             r#"{"depots":[{"longitude":0.0,"latitude":91.0}],
                 "stops":[{"longitude":0.0,"latitude":0.0}]}"#);
-        assert_eq!(request.validate_with(2000)[0].loc, ["body", "depots", "0", "latitude"]);
+        assert_eq!(request.validate_with(2000)[0].loc,
+                   serde_json::json!(["body", "depots", 0, "latitude"])
+                       .as_array().unwrap().clone());
     }
 
     #[test]

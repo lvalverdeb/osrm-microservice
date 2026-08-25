@@ -226,7 +226,13 @@ impl RateLimiter {
         }
         let window_id = now / limit.window_seconds.max(1);
         let key = format!("{client}|{endpoint}");
-        let mut buckets = self.buckets.lock().expect("rate limiter mutex is never poisoned");
+        // Recover rather than propagate: a thread that panicked while holding
+        // this lock would otherwise turn one failure into a panic on every
+        // subsequent request through the limiter.
+        let mut buckets = match self.buckets.lock() {
+            Ok(buckets) => buckets,
+            Err(poisoned) => poisoned.into_inner(),
+        };
 
         if buckets.len() > PRUNE_THRESHOLD {
             buckets.retain(|_, bucket| bucket.window_id >= window_id);

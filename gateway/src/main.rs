@@ -139,6 +139,9 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         .method_not_allowed_fallback(handlers::method_not_allowed)
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), observe))
+        // Innermost of the three, so `observe` still counts a panicking request
+        // and reports it as the 500 it became.
+        .layer(tower_http::catch_panic::CatchPanicLayer::custom(panic_response))
         .with_state(state)
 }
 
@@ -196,6 +199,18 @@ async fn observe(State(state): State<AppState>, request: axum::extract::Request,
                              crate::metrics::status_label(parts.status.as_u16())])
         .inc();
     Response::from_parts(parts, axum::body::Body::from(bytes))
+}
+
+/// Turn a panic into the 500 Starlette's `ServerErrorMiddleware` produced.
+fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    let detail = panic.downcast_ref::<&str>().map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_string());
+    tracing::error!(%detail, "panic while handling a request");
+    // The body matches every other unexpected failure; the cause goes to the
+    // log rather than to the caller.
+    (StatusCode::INTERNAL_SERVER_ERROR,
+     Json(serde_json::json!({ "detail": "Internal server error" }))).into_response()
 }
 
 /// Body size from `Content-Length`, or zero when it is absent or unparseable.

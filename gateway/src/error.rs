@@ -111,13 +111,15 @@ struct ParseFailure {
 }
 
 /// Build pydantic's `loc`: `body`, then the path to the failing field.
-fn location(path: &str, missing_field: Option<&str>) -> Vec<String> {
-    let mut loc = vec!["body".to_string()];
+fn location(path: &str, missing_field: Option<&str>) -> Vec<Value> {
+    use crate::models::loc_part;
+
+    let mut loc = vec![loc_part("body")];
     if path != "." {
-        loc.extend(path.split('.').filter(|part| !part.is_empty()).map(str::to_string));
+        loc.extend(path.split('.').filter(|part| !part.is_empty()).map(loc_part));
     }
     if let Some(field) = missing_field {
-        loc.push(field.to_string());
+        loc.push(loc_part(field));
     }
     loc
 }

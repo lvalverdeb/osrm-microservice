@@ -42,7 +42,11 @@ impl RetryPolicy {
     /// Delay before attempt `n` (1-based), matching `wait_exponential`.
     pub fn backoff(&self, attempt: usize) -> Duration {
         let raw = 2f64.powi(attempt.saturating_sub(1) as i32);
-        let clamped = raw.clamp(self.min_seconds as f64, self.max_seconds as f64);
+        // Deliberately not `clamp`, which panics when min > max. tenacity
+        // computes `max(min, min(result, max))` and so yields `min` for that
+        // misconfiguration; a bad OSRM_RETRY_MIN/MAX pair must not take the
+        // request down.
+        let clamped = raw.min(self.max_seconds as f64).max(self.min_seconds as f64);
         Duration::from_secs_f64(clamped)
     }
 }
