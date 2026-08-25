@@ -52,6 +52,10 @@ pub fn common_options(options: &CommonRoutingOptions) -> Params {
     if let Some(skip) = options.skip_waypoints {
         params.insert("skip_waypoints", flag(skip));
     }
+    // Omitted when unset, so an untouched request builds the URL it always did.
+    if let Some(generate) = options.generate_hints {
+        params.insert("generate_hints", flag(generate));
+    }
     params
 }
 
@@ -242,6 +246,38 @@ mod tests {
         assert_eq!(text(&params, "annotations"), "distance,duration");
         assert_eq!(text(&params, "alternatives"), "false");
         assert_eq!(text(&params, "waypoints"), "0;1");
+    }
+
+    /// Absent unless asked for, so an untouched request builds the URL it
+    /// always did -- and every cache key derived from it stays valid.
+    #[test]
+    fn generate_hints_is_only_sent_when_the_caller_sets_it() {
+        let plain: RouteRequest = parse(&format!("{{{TWO_POINTS}}}"));
+        assert!(!route(&plain, 2).contains_key("generate_hints"));
+
+        let off: RouteRequest = parse(&format!(r#"{{{TWO_POINTS},"generate_hints":false}}"#));
+        assert_eq!(text(&route(&off, 2), "generate_hints"), "false");
+
+        let on: RouteRequest = parse(&format!(r#"{{{TWO_POINTS},"generate_hints":true}}"#));
+        assert_eq!(text(&route(&on, 2), "generate_hints"), "true");
+    }
+
+    /// A general option: every service that takes one must carry it.
+    #[test]
+    fn generate_hints_reaches_every_service() {
+        let matrix_request: MatrixRequest = parse(
+            r#"{"coordinates":[{"longitude":0.0,"latitude":0.0},
+                               {"longitude":1.0,"latitude":1.0}],"generate_hints":false}"#);
+        assert_eq!(text(&matrix(&matrix_request), "generate_hints"), "false");
+
+        let trip_request: TripRequest = parse(
+            r#"{"coordinates":[{"longitude":0.0,"latitude":0.0},
+                               {"longitude":1.0,"latitude":1.0}],"generate_hints":false}"#);
+        assert_eq!(text(&trip(&trip_request), "generate_hints"), "false");
+
+        let nearest_request: NearestRequest = parse(
+            r#"{"coordinate":{"longitude":0.0,"latitude":0.0},"generate_hints":false}"#);
+        assert_eq!(text(&nearest(&nearest_request), "generate_hints"), "false");
     }
 
     #[test]

@@ -435,7 +435,23 @@ pub struct CommonRoutingOptions {
     pub approaches: Option<Vec<Option<Approach>>>,
     pub exclude: Option<Vec<String>>,
     pub snapping: Option<Snapping>,
+    #[serde(default, deserialize_with = "lax::opt_boolean")]
     pub skip_waypoints: Option<bool>,
+    /// Whether the engine should return a `hint` per waypoint.
+    ///
+    /// Hints are per-waypoint Base64 blobs that let a later request skip the
+    /// snapping step. Most callers never send one back, and they dominate a
+    /// small response -- turning them off measured ~40% smaller on a two-point
+    /// route, which is paid again in both cache tiers.
+    ///
+    /// Left unset the parameter is not sent at all, so the upstream URL, and
+    /// every cache key derived from it, is exactly what it was. OSRM's own
+    /// default is `true`.
+    ///
+    /// This has no counterpart in the FastAPI gateway, which never offered it:
+    /// new surface rather than a port gap.
+    #[serde(default, deserialize_with = "lax::opt_boolean")]
+    pub generate_hints: Option<bool>,
 }
 
 /// `alternatives` accepts either a flag or a count, and serialises differently
