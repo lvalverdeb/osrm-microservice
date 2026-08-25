@@ -32,10 +32,19 @@ moka = { version = "0.12", features = ["future"] }
 sha2 = "0.10"
 # Exposition format, histogram bucketing and label handling are not worth
 # hand-rolling, and the text format is a contract scrapers depend on.
-prometheus = { version = "0.13", default-features = false }
+# `process` adds the standard process_* collectors (CPU, RSS, open FDs, start
+# time) that prometheus_client registered by default and whose absence blanked
+# any dashboard reading process_resident_memory_bytes. The feature is inert off
+# Linux -- both its procfs dependency and the collector module are target-gated
+# -- so the FreeBSD jail still reports no process_* series. See metrics.rs.
+prometheus = { version = "0.13", default-features = false, features = ["process"] }
 # L2 cache. No TLS, matching the deployments: Redis is reached over the jail's
 # loopback or the compose network, never across the internet.
-redis = { version = "0.27", default-features = false, features = ["tokio-comp"] }
+# connection-manager gives a single multiplexed, self-reconnecting connection.
+# Without it every get and set opened a fresh TCP connection, so an L1 miss
+# cost a connect and an unreachable Redis cost a full connect timeout per
+# lookup -- where the Python client pooled from one `from_url` at construction.
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # OTLP over HTTP rather than gRPC: reqwest is already here, and the gRPC stack

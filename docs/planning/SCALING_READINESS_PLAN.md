@@ -45,10 +45,25 @@ unreachable from the jail, so both the L2 cache and the limiter's shared storage
 had been silently inert. See "Redis needs the jail to have a real loopback" in
 `../deployment_freebsd.md`.
 
+**P0-2 was then undone by the port and has since been restored (2026-08-25).**
+The Rust limiter was written as a process-local map with no Redis path at all,
+so the fix this plan verified -- one allowance shared across workers and nodes
+-- silently reverted to per-instance counting. Two instances behind a balancer
+allowed twice the configured limit. It now consults Redis when `REDIS_URL` is
+set and falls back to the in-process counter when it is not or when Redis does
+not answer, which is the `in_memory_fallback_enabled` + `swallow_errors`
+posture slowapi had. Worth noting how it was found: not by a test, but by
+diffing the port against the Python source it replaced. Nothing in either suite
+covered it, because both sides pass a single-instance test identically.
+
+P0-1 and P0-3 are resolved rather than regressed: `WORKERS` became tokio worker
+threads inside one process, so a single registry sees all traffic and there is
+no multiprocess directory to aggregate or wipe.
+
 | Item | Status | Evidence |
 |---|---|---|
 | P0-1 metrics | done | 201 requests, counter delta 201 across 2 workers (was ~100) |
-| P0-2 limiter | done | 800 requests/8s at 600/min: 549 allowed with Redis vs 772 without |
+| P0-2 limiter | done, regressed by the port, restored | 800 requests/8s at 600/min: 549 allowed with Redis vs 772 without; see the note below |
 | P0-3 workers | done | `osrm_api_gateway_workers`, two workers under `daemon(8)` |
 | P1 readiness | done | jail acceptance run: engine stopped -> `/ready` 503 immediately, `/health` 200 `degraded`; restored -> both recover, routing returns |
 | Proxy-aware limits | done | `--forwarded-allow-ips` on both paths; without it every client behind a balancer shares one bucket |

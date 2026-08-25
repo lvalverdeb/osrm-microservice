@@ -17,8 +17,19 @@ use std::time::Duration;
 
 use redis::AsyncCommands;
 
+/// Ceiling on a single connect or command against L2.
+///
+/// L2 is an optimisation: waiting longer than this for it costs more than the
+/// cache hit is worth, and the caller has a live upstream to fall back to.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub struct RedisCache {
     client: Option<redis::Client>,
+    /// Built on first use and reused thereafter. `ConnectionManager` is
+    /// multiplexed and reconnects on its own, so this is the pooled handle the
+    /// Python client got from `redis.from_url` at construction. Initialisation
+    /// is retried on the next call if Redis is down at first contact.
+    manager: tokio::sync::OnceCell<redis::aio::ConnectionManager>,
     ttl: u64,
 }
 
@@ -30,14 +41,15 @@ impl RedisCache {
     /// cleared on a connection error. A dead Redis therefore costs a failed
     /// round trip per lookup rather than being switched off.
     pub fn new(url: &str, ttl: u64) -> Self {
+        let manager = tokio::sync::OnceCell::new();
         if url.is_empty() {
-            return Self { client: None, ttl };
+            return Self { client: None, manager, ttl };
         }
         match redis::Client::open(url) {
-            Ok(client) => Self { client: Some(client), ttl },
+            Ok(client) => Self { client: Some(client), manager, ttl },
             Err(error) => {
                 eprintln!("redis: unusable URL, L2 cache disabled: {error}");
-                Self { client: None, ttl }
+                Self { client: None, manager, ttl }
             }
         }
     }
@@ -51,12 +63,32 @@ impl RedisCache {
         self.client.is_some()
     }
 
+    /// The shared connection, built once and reused.
+    async fn connection(&self) -> Option<redis::aio::ConnectionManager> {
+        let client = self.client.as_ref()?;
+        self.manager
+            .get_or_try_init(|| {
+                // Bounded hard. ConnectionManager's defaults retry six times
+                // with exponential backoff, which turned one lookup against a
+                // dead Redis into minutes of waiting -- this tier exists to be
+                // skipped when it is unavailable, not to hold up the request.
+                // A failed init leaves the cell empty, so the next lookup
+                // retries; that is the reconnect path, and it must stay cheap.
+                let config = redis::aio::ConnectionManagerConfig::new()
+                    .set_number_of_retries(0)
+                    .set_connection_timeout(CONNECT_TIMEOUT)
+                    .set_response_timeout(CONNECT_TIMEOUT);
+                redis::aio::ConnectionManager::new_with_config(client.clone(), config)
+            })
+            .await
+            .inspect_err(|error| eprintln!("redis: connect failed: {error}"))
+            .ok()
+            .cloned()
+    }
+
     /// Look up a key, treating every failure as a miss.
     pub async fn get(&self, key: &str) -> Option<Vec<u8>> {
-        let client = self.client.as_ref()?;
-        let mut connection = client.get_multiplexed_async_connection().await
-            .inspect_err(|error| eprintln!("redis: connect failed on get: {error}"))
-            .ok()?;
+        let mut connection = self.connection().await?;
         let value: Option<Vec<u8>> = connection.get(key).await
             .inspect_err(|error| eprintln!("redis: get failed: {error}"))
             .ok()?;
@@ -65,12 +97,7 @@ impl RedisCache {
 
     /// Store a key with the configured TTL, ignoring failures.
     pub async fn set(&self, key: &str, value: &[u8]) {
-        let Some(client) = self.client.as_ref() else {
-            return;
-        };
-        let Ok(mut connection) = client.get_multiplexed_async_connection().await
-            .inspect_err(|error| eprintln!("redis: connect failed on set: {error}"))
-        else {
+        let Some(mut connection) = self.connection().await else {
             return;
         };
         let stored: Result<(), _> = connection
@@ -81,6 +108,29 @@ impl RedisCache {
         }
     }
 
+    /// Increment a fixed-window counter and return its new value.
+    ///
+    /// Not a cache operation, but it belongs on this connection: slowapi
+    /// pointed its limiter at the same `REDIS_URL`, and opening a second pool
+    /// to the same server to count requests would be pure overhead. `None`
+    /// means Redis did not answer, which the caller treats as "fall back to
+    /// the in-process counter" -- slowapi's `swallow_errors` posture.
+    pub async fn incr_in_window(&self, key: &str, window_seconds: u64) -> Option<i64> {
+        let mut connection = self.connection().await?;
+        let count: i64 = connection.incr(key, 1).await
+            .inspect_err(|error| eprintln!("redis: rate-limit incr failed: {error}"))
+            .ok()?;
+        // Only the request that created the window sets its expiry, so the
+        // window does not slide forward with every hit inside it.
+        if count == 1 {
+            let expired: Result<(), _> = connection.expire(key, window_seconds.max(1) as i64).await;
+            if let Err(error) = expired {
+                eprintln!("redis: rate-limit expire failed: {error}");
+            }
+        }
+        Some(count)
+    }
+
     /// How long entries live, for callers that report configuration.
     pub fn ttl(&self) -> Duration {
         Duration::from_secs(self.ttl)
@@ -89,6 +139,23 @@ impl RedisCache {
 
 #[cfg(test)]
 mod tests {
+    /// L2 must degrade fast, not merely degrade.
+    ///
+    /// Pooling the connection initially pulled in `ConnectionManager`'s default
+    /// retry schedule -- six attempts with exponential backoff -- which turned
+    /// a single lookup against a dead Redis into minutes of waiting while still
+    /// technically "swallowing the error".
+    #[tokio::test]
+    async fn an_unreachable_redis_gives_up_quickly() {
+        let cache = RedisCache::new("redis://127.0.0.1:1/", 900);
+        let started = std::time::Instant::now();
+        assert!(cache.get("any-key").await.is_none());
+        cache.set("any-key", b"value").await;
+        let elapsed = started.elapsed();
+        assert!(elapsed < CONNECT_TIMEOUT * 3,
+                "L2 took {elapsed:?} to give up; it must stay off the critical path");
+    }
+
     use super::*;
 
     #[test]

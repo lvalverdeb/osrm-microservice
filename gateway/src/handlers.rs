@@ -28,6 +28,8 @@ pub struct AppState {
     /// the product of the two.
     pub vrp_gate: Arc<crate::admission::AdmissionGate>,
     pub limiter: Arc<crate::ratelimit::RateLimiter>,
+    /// Shared with the OSRM client's L2 tier: one Redis, one connection.
+    pub l2: Arc<crate::redis_cache::RedisCache>,
     pub limits: crate::ratelimit::Limits,
     pub trusted_proxies: Arc<crate::ratelimit::TrustedProxies>,
     pub metrics: Arc<crate::metrics::Metrics>,
@@ -318,6 +320,38 @@ pub async fn docs(State(state): State<AppState>) -> Response {
   </body>
 </html>"#);
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
+}
+
+/// ReDoc, which FastAPI served at this path by default.
+///
+/// Dropping it was a silent 404 for anyone whose bookmark or internal docs
+/// link pointed here; the schema behind it is the same `/openapi.json`.
+pub async fn redoc(State(state): State<AppState>) -> Response {
+    let title = &state.settings.app_name;
+    let html = format!(r#"<!DOCTYPE html>
+<html>
+  <head>
+    <title>{title} - ReDoc</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head>
+  <body>
+    <redoc spec-url="/openapi.json"></redoc>
+    <script src="https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js"></script>
+  </body>
+</html>"#);
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
+}
+
+/// Starlette's 404 body, which axum's default fallback does not send.
+pub async fn not_found() -> Response {
+    ApiError::NotFound.into_response()
+}
+
+/// Starlette's 405 body, likewise.
+pub async fn method_not_allowed() -> Response {
+    (StatusCode::METHOD_NOT_ALLOWED,
+     Json(json!({ "detail": "Method Not Allowed" }))).into_response()
 }
 
 /// Prometheus exposition. Never rate limited, so a scrape is never shed.

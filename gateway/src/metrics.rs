@@ -7,7 +7,22 @@
 //! and is simply absent -- along with the entrypoint script and rc.d `precmd`
 //! step that maintained it.
 
-use prometheus::{Encoder, HistogramVec, IntCounterVec, Registry, TextEncoder};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use prometheus::core::{Collector, Desc};
+use prometheus::{proto, Encoder, Histogram, HistogramVec, IntCounterVec, Registry, TextEncoder};
+
+/// Latency buckets, matching `prometheus-fastapi-instrumentator`'s
+/// `latency_lowr_buckets` default. The prometheus crate's `DEFAULT_BUCKETS`
+/// span 0.005..10 in twelve steps, so leaving them unset gave the same metric
+/// name a different bucket set and made `histogram_quantile` disagree with the
+/// Python deployment over identical traffic.
+const LATENCY_BUCKETS: [f64; 3] = [0.1, 0.5, 1.0];
+
+/// The instrumentator's `highr` buckets, on the unlabelled duration histogram.
+const HIGHR_BUCKETS: [f64; 18] = [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5,
+                                  2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 7.5];
 
 /// OSRM services that get their own `service` label value.
 ///
@@ -20,6 +35,80 @@ pub struct Metrics {
     pub cache_lookups: IntCounterVec,
     pub requests: IntCounterVec,
     pub duration: HistogramVec,
+    /// Unlabelled, high-resolution companion to `duration`, as Python exposes.
+    pub duration_highr: Histogram,
+    pub request_size: SizeSummary,
+    pub response_size: SizeSummary,
+}
+
+/// A `handler`-labelled summary carrying only `_sum` and `_count`.
+///
+/// `prometheus_client`'s `Summary` -- what the instrumentator uses for the two
+/// size metrics -- exposes exactly those two series and no quantiles. The
+/// prometheus crate has no summary type at all, so rather than substitute a
+/// histogram (same `_sum`/`_count`, but a `histogram` TYPE line and a spray of
+/// `_bucket` series Python never emitted) this collects the pair directly.
+#[derive(Clone)]
+pub struct SizeSummary {
+    desc: Arc<Desc>,
+    name: String,
+    help: String,
+    /// handler -> (count, sum). Shared, so a registered clone and the caller's
+    /// handle observe the same state -- the shape every built-in metric uses.
+    observations: Arc<Mutex<HashMap<String, (u64, f64)>>>,
+}
+
+impl SizeSummary {
+    fn new(name: &str, help: &str) -> Self {
+        let desc = Desc::new(name.to_string(), help.to_string(),
+                             vec!["handler".to_string()], HashMap::new())
+            .expect("metric definition is valid");
+        Self { desc: Arc::new(desc), name: name.to_string(), help: help.to_string(),
+               observations: Arc::new(Mutex::new(HashMap::new())) }
+    }
+
+    /// Record one body size against a handler.
+    pub fn observe(&self, handler: &str, bytes: f64) {
+        // A poisoned lock costs an observation rather than the request: this is
+        // instrumentation, and panicking here would take down a served response.
+        let Ok(mut observations) = self.observations.lock() else {
+            return;
+        };
+        let entry = observations.entry(handler.to_string()).or_insert((0, 0.0));
+        entry.0 += 1;
+        entry.1 += bytes;
+    }
+}
+
+impl Collector for SizeSummary {
+    fn desc(&self) -> Vec<&Desc> {
+        vec![&self.desc]
+    }
+
+    fn collect(&self) -> Vec<proto::MetricFamily> {
+        let Ok(observations) = self.observations.lock() else {
+            return Vec::new();
+        };
+        let metrics = observations.iter().map(|(handler, (count, sum))| {
+            let mut label = proto::LabelPair::default();
+            label.set_name("handler".to_string());
+            label.set_value(handler.clone());
+            let mut summary = proto::Summary::default();
+            summary.set_sample_count(*count);
+            summary.set_sample_sum(*sum);
+            let mut metric = proto::Metric::default();
+            metric.set_label(vec![label]);
+            metric.set_summary(summary);
+            metric
+        }).collect();
+
+        let mut family = proto::MetricFamily::default();
+        family.set_name(self.name.clone());
+        family.set_help(self.help.clone());
+        family.set_field_type(proto::MetricType::SUMMARY);
+        family.set_metric(metrics);
+        vec![family]
+    }
 }
 
 impl Metrics {
@@ -35,14 +124,35 @@ impl Metrics {
         ).expect("metric definition is valid");
         let duration = HistogramVec::new(
             prometheus::histogram_opts!("http_request_duration_seconds",
-                                        "HTTP request latency in seconds"),
+                                        "HTTP request latency in seconds",
+                                        LATENCY_BUCKETS.to_vec()),
             &["handler", "method"],
         ).expect("metric definition is valid");
+        let duration_highr = Histogram::with_opts(
+            prometheus::histogram_opts!("http_request_duration_highr_seconds",
+                                        "HTTP request latency, high resolution, all handlers",
+                                        HIGHR_BUCKETS.to_vec()),
+        ).expect("metric definition is valid");
+        let request_size = SizeSummary::new("http_request_size_bytes", "Request body size");
+        let response_size = SizeSummary::new("http_response_size_bytes", "Response body size");
+        registry.register(Box::new(request_size.clone())).expect("fresh registry");
+        registry.register(Box::new(response_size.clone())).expect("fresh registry");
 
         registry.register(Box::new(cache_lookups.clone())).expect("fresh registry");
         registry.register(Box::new(requests.clone())).expect("fresh registry");
         registry.register(Box::new(duration.clone())).expect("fresh registry");
-        Self { registry, cache_lookups, requests, duration }
+        registry.register(Box::new(duration_highr.clone())).expect("fresh registry");
+        // The process_* collectors prometheus_client registered by default:
+        // process_cpu_seconds_total, process_resident_memory_bytes,
+        // process_open_fds and process_start_time_seconds. Reading them needs
+        // /proc, so this is Linux-only -- the Docker deployment and CI get
+        // them, the FreeBSD jail does not, and nothing else changes there.
+        #[cfg(target_os = "linux")]
+        registry.register(Box::new(prometheus::process_collector::ProcessCollector::for_self()))
+            .expect("fresh registry");
+
+        Self { registry, cache_lookups, requests, duration, duration_highr,
+               request_size, response_size }
     }
 
     /// Count one cache lookup.
@@ -71,6 +181,21 @@ impl Default for Metrics {
     }
 }
 
+/// Group a status code the way `should_group_status_codes` does.
+///
+/// The instrumentator's default buckets these as `2xx`/`4xx`/`5xx`, so emitting
+/// the full code under the same metric and label name left every existing
+/// `http_requests_total{status="5xx"}` query matching nothing.
+pub fn status_label(status: u16) -> &'static str {
+    match status / 100 {
+        1 => "1xx",
+        2 => "2xx",
+        3 => "3xx",
+        4 => "4xx",
+        _ => "5xx",
+    }
+}
+
 /// Reduce an upstream endpoint to a bounded label.
 pub fn service_label(endpoint: &str) -> &'static str {
     let segment = endpoint.trim_start_matches('/').split('/').next().unwrap_or("");
@@ -84,8 +209,13 @@ pub fn service_label(endpoint: &str) -> &'static str {
 pub fn handler_label(path: &str) -> String {
     match path {
         "/route" | "/matrix" | "/matrix-graph" | "/match" | "/trip" | "/nearest"
-        | "/vrp" | "/vrp/allocate" | "/health" | "/ready" | "/metrics" => path.to_string(),
-        _ if path.starts_with("/tile/") => "/tile/{profile}/{z}/{x}/{y}".to_string(),
+        | "/vrp" | "/vrp/allocate" | "/health" | "/ready" | "/metrics"
+        // Labelled by path in Python too; collapsing them into `other` mixed
+        // doc traffic in with genuinely unrouted requests.
+        | "/docs" | "/redoc" | "/openapi.json" => path.to_string(),
+        // The route template FastAPI registered carried the suffix, and the
+        // label is the join key for any dashboard spanning the two.
+        _ if path.starts_with("/tile/") => "/tile/{profile}/{z}/{x}/{y}.mvt".to_string(),
         _ => "other".to_string(),
     }
 }
@@ -113,14 +243,16 @@ mod tests {
     #[test]
     fn tile_paths_collapse_to_their_route_pattern() {
         assert_eq!(handler_label("/tile/driving/12/100/200.mvt"),
-                   "/tile/{profile}/{z}/{x}/{y}");
+                   "/tile/{profile}/{z}/{x}/{y}.mvt");
         assert_eq!(handler_label("/tile/driving/12/101/201.mvt"),
-                   "/tile/{profile}/{z}/{x}/{y}");
+                   "/tile/{profile}/{z}/{x}/{y}.mvt");
     }
 
     #[test]
     fn routed_paths_keep_their_own_label() {
         assert_eq!(handler_label("/vrp/allocate"), "/vrp/allocate");
+        assert_eq!(handler_label("/docs"), "/docs");
+        assert_eq!(handler_label("/openapi.json"), "/openapi.json");
         assert_eq!(handler_label("/unrouted"), "other");
     }
 

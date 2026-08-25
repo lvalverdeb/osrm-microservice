@@ -153,8 +153,7 @@ impl OsrmClient {
         -> Result<Vec<u8>, OsrmError> {
         // Note the reordering: the gateway takes z/x/y and OSRM wants (x,y,z).
         let url = format!("{}/tile/v1/{profile}/tile({x},{y},{z}).mvt", self.base_url);
-        let response = self.http.get(&url).send().await
-            .map_err(|e| OsrmError::Unavailable(e.to_string()))?;
+        let response = self.send(self.http.get(&url)).await?;
         let status = response.status().as_u16();
         let bytes = response.bytes().await
             .map_err(|e| OsrmError::Unavailable(e.to_string()))?;
@@ -202,6 +201,24 @@ impl OsrmClient {
                                            self.retry.attempts)))
     }
 
+    /// Send one upstream request inside a client span, carrying trace context.
+    ///
+    /// The span is the counterpart to `HTTPXClientInstrumentor`'s, and the
+    /// injected `traceparent` is what lets `osrm-routed` join the caller's
+    /// trace instead of starting its own.
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response, OsrmError> {
+        use tracing::Instrument as _;
+
+        let span = tracing::info_span!("http.client", otel.kind = "client");
+        async {
+            let mut request = request.build()
+                .map_err(|e| OsrmError::Unavailable(e.to_string()))?;
+            crate::telemetry::inject_context(request.headers_mut());
+            self.http.execute(request).await
+                .map_err(|e| OsrmError::Unavailable(e.to_string()))
+        }.instrument(span).await
+    }
+
     fn retryable(error: &OsrmError) -> bool {
         match error {
             OsrmError::Status { status, .. } => is_retryable_status(*status),
@@ -210,8 +227,7 @@ impl OsrmClient {
     }
 
     async fn attempt(&self, url: &str) -> Result<Vec<u8>, OsrmError> {
-        let response = self.http.get(url).send().await
-            .map_err(|e| OsrmError::Unavailable(e.to_string()))?;
+        let response = self.send(self.http.get(url)).await?;
         let status = response.status().as_u16();
         let bytes = response.bytes().await
             .map_err(|e| OsrmError::Unavailable(e.to_string()))?;

@@ -60,6 +60,10 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     let _telemetry = telemetry::setup(&settings);
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(settings.osrm_client_timeout))
+        // httpx defaults to following none, and reqwest to following ten. A
+        // redirect from the engine is a misconfiguration, not a route to
+        // chase: following it silently turned a 3xx into someone else's body.
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let cache = Cache::builder()
         .max_capacity(settings.l1_cache_maxsize)
@@ -75,7 +79,7 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     let client = OsrmClient::new(http, cache, settings.osrm_base_url.clone(), retry,
                                  &settings.health_check_coords,
                                  Duration::from_secs(settings.health_check_timeout),
-                                 Arc::clone(&metrics), l2);
+                                 Arc::clone(&metrics), Arc::clone(&l2));
 
     let bind = format!("{}:{}", settings.host, settings.port);
     let metrics_path = settings.metrics_endpoint.clone();
@@ -84,13 +88,14 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         settings.vrp_queue_timeout,
         settings.vrp_max_queue_depth,
     ));
-    let limits = Limits::from_settings(&settings);
+    let limits = Limits::from_settings(&settings)?;
     let trusted_proxies = Arc::new(TrustedProxies::parse(&settings.forwarded_allow_ips));
     let state = AppState {
         client: Arc::new(client),
         settings: Arc::new(settings),
         vrp_gate,
         limiter: Arc::new(RateLimiter::new()),
+        l2,
         limits,
         trusted_proxies,
         metrics,
@@ -126,6 +131,12 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         .route(metrics_path, get(handlers::metrics))
         .route("/openapi.json", get(handlers::openapi))
         .route("/docs", get(handlers::docs))
+        .route("/redoc", get(handlers::redoc))
+        // Starlette answered these as JSON `{"detail": ...}`; axum's default
+        // fallback sends an empty body with no content-type, so a client
+        // parsing `detail` got nothing to parse.
+        .fallback(handlers::not_found)
+        .method_not_allowed_fallback(handlers::method_not_allowed)
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)
@@ -139,16 +150,44 @@ async fn observe(State(state): State<AppState>, request: axum::extract::Request,
                  next: Next) -> Response {
     let handler = crate::metrics::handler_label(request.uri().path());
     let method = request.method().to_string();
+    // Content-Length is what the Python instrumentator measures too, so an
+    // unlabelled or chunked body counts as zero on both sides.
+    let request_bytes = content_length(request.headers());
     let timer = state.metrics.duration
         .with_label_values(&[&handler, &method])
         .start_timer();
+    let highr = state.metrics.duration_highr.start_timer();
 
-    let response = next.run(request).await;
+    // The span the collector sees. Nothing in the port created one, so an
+    // OTLP endpoint could be configured and correctly connected and still
+    // receive an empty trace -- the layer was installed over no spans at all.
+    // status_code is declared Empty and filled after the response: `record` on
+    // an undeclared field is silently dropped.
+    let span = tracing::info_span!("http.server", otel.name = %format!("{method} {handler}"),
+                                   http.request.method = %method, http.route = %handler,
+                                   http.response.status_code = tracing::field::Empty);
+    let response = {
+        use tracing::Instrument as _;
+        next.run(request).instrument(span.clone()).await
+    };
+    span.record("http.response.status_code", response.status().as_u16());
     timer.observe_duration();
+    highr.observe_duration();
+    state.metrics.request_size.observe(&handler, request_bytes);
+    state.metrics.response_size.observe(&handler, content_length(response.headers()));
     state.metrics.requests
-        .with_label_values(&[&handler, &method, response.status().as_str()])
+        .with_label_values(&[&handler, &method,
+                             crate::metrics::status_label(response.status().as_u16())])
         .inc();
     response
+}
+
+/// Body size from `Content-Length`, or zero when it is absent or unparseable.
+fn content_length(headers: &axum::http::HeaderMap) -> f64 {
+    headers.get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0)
 }
 
 /// Reject requests past their endpoint's allowance.
@@ -164,7 +203,7 @@ async fn rate_limit(State(state): State<AppState>, ConnectInfo(peer): ConnectInf
     let forwarded = request.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok());
     let client = client_key(&peer.ip().to_string(), forwarded, &state.trusted_proxies);
 
-    if state.limiter.check(&client, label, limit) {
+    if state.limiter.check_shared(Some(&state.l2), &client, label, limit).await {
         return next.run(request).await;
     }
     // slowapi's own wording and shape, which clients may be matching on. Note

@@ -58,6 +58,20 @@ impl Limit {
     }
 }
 
+/// One configured limit: absent, valid, or a startup failure.
+///
+/// An empty value means "unset", as it does for every other setting; anything
+/// else must parse, because the alternative is an endpoint that comes up
+/// silently unlimited.
+fn configured(name: &str, raw: &str) -> Result<Option<Limit>, String> {
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    Limit::parse(raw)
+        .map(Some)
+        .ok_or_else(|| format!("{name}: cannot parse rate limit {raw:?}"))
+}
+
 /// Which peers may set `X-Forwarded-For`.
 #[derive(Debug, Clone, Default)]
 pub struct TrustedProxies {
@@ -181,6 +195,31 @@ impl RateLimiter {
     }
 
     /// The same, at an explicit time -- the seam the tests drive.
+    /// Check against Redis when it is configured, falling back in process.
+    ///
+    /// slowapi took a `storage_uri` and shared one allowance across every
+    /// worker and node, with `in_memory_fallback_enabled` and `swallow_errors`
+    /// covering an outage. Counting only in process meant N instances behind a
+    /// balancer allowed N times the configured limit -- the limit silently
+    /// became a per-instance one.
+    pub async fn check_shared(&self, redis: Option<&crate::redis_cache::RedisCache>,
+                              client: &str, endpoint: &str, limit: Limit) -> bool {
+        if limit.amount == 0 {
+            return false;
+        }
+        if let Some(redis) = redis.filter(|redis| redis.is_configured()) {
+            let window = limit.window_seconds.max(1);
+            // Same window identity as the local path, so an instance that
+            // falls back mid-window keeps counting in the same bucket.
+            let window_id = now_seconds() / window;
+            let key = format!("ratelimit:{client}:{endpoint}:{window_id}");
+            if let Some(count) = redis.incr_in_window(&key, window).await {
+                return count <= i64::from(limit.amount);
+            }
+        }
+        self.check(client, endpoint, limit)
+    }
+
     fn check_at(&self, client: &str, endpoint: &str, limit: Limit, now: u64) -> bool {
         if limit.amount == 0 {
             return false;
@@ -228,9 +267,25 @@ mod tests {
     }
 
     #[test]
-    fn unparseable_limits_are_none_rather_than_fatal() {
+    fn the_parser_reports_spellings_it_cannot_read() {
         assert!(Limit::parse("nonsense").is_none());
         assert!(Limit::parse("600/fortnight").is_none());
+    }
+
+    /// A typo must stop the process, not silently unlimit the endpoint.
+    ///
+    /// `limits` raised at decoration time, so the Python app would not import
+    /// with a bad value. Mapping it to `None` here made it "no limit".
+    #[test]
+    fn a_malformed_configured_limit_is_a_startup_failure() {
+        assert!(configured("RATE_LIMIT_VRP", "100/fortnight").is_err());
+        assert!(configured("RATE_LIMIT_VRP", "nonsense").is_err());
+        let error = configured("RATE_LIMIT_VRP", "nonsense").unwrap_err();
+        assert!(error.contains("RATE_LIMIT_VRP"), "the message must name the setting: {error}");
+        // Unset stays unset.
+        assert_eq!(configured("RATE_LIMIT_VRP", "").expect("empty is unset"), None);
+        assert_eq!(configured("RATE_LIMIT_VRP", "  ").expect("blank is unset"), None);
+        assert!(configured("RATE_LIMIT_VRP", "100/minute").expect("valid").is_some());
     }
 
     /// Pinned against a live slowapi response: `{"error":"Rate limit exceeded:
@@ -349,16 +404,22 @@ pub struct Limits {
 }
 
 impl Limits {
-    pub fn from_settings(settings: &crate::config::Settings) -> Self {
-        Self {
-            route: Limit::parse(&settings.rate_limit_route),
-            matrix: Limit::parse(&settings.rate_limit_matrix),
-            match_trace: Limit::parse(&settings.rate_limit_match),
-            trip: Limit::parse(&settings.rate_limit_trip),
-            nearest: Limit::parse(&settings.rate_limit_nearest),
-            tile: Limit::parse(&settings.rate_limit_tile),
-            vrp: Limit::parse(&settings.rate_limit_vrp),
-        }
+    /// Parse every configured limit, refusing to start if one is malformed.
+    ///
+    /// `limits` raises at decoration time, so a typo in a `RATE_LIMIT_*` value
+    /// stopped the Python app from importing. Mapping the same typo to `None`
+    /// here meant "no limit at all" -- the endpoint came up silently unlimited,
+    /// which is the one failure mode a rate limiter must not have.
+    pub fn from_settings(settings: &crate::config::Settings) -> Result<Self, String> {
+        Ok(Self {
+            route: configured("RATE_LIMIT_ROUTE", &settings.rate_limit_route)?,
+            matrix: configured("RATE_LIMIT_MATRIX", &settings.rate_limit_matrix)?,
+            match_trace: configured("RATE_LIMIT_MATCH", &settings.rate_limit_match)?,
+            trip: configured("RATE_LIMIT_TRIP", &settings.rate_limit_trip)?,
+            nearest: configured("RATE_LIMIT_NEAREST", &settings.rate_limit_nearest)?,
+            tile: configured("RATE_LIMIT_TILE", &settings.rate_limit_tile)?,
+            vrp: configured("RATE_LIMIT_VRP", &settings.rate_limit_vrp)?,
+        })
     }
 
     /// The limit for a request path, with the bucket label to key it on.
@@ -380,6 +441,39 @@ impl Limits {
             _ => return None,
         };
         limit.map(|limit| (label, limit))
+    }
+}
+
+#[cfg(test)]
+mod shared_tests {
+    use super::*;
+    use crate::redis_cache::RedisCache;
+
+    fn limit() -> Limit {
+        Limit::parse("2/minute").expect("a valid spelling")
+    }
+
+    /// With no Redis configured the shared path must behave exactly as the
+    /// in-process one, not open up into "unlimited".
+    #[tokio::test]
+    async fn an_unconfigured_redis_falls_back_to_the_local_counter() {
+        let limiter = RateLimiter::new();
+        let l2 = RedisCache::new("", 900);
+        assert!(limiter.check_shared(Some(&l2), "1.2.3.4", "route", limit()).await);
+        assert!(limiter.check_shared(Some(&l2), "1.2.3.4", "route", limit()).await);
+        assert!(!limiter.check_shared(Some(&l2), "1.2.3.4", "route", limit()).await,
+                "the third request in the window must be refused");
+    }
+
+    /// slowapi's `swallow_errors` + `in_memory_fallback_enabled`: an outage
+    /// degrades to per-instance counting, it does not stop limiting.
+    #[tokio::test]
+    async fn an_unreachable_redis_still_enforces_the_limit_locally() {
+        let limiter = RateLimiter::new();
+        let l2 = RedisCache::new("redis://127.0.0.1:1/", 900);
+        assert!(limiter.check_shared(Some(&l2), "5.6.7.8", "vrp", limit()).await);
+        assert!(limiter.check_shared(Some(&l2), "5.6.7.8", "vrp", limit()).await);
+        assert!(!limiter.check_shared(Some(&l2), "5.6.7.8", "vrp", limit()).await);
     }
 }
 
