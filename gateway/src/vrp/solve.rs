@@ -122,11 +122,40 @@ struct TableResponse {
     distances: Vec<Vec<Option<f64>>>,
 }
 
+/// Order one depot's stops for chunking, by sweep angle around the depot.
+///
+/// Chunk membership is a contiguous slice of this order, so the order decides
+/// which stops share a vehicle. Taking the caller's submission order let an
+/// interleaved input pair stops from opposite sides of the depot into one
+/// route: six stops in two tight clusters cost 95.03 km submitted alternating
+/// and 49.68 km submitted grouped, the same stops either way. Sorting by
+/// bearing makes the result depend on where the stops are rather than on the
+/// order they arrived in.
+///
+/// Longitude is scaled by cos(depot latitude) so a bearing is a bearing rather
+/// than one stretched by the projection -- the same correction `allocate` makes
+/// when it measures air distance. Ties fall back to radius and then to the
+/// original index, so the order is total and reproducible.
+fn sweep_order(depot: &Coordinate, stops: &[Stop], stop_indices: &[usize]) -> Vec<usize> {
+    let lon_scale = depot.latitude.to_radians().cos();
+    let mut keyed: Vec<(f64, f64, usize)> = stop_indices.iter()
+        .map(|&i| {
+            let stop = stops[i].coordinate();
+            let dy = stop.latitude - depot.latitude;
+            let dx = (stop.longitude - depot.longitude) * lon_scale;
+            (dy.atan2(dx), dx * dx + dy * dy, i)
+        })
+        .collect();
+    keyed.sort_by(|a, b| {
+        a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2))
+    });
+    keyed.into_iter().map(|(_, _, i)| i).collect()
+}
+
 /// Partition one depot's stops into TSP-sized chunks.
 ///
-/// Chunks are contiguous slices of the allocation order, with no geographic
-/// sub-clustering -- membership is whatever order the stops arrived in. That is
-/// the largest route-quality gap in the algorithm and is reproduced as-is.
+/// Chunks are contiguous slices of `sweep_order`, so each vehicle gets a wedge
+/// of the depot's territory rather than an arbitrary slice of the input.
 ///
 /// Args:
 ///     request: The originating VRP request.
@@ -148,8 +177,16 @@ pub fn build_chunk_requests(request: &VrpRequest, depot_idx: usize, stop_indices
         .min(trip_bound)
         .max(1);
     let num_chunks = stop_indices.len().div_ceil(chunk_size);
+    // Only sweep when the split is real. One chunk has no membership to decide,
+    // and reordering it anyway would change the upstream `/trip` URL -- and so
+    // its cache key and its parity fixture -- for no change in the route.
+    let ordered: Vec<usize> = if num_chunks > 1 {
+        sweep_order(&depot.coordinate(), &request.stops, stop_indices)
+    } else {
+        stop_indices.to_vec()
+    };
 
-    stop_indices.chunks(chunk_size).enumerate()
+    ordered.chunks(chunk_size).enumerate()
         .map(|(position, chunk)| {
             let ids: Vec<Value> = chunk.iter()
                 .map(|&i| request.stops[i].id.clone().unwrap_or(Value::Null))
@@ -359,6 +396,66 @@ mod tests {
         serde_json::from_value(json!({
             "depots": [{"longitude": 0.0, "latitude": 0.0}], "stops": stop_list, "capacity": 2
         })).expect("valid request")
+    }
+
+    /// One depot, stops given as (lon, lat, id).
+    fn vrp_with(points: &[(f64, f64, &str)], capacity: i64) -> VrpRequest {
+        let stops: Vec<Value> = points.iter()
+            .map(|(lon, lat, id)| json!({"longitude": lon, "latitude": lat, "id": id}))
+            .collect();
+        serde_json::from_value(json!({
+            "depots": [{"longitude": 0.0, "latitude": 0.0, "id": "d0"}],
+            "stops": stops,
+            "capacity": capacity,
+        })).expect("valid request")
+    }
+
+    fn chunk_ids(request: &VrpRequest, indices: &[usize], limit: usize) -> Vec<String> {
+        let mut labels: Vec<String> = build_chunk_requests(request, 0, indices, 0, limit)
+            .into_iter()
+            .map(|chunk| {
+                let mut ids: Vec<String> = chunk.stop_ids.expect("stops carry ids").iter()
+                    .map(|id| id.as_str().expect("string id").to_string())
+                    .collect();
+                ids.sort();
+                ids.join(",")
+            })
+            .collect();
+        labels.sort();
+        labels
+    }
+
+    /// Chunk membership must follow geography, not arrival order.
+    ///
+    /// The regression: stops submitted alternating between two clusters on
+    /// opposite sides of the depot were sliced contiguously, so every vehicle
+    /// got one of each. Measured against the live gateway at 95.03 km for the
+    /// interleaved submission and 49.68 km for the grouped one -- same six
+    /// stops, same depot, same capacity.
+    #[test]
+    fn chunk_membership_does_not_depend_on_submission_order() {
+        const E: [(f64, f64, &str); 3] = [(1.0, 0.0, "E0"), (1.1, 0.0, "E1"), (1.2, 0.0, "E2")];
+        const W: [(f64, f64, &str); 3] = [(-1.0, 0.0, "W0"), (-1.1, 0.0, "W1"), (-1.2, 0.0, "W2")];
+        let all: Vec<usize> = (0..6).collect();
+
+        let interleaved = vrp_with(&[E[0], W[0], E[1], W[1], E[2], W[2]], 3);
+        let grouped = vrp_with(&[E[0], E[1], E[2], W[0], W[1], W[2]], 3);
+
+        let expected = vec!["E0,E1,E2".to_string(), "W0,W1,W2".to_string()];
+        assert_eq!(chunk_ids(&interleaved, &all, 80), expected,
+                   "interleaved submission must still group each cluster");
+        assert_eq!(chunk_ids(&grouped, &all, 80), expected);
+    }
+
+    /// A single chunk keeps the caller's order: there is no membership to
+    /// decide, and reordering would change the `/trip` URL, its cache key and
+    /// its parity fixture for nothing.
+    #[test]
+    fn a_single_chunk_is_left_in_submission_order() {
+        let request = vrp_with(&[(1.0, 0.0, "E0"), (-1.0, 0.0, "W0"), (1.1, 0.0, "E1")], 80);
+        let chunks = build_chunk_requests(&request, 0, &[0, 1, 2], 0, 80);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].original_indices, vec![0, 1, 2]);
     }
 
     #[test]
