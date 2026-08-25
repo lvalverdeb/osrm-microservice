@@ -66,3 +66,10 @@ Thumbs.db
 # Rust evaluation spike build artifacts (255 MB). Cargo.lock stays tracked:
 # it is a binary crate, and pinning keeps the benchmark reproducible.
 rust-spike/target/
+
+# Schemathesis crash cache -- regenerated on every run, and rewritten in place:
+# a run that finds different cases deletes the previous ones, so committing it
+# means every fuzz run produces unrelated churn in the diff. The reproducing
+# case for anything worth keeping belongs in tests/, not here. There is no
+# config under this path; schemathesis reads schemathesis.toml from the root.
+.schemathesis/
