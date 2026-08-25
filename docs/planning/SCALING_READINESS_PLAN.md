@@ -89,10 +89,15 @@ which recommends raising it for throughput without noting this cost.
 
 Two observations worth acting on separately:
 
-- **A shed request costs the client 10 seconds.** p50 latency was 10,008 ms,
-  which is `VRP_QUEUE_TIMEOUT` exactly: under overload a client waits the full
-  timeout to be told no. Shedding faster when the queue is already deep would be
-  kinder than making callers pay for the queue they never got into.
+- **A shed request cost the client 10 seconds.** p50 latency was 10,008 ms,
+  which is `VRP_QUEUE_TIMEOUT` exactly: under overload a client waited the full
+  timeout to be told no. **Fixed** by `VRP_MAX_QUEUE_DEPTH`, which refuses
+  immediately once the queue is deeper than it can drain. Measured against a
+  deliberately slow engine, 20 concurrent solves against one slot: refusal p50
+  went from 10,018 ms to 8 ms, with the *same* number of requests succeeding at
+  the same latency. The queue was never what served them -- which had been
+  assumed rather than measured when arguing the wait was load-bearing. Set it to
+  0 to restore the wait-only behaviour.
 - **Two transport errors** in 121 requests, at a load where the rest were
   cleanly refused. Investigated: a matched re-run of 120 requests reproduced the
   status mix (22x200, 56x503, 42x429 against the original 24/76/19) with **zero**
