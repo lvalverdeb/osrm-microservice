@@ -149,7 +149,33 @@ fn sweep_order(depot: &Coordinate, stops: &[Stop], stop_indices: &[usize]) -> Ve
     keyed.sort_by(|a, b| {
         a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2))
     });
+    // Then rotate so the sweep starts after the widest empty wedge. atan2's cut
+    // at +/-pi is an artifact of the coordinate system, not of the stops: a
+    // cluster lying due west of the depot has members on both sides of it, and
+    // slicing there splits that cluster across two vehicles -- exactly what the
+    // sweep exists to prevent. Six San Jose stops in two clusters stayed at
+    // 94.56 km until the cut was moved, against 49.68 km once it was.
+    let start = widest_gap_start(&keyed);
+    keyed.rotate_left(start);
     keyed.into_iter().map(|(_, _, i)| i).collect()
+}
+
+/// Index of the stop just after the widest angular gap, or 0 when that gap is
+/// already the wrap from the last bearing round to the first.
+///
+/// Takes `keyed` sorted by bearing. Ties keep the wrap, so the order is stable.
+fn widest_gap_start(keyed: &[(f64, f64, usize)]) -> usize {
+    let Some(last) = keyed.last() else { return 0 };
+    let mut widest = keyed[0].0 + std::f64::consts::TAU - last.0;
+    let mut start = 0;
+    for index in 1..keyed.len() {
+        let gap = keyed[index].0 - keyed[index - 1].0;
+        if gap > widest {
+            widest = gap;
+            start = index;
+        }
+    }
+    start
 }
 
 /// Partition one depot's stops into TSP-sized chunks.
@@ -398,16 +424,20 @@ mod tests {
         })).expect("valid request")
     }
 
-    /// One depot, stops given as (lon, lat, id).
-    fn vrp_with(points: &[(f64, f64, &str)], capacity: i64) -> VrpRequest {
+    /// One depot at `depot`, stops given as (lon, lat, id).
+    fn vrp_at(depot: (f64, f64), points: &[(f64, f64, &str)], capacity: i64) -> VrpRequest {
         let stops: Vec<Value> = points.iter()
             .map(|(lon, lat, id)| json!({"longitude": lon, "latitude": lat, "id": id}))
             .collect();
         serde_json::from_value(json!({
-            "depots": [{"longitude": 0.0, "latitude": 0.0, "id": "d0"}],
+            "depots": [{"longitude": depot.0, "latitude": depot.1, "id": "d0"}],
             "stops": stops,
             "capacity": capacity,
         })).expect("valid request")
+    }
+
+    fn vrp_with(points: &[(f64, f64, &str)], capacity: i64) -> VrpRequest {
+        vrp_at((0.0, 0.0), points, capacity)
     }
 
     fn chunk_ids(request: &VrpRequest, indices: &[usize], limit: usize) -> Vec<String> {
@@ -427,23 +457,43 @@ mod tests {
 
     /// Chunk membership must follow geography, not arrival order.
     ///
-    /// The regression: stops submitted alternating between two clusters on
-    /// opposite sides of the depot were sliced contiguously, so every vehicle
-    /// got one of each. Measured against the live gateway at 95.03 km for the
-    /// interleaved submission and 49.68 km for the grouped one -- same six
-    /// stops, same depot, same capacity.
+    /// The real San Jose geometry this was measured on: a depot with one
+    /// cluster east-southeast and one due west. The west cluster straddles
+    /// atan2's +/-pi cut, so a sweep that does not move the cut splits it and
+    /// still hands each vehicle one of each -- which is what the first version
+    /// of this fix did, measured at 94.56 km against 49.68 km once the cut was
+    /// moved into the empty wedge between the clusters.
     #[test]
-    fn chunk_membership_does_not_depend_on_submission_order() {
-        const E: [(f64, f64, &str); 3] = [(1.0, 0.0, "E0"), (1.1, 0.0, "E1"), (1.2, 0.0, "E2")];
-        const W: [(f64, f64, &str); 3] = [(-1.0, 0.0, "W0"), (-1.1, 0.0, "W1"), (-1.2, 0.0, "W2")];
+    fn chunk_membership_follows_geography_across_the_branch_cut() {
+        const W: [(f64, f64, &str); 3] = [
+            (-84.1830, 9.9320, "W0"), (-84.1810, 9.9340, "W1"), (-84.1790, 9.9360, "W2")];
+        const E: [(f64, f64, &str); 3] = [
+            (-84.0330, 9.9130, "E0"), (-84.0310, 9.9150, "E1"), (-84.0290, 9.9170, "E2")];
+        let depot = (-84.0833, 9.9333);
         let all: Vec<usize> = (0..6).collect();
 
-        let interleaved = vrp_with(&[E[0], W[0], E[1], W[1], E[2], W[2]], 3);
-        let grouped = vrp_with(&[E[0], E[1], E[2], W[0], W[1], W[2]], 3);
+        let interleaved = vrp_at(depot, &[W[0], E[0], W[1], E[1], W[2], E[2]], 3);
+        let grouped = vrp_at(depot, &[W[0], W[1], W[2], E[0], E[1], E[2]], 3);
 
         let expected = vec!["E0,E1,E2".to_string(), "W0,W1,W2".to_string()];
         assert_eq!(chunk_ids(&interleaved, &all, 80), expected,
-                   "interleaved submission must still group each cluster");
+                   "a cluster straddling the +/-pi cut must not be split");
+        assert_eq!(chunk_ids(&grouped, &all, 80), expected,
+                   "and the same partition must come back in any input order");
+    }
+
+    /// The same property with the clusters away from the cut.
+    #[test]
+    fn chunk_membership_does_not_depend_on_submission_order() {
+        const E: [(f64, f64, &str); 3] = [(1.0, 0.1, "E0"), (1.1, 0.2, "E1"), (1.2, 0.3, "E2")];
+        const N: [(f64, f64, &str); 3] = [(0.1, 1.0, "N0"), (0.2, 1.1, "N1"), (0.3, 1.2, "N2")];
+        let all: Vec<usize> = (0..6).collect();
+
+        let interleaved = vrp_at((0.0, 0.0), &[E[0], N[0], E[1], N[1], E[2], N[2]], 3);
+        let grouped = vrp_at((0.0, 0.0), &[E[0], E[1], E[2], N[0], N[1], N[2]], 3);
+
+        let expected = vec!["E0,E1,E2".to_string(), "N0,N1,N2".to_string()];
+        assert_eq!(chunk_ids(&interleaved, &all, 80), expected);
         assert_eq!(chunk_ids(&grouped, &all, 80), expected);
     }
 
