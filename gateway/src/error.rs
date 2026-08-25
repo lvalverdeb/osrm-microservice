@@ -41,9 +41,13 @@ fn upstream_detail(body: &Option<Value>) -> Value {
     let Some(Value::Object(map)) = body else {
         return Value::String("Routing service error".to_string());
     };
+    // `body.get("code", "Error")` substitutes only when the key is absent, so a
+    // numeric or null `code` from a malformed engine reached the caller intact.
+    // Coercing every non-string to "Error" hid what the engine actually said.
     json!({
-        "code": map.get("code").and_then(Value::as_str).unwrap_or("Error"),
-        "message": map.get("message").and_then(Value::as_str).unwrap_or("Routing service error"),
+        "code": map.get("code").cloned().unwrap_or_else(|| json!("Error")),
+        "message": map.get("message").cloned()
+            .unwrap_or_else(|| json!("Routing service error")),
     })
 }
 

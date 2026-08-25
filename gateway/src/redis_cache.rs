@@ -100,9 +100,13 @@ impl RedisCache {
         let Some(mut connection) = self.connection().await else {
             return;
         };
-        let stored: Result<(), _> = connection
-            .set_ex(key, value, self.ttl.max(1))
-            .await;
+        // Redis rejects `EX 0`; Python let that error surface and swallowed it,
+        // so a zero TTL stored nothing. Rounding it up to 1 second instead made
+        // `REDIS_TTL=0` mean "cache for a moment" rather than "do not cache".
+        if self.ttl == 0 {
+            return;
+        }
+        let stored: Result<(), _> = connection.set_ex(key, value, self.ttl).await;
         if let Err(error) = stored {
             eprintln!("redis: set failed: {error}");
         }

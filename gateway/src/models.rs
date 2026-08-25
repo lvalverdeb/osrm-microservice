@@ -791,19 +791,28 @@ impl VrpRequest {
 
     /// Validate, including the configured stop ceiling.
     pub fn validate_with(&self, max_stops: usize) -> Vec<ValidationError> {
-        let mut errors = length_errors(self.depots.len(), "depots", bounds::DEPOTS.0, bounds::DEPOTS.1);
-        errors.extend(length_errors(self.stops.len(), "stops", 1, max_stops));
+        // Field-declaration order, which is the order pydantic reports in:
+        // depots (length then items), stops, vehicle_count, capacity,
+        // max_radius_km, hysteresis_m. A client reading `detail[0]` sees a
+        // different field if these are emitted in a different sequence.
+        //
         // Depot and stop coordinates are range-checked like every other
         // endpoint's. This was missed in the port: `Stop` inherits `Coordinate`
         // in the pydantic schema, and pydantic validates nested models, so
         // FastAPI rejected an out-of-range depot with 422 while this accepted it
         // and forwarded it to the engine.
-        for (field, list) in [("depots", &self.depots), ("stops", &self.stops)] {
+        let mut errors = Vec::new();
+        for (field, list, min, max) in [
+            ("depots", &self.depots, bounds::DEPOTS.0, bounds::DEPOTS.1),
+            ("stops", &self.stops, 1, max_stops),
+        ] {
+            errors.extend(length_errors(list.len(), field, min, max));
             for (index, stop) in list.iter().enumerate() {
                 let index_str = index.to_string();
                 errors.extend(stop.coordinate().validate_at(&[field, &index_str]));
             }
         }
+        positive(self.vehicle_count.map(|v| v as f64), &["vehicle_count"], &mut errors);
         // pydantic reports the bound that was actually crossed, and a client
         // branching on `type` sees `less_than_equal` for an over-large capacity.
         if self.capacity < bounds::CAPACITY.0 {
@@ -815,7 +824,6 @@ impl VrpRequest {
         }
         positive(self.max_radius_km, &["max_radius_km"], &mut errors);
         non_negative(self.hysteresis_m, &["hysteresis_m"], &mut errors);
-        positive(self.vehicle_count.map(|v| v as f64), &["vehicle_count"], &mut errors);
         errors
     }
 }

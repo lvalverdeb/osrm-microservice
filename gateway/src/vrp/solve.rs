@@ -140,7 +140,16 @@ struct TableResponse {
 pub fn build_chunk_requests(request: &VrpRequest, depot_idx: usize, stop_indices: &[usize],
                             vehicle_offset: usize, chunk_size_limit: usize) -> Vec<ChunkRequest> {
     let depot = &request.depots[depot_idx];
-    let chunk_size = chunk_size_limit.min(request.capacity.max(1) as usize).max(1);
+    // A chunk becomes one `/trip` call of depot + stops, and the trip schema
+    // caps coordinates at 200. Python built a real `TripRequest` here, so a
+    // `VRP_CHUNK_SIZE` past that raised before any request went out; building
+    // the struct directly skipped the check and sent the engine more than it
+    // accepts. Bounded here so an over-large setting degrades instead.
+    let trip_bound = crate::models::bounds::TRIP_COORDINATES.1.saturating_sub(1);
+    let chunk_size = chunk_size_limit
+        .min(request.capacity.max(1) as usize)
+        .min(trip_bound)
+        .max(1);
     let num_chunks = stop_indices.len().div_ceil(chunk_size);
 
     stop_indices.chunks(chunk_size).enumerate()
@@ -362,6 +371,23 @@ mod tests {
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks[0].original_indices, vec![0, 1]);
         assert_eq!(chunks[2].original_indices, vec![4]);
+    }
+
+    /// A chunk must fit the `/trip` coordinate cap once the depot is added.
+    #[test]
+    fn chunks_never_exceed_what_the_trip_schema_accepts() {
+        let request = request(500, 1, 10_000);
+        let indices: Vec<usize> = (0..500).collect();
+        // Both settings well past the cap: without the bound this produced a
+        // single 501-coordinate /trip call.
+        let chunks = build_chunk_requests(&request, 0, &indices, 0, 1_000);
+        for chunk in &chunks {
+            assert!(chunk.stops.len() + 1 <= crate::models::bounds::TRIP_COORDINATES.1,
+                    "{} stops + depot exceeds the trip cap", chunk.stops.len());
+        }
+        assert!(chunks.len() > 1, "the work must be split, not truncated");
+        let placed: usize = chunks.iter().map(|c| c.stops.len()).sum();
+        assert_eq!(placed, 500, "every stop must still be routed");
     }
 
     /// The bound is min(VRP_CHUNK_SIZE, capacity), not capacity alone.

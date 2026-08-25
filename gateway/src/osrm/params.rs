@@ -190,6 +190,12 @@ fn urlencode(value: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(byte as char)
             }
+            // httpx serialises query params with `urlencode`, whose default
+            // `quote_via=quote_plus` writes a space as `+`, not `%20`. Only
+            // reachable through a caller-supplied `hints`, `exclude` or
+            // `bearings` value, but it changes the upstream URL and so anything
+            // keyed on it, including a replay fixture.
+            b' ' => out.push('+'),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }

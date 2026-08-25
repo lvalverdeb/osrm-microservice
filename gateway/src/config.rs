@@ -51,11 +51,24 @@ impl FromEnv for bool {
 /// boots with a documented default is more useful at 3am than one that refuses
 /// to start because a typo reached `L1_CACHE_TTL`.
 fn read<T: FromEnv>(key: &str, default: &str) -> T {
-    let raw = std::env::var(key).unwrap_or_default();
+    let raw = lookup_env(key).unwrap_or_default();
     let candidate = if raw.is_empty() && !default.is_empty() { default } else { &raw };
     T::from_env_str(candidate)
         .or_else(|| T::from_env_str(default))
         .expect("committed default must parse")
+}
+
+/// Read an environment variable, exact match first.
+///
+/// pydantic-settings defaults to `case_sensitive=False`, so a lower-case
+/// `debug=true` in the environment configured the Python gateway and was
+/// invisible here. The exact name is tried first, so the ordinary upper-case
+/// case costs nothing extra.
+fn lookup_env(key: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        return Some(value);
+    }
+    std::env::vars().find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| value)
 }
 
 /// Declares the settings table once, so the struct, the constructor and the
@@ -216,17 +229,65 @@ pub fn parse_dotenv(contents: &str) -> HashMap<String, String> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
+        // `export KEY=value` is valid in a .env python-dotenv reads.
+        let key = key.trim().strip_prefix("export ").unwrap_or(key.trim()).trim();
         // Insert, not entry(): the last occurrence of a key is the one that counts.
-        values.insert(
-            key.trim().to_string(),
-            value.trim().trim_matches('"').trim_matches('\'').to_string(),
-        );
+        values.insert(key.to_string(), clean_value(value.trim()));
     }
     values
 }
 
+/// Strip a matched quote pair, or an unquoted trailing comment.
+///
+/// python-dotenv drops ` # ...` from an unquoted value and leaves it alone
+/// inside quotes. Without this, `RATE_LIMIT_ROUTE=600/minute  # burst` parsed
+/// as the literal `600/minute  # burst` -- which, now that an unreadable rate
+/// limit refuses to start the process, turns a comment into a failed boot.
+///
+/// Quotes are stripped only as a matched pair; `trim_matches` removed repeated
+/// and unbalanced ones, which python-dotenv keeps.
+fn clean_value(raw: &str) -> String {
+    for quote in ['"', '\''] {
+        if raw.len() >= 2 && raw.starts_with(quote) && raw.ends_with(quote) {
+            return raw[1..raw.len() - 1].to_string();
+        }
+    }
+    // Unquoted: a `#` that begins a word starts a comment.
+    match raw.split_once(" #").or_else(|| raw.split_once("\t#")) {
+        Some((value, _)) => value.trim_end().to_string(),
+        None if raw.starts_with('#') => String::new(),
+        None => raw.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// python-dotenv shapes the parser previously took literally.
+    ///
+    /// The comment case is the one that bites: an unreadable `RATE_LIMIT_*`
+    /// now refuses to start the process, so treating a trailing comment as
+    /// part of the value turns documentation into a failed boot.
+    #[test]
+    fn dotenv_handles_comments_quotes_and_export() {
+        let parsed = parse_dotenv(concat!(
+            "RATE_LIMIT_ROUTE=600/minute  # burst allowance\n",
+            "export APP_NAME=Gateway\n",
+            "QUOTED=\"value # not a comment\"\n",
+            "SINGLE='inner'\n",
+            "PLAIN=untouched\n",
+            "HASHLESS=a#b\n",
+        ));
+        assert_eq!(parsed["RATE_LIMIT_ROUTE"], "600/minute");
+        assert_eq!(parsed["APP_NAME"], "Gateway");
+        assert_eq!(parsed["QUOTED"], "value # not a comment");
+        assert_eq!(parsed["SINGLE"], "inner");
+        assert_eq!(parsed["PLAIN"], "untouched");
+        // No preceding space, so not a comment.
+        assert_eq!(parsed["HASHLESS"], "a#b");
+        // The committed limit must still parse after going through this.
+        assert!(crate::ratelimit::Limit::parse(&parsed["RATE_LIMIT_ROUTE"]).is_some());
+    }
+
     /// pydantic-settings accepts twelve spellings; four were missing here, and
     /// a value it accepts must not silently fall back to the default.
     #[test]

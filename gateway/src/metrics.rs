@@ -210,7 +210,12 @@ pub fn service_label(endpoint: &str) -> &'static str {
 ///
 /// `/tile` carries coordinates in its path, so it collapses to its route
 /// pattern; anything unrouted collapses to `other` for the same reason.
-pub fn handler_label(path: &str) -> String {
+pub fn handler_label(path: &str, metrics_endpoint: &str) -> String {
+    // The scrape path is configurable, and hardcoding `/metrics` counted every
+    // scrape under the unrouted bucket whenever METRICS_ENDPOINT was moved.
+    if path == metrics_endpoint {
+        return path.to_string();
+    }
     match path {
         "/route" | "/matrix" | "/matrix-graph" | "/match" | "/trip" | "/nearest"
         | "/vrp" | "/vrp/allocate" | "/health" | "/ready" | "/metrics"
@@ -248,18 +253,27 @@ mod tests {
 
     #[test]
     fn tile_paths_collapse_to_their_route_pattern() {
-        assert_eq!(handler_label("/tile/driving/12/100/200.mvt"),
+        assert_eq!(handler_label("/tile/driving/12/100/200.mvt", "/metrics"),
                    "/tile/{profile}/{z}/{x}/{y}.mvt");
-        assert_eq!(handler_label("/tile/driving/12/101/201.mvt"),
+        assert_eq!(handler_label("/tile/driving/12/101/201.mvt", "/metrics"),
                    "/tile/{profile}/{z}/{x}/{y}.mvt");
+    }
+
+    /// The scrape path is configurable; the label must follow it.
+    #[test]
+    fn a_relocated_metrics_endpoint_keeps_its_own_label() {
+        assert_eq!(handler_label("/internal/metrics", "/internal/metrics"), "/internal/metrics");
+        // And the default spelling is no longer special when it is not the one
+        // configured -- it is just another unrouted path.
+        assert_eq!(handler_label("/internal/metrics", "/metrics"), "none");
     }
 
     #[test]
     fn routed_paths_keep_their_own_label() {
-        assert_eq!(handler_label("/vrp/allocate"), "/vrp/allocate");
-        assert_eq!(handler_label("/docs"), "/docs");
-        assert_eq!(handler_label("/openapi.json"), "/openapi.json");
-        assert_eq!(handler_label("/unrouted"), "none");
+        assert_eq!(handler_label("/vrp/allocate", "/metrics"), "/vrp/allocate");
+        assert_eq!(handler_label("/docs", "/metrics"), "/docs");
+        assert_eq!(handler_label("/openapi.json", "/metrics"), "/openapi.json");
+        assert_eq!(handler_label("/unrouted", "/metrics"), "none");
     }
 
     #[test]

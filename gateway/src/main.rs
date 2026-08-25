@@ -153,7 +153,8 @@ fn router(state: AppState, metrics_path: &str) -> Router {
 /// the metric would go quiet exactly when the gateway is under pressure.
 async fn observe(State(state): State<AppState>, request: axum::extract::Request,
                  next: Next) -> Response {
-    let handler = crate::metrics::handler_label(request.uri().path());
+    let handler = crate::metrics::handler_label(request.uri().path(),
+                                               &state.settings.metrics_endpoint);
     let method = request.method().to_string();
     // Content-Length is what the Python instrumentator measures too, so an
     // unlabelled or chunked body counts as zero on both sides.
