@@ -72,16 +72,30 @@ impl Modify for NoSecurity {
 }
 
 /// Render the document as JSON.
-pub fn document() -> String {
-    ApiDoc::openapi().to_pretty_json().unwrap_or_default()
+///
+/// `vrp_max_stops` is patched in rather than annotated, because it is runtime
+/// configuration: an operator can lower it on a smaller box, and a schema
+/// advertising the compile-time default would then invite requests the gateway
+/// rejects. FastAPI reflected the configured value too, by reading it when the
+/// model class was defined.
+pub fn document(vrp_max_stops: usize) -> String {
+    let mut doc = match serde_json::to_value(ApiDoc::openapi()) {
+        Ok(doc) => doc,
+        Err(_) => return String::new(),
+    };
+    if let Some(stops) = doc.pointer_mut("/components/schemas/VrpRequest/properties/stops") {
+        stops["maxItems"] = serde_json::json!(vrp_max_stops);
+    }
+    serde_json::to_string_pretty(&doc).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The document as served, with a representative `VRP_MAX_STOPS`.
     fn doc() -> serde_json::Value {
-        serde_json::from_str(&document()).expect("the generated document is valid JSON")
+        serde_json::from_str(&document(2000)).expect("the generated document is valid JSON")
     }
 
     /// Every route the gateway serves must appear, or clients generated from
@@ -164,6 +178,128 @@ mod tests {
         check!("TripDestination", crate::models::TripDestination);
         check!("Gaps", crate::models::Gaps);
         check!("ClusteringMode", crate::models::ClusteringMode);
+    }
+
+    /// Find a property's schema, looking through `allOf` composition.
+    ///
+    /// utoipa encodes a `#[serde(flatten)]` field as composition, so a request
+    /// model's own properties sit inside `allOf` rather than at the top level.
+    /// A naive lookup finds nothing and reports the constraint as missing --
+    /// which is how this helper came to exist.
+    fn property<'a>(schemas: &'a serde_json::Value, model: &str,
+                    field: &str) -> &'a serde_json::Value {
+        let schema = &schemas[model];
+        let direct = &schema["properties"][field];
+        if !direct.is_null() {
+            return direct;
+        }
+        for part in schema["allOf"].as_array().into_iter().flatten() {
+            let found = &part["properties"][field];
+            if !found.is_null() {
+                return found;
+            }
+        }
+        panic!("{model} has no property {field}, directly or through allOf");
+    }
+
+    /// Every list bound the document declares is the bound `validate()`
+    /// enforces -- checked by building a request at the bound and one past it.
+    ///
+    /// The schema previously declared no bounds at all while `validate()`
+    /// enforced several, so a client generated from it produced requests the
+    /// gateway rejected. Reading the numbers out of the document rather than
+    /// restating them means this fails if either side moves alone.
+    #[test]
+    fn declared_list_bounds_are_the_enforced_ones() {
+        use crate::models::Validate;
+
+        let doc = doc();
+        let schemas = &doc["components"]["schemas"];
+        let bound = |model: &str, field: &str, key: &str| -> usize {
+            property(schemas, model, field)[key]
+                .as_u64()
+                .unwrap_or_else(|| panic!("{model}.{field} declares no {key}")) as usize
+        };
+        // A coordinate list of `n` entries, as JSON.
+        let coords = |n: usize| (0..n)
+            .map(|i| format!(r#"{{"longitude":{}.0,"latitude":0.0}}"#, i % 90))
+            .collect::<Vec<_>>().join(",");
+        let stops = |n: usize| coords(n);
+
+        let matrix = |n: usize| -> Vec<crate::models::ValidationError> {
+            let r: crate::models::MatrixRequest =
+                serde_json::from_str(&format!(r#"{{"coordinates":[{}]}}"#, coords(n))).unwrap();
+            r.validate()
+        };
+        let min = bound("MatrixRequest", "coordinates", "minItems");
+        let max = bound("MatrixRequest", "coordinates", "maxItems");
+        assert!(!matrix(min - 1).is_empty(), "matrix accepts {} coordinates, below its declared minimum", min - 1);
+        assert!(matrix(min).is_empty(), "matrix rejects its declared minimum of {min}");
+        assert!(matrix(max).is_empty(), "matrix rejects its declared maximum of {max}");
+        assert!(!matrix(max + 1).is_empty(), "matrix accepts {} coordinates, above its declared maximum", max + 1);
+
+        let trip = |n: usize| -> Vec<crate::models::ValidationError> {
+            let r: crate::models::TripRequest =
+                serde_json::from_str(&format!(r#"{{"coordinates":[{}]}}"#, coords(n))).unwrap();
+            r.validate()
+        };
+        let trip_max = bound("TripRequest", "coordinates", "maxItems");
+        assert!(trip(trip_max).is_empty(), "trip rejects its declared maximum");
+        assert!(!trip(trip_max + 1).is_empty(), "trip accepts more than its declared maximum");
+
+        let crumbs = |n: usize| -> Vec<crate::models::ValidationError> {
+            let list = (0..n)
+                .map(|i| format!(r#"{{"longitude":0.0,"latitude":0.0,"timestamp":{i}}}"#))
+                .collect::<Vec<_>>().join(",");
+            let r: crate::models::MatchRequest =
+                serde_json::from_str(&format!(r#"{{"breadcrumbs":[{list}]}}"#)).unwrap();
+            r.validate()
+        };
+        let crumb_min = bound("MatchRequest", "breadcrumbs", "minItems");
+        assert!(!crumbs(crumb_min - 1).is_empty(), "match accepts fewer breadcrumbs than declared");
+        assert!(crumbs(crumb_min).is_empty(), "match rejects its declared minimum");
+
+        // VrpRequest carries the runtime-configured stop ceiling, so the
+        // document is rendered with a known value above and checked against it.
+        let vrp = |depots: usize, stop_count: usize| -> Vec<crate::models::ValidationError> {
+            let r: crate::models::VrpRequest = serde_json::from_str(&format!(
+                r#"{{"depots":[{}],"stops":[{}]}}"#, coords(depots.max(1)), stops(stop_count)))
+                .unwrap();
+            r.validate_with(2000)
+        };
+        let stops_max = bound("VrpRequest", "stops", "maxItems");
+        assert_eq!(stops_max, 2000, "the document should carry the configured stop ceiling");
+        assert!(vrp(1, stops_max).is_empty(), "vrp rejects its declared stop maximum");
+        assert!(!vrp(1, stops_max + 1).is_empty(), "vrp accepts more stops than declared");
+    }
+
+    /// The same for the numeric bounds.
+    #[test]
+    fn declared_numeric_bounds_are_the_enforced_ones() {
+        use crate::models::Validate;
+
+        let doc = doc();
+        let schemas = &doc["components"]["schemas"];
+        let lon_max = property(schemas, "Coordinate", "longitude")["maximum"]
+            .as_f64().expect("longitude maximum");
+        let lat_min = property(schemas, "Coordinate", "latitude")["minimum"]
+            .as_f64().expect("latitude minimum");
+
+        let nearest = |lon: f64, lat: f64, number: i64| {
+            let r: crate::models::NearestRequest = serde_json::from_str(&format!(
+                r#"{{"coordinate":{{"longitude":{lon},"latitude":{lat}}},"number":{number}}}"#))
+                .unwrap();
+            r.validate()
+        };
+        assert!(nearest(lon_max, 0.0, 1).is_empty(), "the declared longitude maximum is rejected");
+        assert!(!nearest(lon_max + 1.0, 0.0, 1).is_empty(), "past the declared longitude maximum is accepted");
+        assert!(nearest(0.0, lat_min, 1).is_empty(), "the declared latitude minimum is rejected");
+        assert!(!nearest(0.0, lat_min - 1.0, 1).is_empty(), "past the declared latitude minimum is accepted");
+
+        let number_min = property(schemas, "NearestRequest", "number")["minimum"]
+            .as_i64().expect("number minimum");
+        assert!(nearest(0.0, 0.0, number_min).is_empty(), "the declared number minimum is rejected");
+        assert!(!nearest(0.0, 0.0, number_min - 1).is_empty(), "below the declared number minimum is accepted");
     }
 
     #[test]
