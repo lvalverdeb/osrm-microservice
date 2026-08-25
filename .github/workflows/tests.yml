@@ -26,6 +26,25 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      # The parity harness's acceptance test and its replay regression gate
+      # drive the gateway binary as a subprocess. Without this they skip, and CI
+      # goes green having never run the two most valuable gates in the repo --
+      # which is exactly what happened between #5 and this change.
+      # Cache key matches the `rust` job, so whichever runs second reuses it.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            gateway/target
+            rust-spike/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('gateway/Cargo.lock', 'rust-spike/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Build the gateway, so the binary-dependent tests run
+        run: cargo build --locked --manifest-path gateway/Cargo.toml
+
       - name: Test with pytest
         run: make test
 

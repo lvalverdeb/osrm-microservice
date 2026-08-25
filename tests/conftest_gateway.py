@@ -51,6 +51,7 @@ def wait_until_ready(url: str, deadline: float = 20.0) -> None:
 @contextlib.contextmanager
 def gateway(engine_url: str, **env: str):
     """Run the gateway against `engine_url` and yield its base URL."""
+    require_binary_built()
     port = free_port()
     environment = {
         **os.environ,
@@ -106,7 +107,23 @@ def replay_engine(fixtures: Path = FIXTURES / "upstream"):
             process.wait(timeout=10)
 
 
+# Skipping locally is a convenience: `pytest` stays usable without a Rust
+# toolchain. Skipping in CI is a hole -- these are the harness's own acceptance
+# test and the replay regression gate, and a green run that never executed them
+# says nothing. So CI fails instead, which is what catches the build step being
+# dropped from the workflow.
+IN_CI = os.environ.get("CI", "").lower() == "true"
+
 requires_binary = pytest.mark.skipif(
-    not BINARY.exists(),
+    not BINARY.exists() and not IN_CI,
     reason=f"{BINARY.relative_to(REPO)} not built; run `cargo build --manifest-path gateway/Cargo.toml`",
 )
+
+
+def require_binary_built() -> None:
+    """Fail with an actionable message when the binary is missing under CI."""
+    if not BINARY.exists():
+        raise AssertionError(
+            f"{BINARY.relative_to(REPO)} is missing. In CI these tests must run, not skip: "
+            "the workflow needs a `cargo build --manifest-path gateway/Cargo.toml` step "
+            "before pytest.")
