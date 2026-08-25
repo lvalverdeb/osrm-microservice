@@ -196,14 +196,61 @@ pub struct ValidationError {
     #[schema(value_type = Vec<String>)]
     pub loc: Vec<serde_json::Value>,
     pub msg: String,
+    /// The offending value, echoed back as pydantic does. Filled from the parsed
+    /// body by `fill_inputs` rather than threaded through every validator.
+    #[serde(default)]
+    pub input: serde_json::Value,
+    /// The constraint that was crossed, when the error names one -- `{"gt": 0}`,
+    /// `{"ge": -180.0}`, the literal set, the list bounds. Absent otherwise, as
+    /// it is absent from pydantic's entry for errors with no context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ctx: Option<serde_json::Value>,
+}
+
+/// Fill each error's `input` from the value its `loc` points at.
+///
+/// pydantic reports the offending value on every entry. Walking the body once
+/// here keeps that out of the validators, which would otherwise each have to
+/// carry and serialise their own operand. An unresolvable path falls back to
+/// the deepest ancestor that does resolve, which is what makes a `missing`
+/// error report its containing object -- exactly what pydantic shows.
+pub fn fill_inputs(errors: &mut [ValidationError], body: &serde_json::Value) {
+    for error in errors.iter_mut() {
+        let mut cursor = body;
+        // Skip the leading "body"/"path" root segment.
+        for segment in error.loc.iter().skip(1) {
+            let next = match segment {
+                serde_json::Value::String(field) => cursor.get(field.as_str()),
+                serde_json::Value::Number(index) => index.as_u64()
+                    .and_then(|i| cursor.get(i as usize)),
+                _ => None,
+            };
+            match next {
+                Some(value) => cursor = value,
+                None => break,
+            }
+        }
+        error.input = cursor.clone();
+    }
 }
 
 impl ValidationError {
     /// A failure on a path parameter, whose `loc` is rooted at `path`.
-    pub fn path_param(kind: &str, name: &str, msg: &str) -> Self {
+    ///
+    /// `input` is passed in rather than filled later: `fill_inputs` walks the
+    /// request body, and a path segment is not in it.
+    pub fn path_param(kind: &str, name: &str, msg: &str, input: &str) -> Self {
         Self { kind: kind.to_string(),
                loc: vec![loc_part("path"), loc_part(name)],
-               msg: msg.to_string() }
+               msg: msg.to_string(),
+               input: serde_json::Value::String(input.to_string()),
+               ctx: None }
+    }
+
+    /// Attach the constraint this error names.
+    pub fn with_ctx(mut self, ctx: serde_json::Value) -> Self {
+        self.ctx = Some(ctx);
+        self
     }
 
     /// A failure against the body as a whole, for callers outside this module.
@@ -214,7 +261,8 @@ impl ValidationError {
     fn new(kind: &str, loc: &[&str], msg: String) -> Self {
         let mut path = vec![loc_part("body")];
         path.extend(loc.iter().copied().map(loc_part));
-        Self { kind: kind.to_string(), loc: path, msg }
+        Self { kind: kind.to_string(), loc: path, msg,
+               input: serde_json::Value::Null, ctx: None }
     }
 }
 
@@ -302,10 +350,12 @@ impl Coordinate {
             path.push(field);
             if value < min as f64 {
                 errors.push(ValidationError::new("greater_than_equal", &path,
-                    format!("Input should be greater than or equal to {min}")));
+                    format!("Input should be greater than or equal to {min}"))
+                    .with_ctx(serde_json::json!({ "ge": min as f64 })));
             } else if value > max as f64 {
                 errors.push(ValidationError::new("less_than_equal", &path,
-                    format!("Input should be less than or equal to {max}")));
+                    format!("Input should be less than or equal to {max}"))
+                    .with_ctx(serde_json::json!({ "le": max as f64 })));
             }
         };
         check(self.longitude, "longitude", bounds::LONGITUDE.0 as i64, bounds::LONGITUDE.1 as i64);
@@ -331,7 +381,8 @@ pub fn join_coordinates(coordinates: &[Coordinate]) -> String {
 fn positive(value: Option<f64>, field: &[&str], errors: &mut Vec<ValidationError>) {
     if value.is_some_and(|v| !(v > bounds::POSITIVE)) {
         errors.push(ValidationError::new("greater_than", field,
-            "Input should be greater than 0".to_string()));
+            "Input should be greater than 0".to_string())
+            .with_ctx(serde_json::json!({ "gt": 0 })));
     }
 }
 
@@ -340,7 +391,8 @@ fn positive(value: Option<f64>, field: &[&str], errors: &mut Vec<ValidationError
 fn non_negative(value: f64, field: &[&str], errors: &mut Vec<ValidationError>) {
     if !(value >= bounds::POSITIVE) {
         errors.push(ValidationError::new("greater_than_equal", field,
-            "Input should be greater than or equal to 0".to_string()));
+            "Input should be greater than or equal to 0".to_string())
+            .with_ctx(serde_json::json!({ "ge": 0 })));
     }
 }
 
@@ -358,11 +410,15 @@ fn validate_coordinates(coordinates: &[Coordinate], field: &str, min: usize,
 fn length_errors(len: usize, field: &str, min: usize, max: usize) -> Vec<ValidationError> {
     if len < min {
         return vec![ValidationError::new("too_short", &[field],
-            format!("List should have at least {min} items after validation, not {len}"))];
+            format!("List should have at least {min} items after validation, not {len}"))
+            .with_ctx(serde_json::json!({
+                "field_type": "List", "min_length": min, "actual_length": len }))];
     }
     if len > max {
         return vec![ValidationError::new("too_long", &[field],
-            format!("List should have at most {max} items after validation, not {len}"))];
+            format!("List should have at most {max} items after validation, not {len}"))
+            .with_ctx(serde_json::json!({
+                "field_type": "List", "max_length": max, "actual_length": len }))];
     }
     Vec::new()
 }
@@ -633,7 +689,8 @@ impl Validate for MatchRequest {
             if crumb.timestamp < 0 {
                 errors.push(ValidationError::new("greater_than_equal",
                     &["breadcrumbs", &index_str, "timestamp"],
-                    "Input should be greater than or equal to 0".to_string()));
+                    "Input should be greater than or equal to 0".to_string())
+                    .with_ctx(serde_json::json!({ "ge": 0 })));
             }
             positive(crumb.accuracy_meters,
                      &["breadcrumbs", &index_str, "accuracy_meters"], &mut errors);
@@ -723,7 +780,8 @@ impl Validate for NearestRequest {
         let mut errors = self.coordinate.validate_at(&["coordinate"]);
         if self.number < bounds::NEAREST_NUMBER_MIN {
             errors.push(ValidationError::new("greater_than_equal", &["number"],
-                "Input should be greater than or equal to 1".to_string()));
+                "Input should be greater than or equal to 1".to_string())
+                .with_ctx(serde_json::json!({ "ge": bounds::NEAREST_NUMBER_MIN })));
         }
         errors
     }
@@ -817,10 +875,12 @@ impl VrpRequest {
         // branching on `type` sees `less_than_equal` for an over-large capacity.
         if self.capacity < bounds::CAPACITY.0 {
             errors.push(ValidationError::new("greater_than", &["capacity"],
-                "Input should be greater than 0".to_string()));
+                "Input should be greater than 0".to_string())
+                .with_ctx(serde_json::json!({ "gt": 0 })));
         } else if self.capacity > bounds::CAPACITY.1 {
             errors.push(ValidationError::new("less_than_equal", &["capacity"],
-                format!("Input should be less than or equal to {}", bounds::CAPACITY.1)));
+                format!("Input should be less than or equal to {}", bounds::CAPACITY.1))
+                .with_ctx(serde_json::json!({ "le": bounds::CAPACITY.1 })));
         }
         positive(self.max_radius_km, &["max_radius_km"], &mut errors);
         non_negative(self.hysteresis_m, &["hysteresis_m"], &mut errors);

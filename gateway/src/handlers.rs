@@ -10,7 +10,7 @@ use axum::Json;
 use serde_json::{json, Map, Value};
 
 use crate::config::Settings;
-use crate::error::{parse_body, ApiError};
+use crate::error::ApiError;
 use crate::models::{
     join_coordinates, MatchRequest, MatrixRequest, NearestRequest, RouteRequest, TripRequest,
     Validate, ValidationError, VrpRequest,
@@ -37,13 +37,39 @@ pub struct AppState {
 
 /// Decode and validate a request body in one step.
 fn accept<T: for<'de> serde::Deserialize<'de> + Validate>(body: &[u8]) -> Result<T, ApiError> {
-    let request: T = parse_body(body)?;
-    let errors = request.validate();
-    if errors.is_empty() {
-        Ok(request)
-    } else {
-        Err(ApiError::Validation(errors))
+    finish(crate::error::parse_collecting::<T>(body)?, |request| request.validate())
+}
+
+/// Merge decode failures with the model's own, as pydantic reports them together.
+///
+/// A body that is both the wrong type in one field and out of range in another
+/// produced one error here and two there, because validation never ran once
+/// decoding had failed. Decoding now yields a patched value, so the model can be
+/// validated in the same pass.
+fn finish<T>(parsed: crate::error::Parsed<T>,
+             validate: impl FnOnce(&T) -> Vec<crate::models::ValidationError>)
+    -> Result<T, ApiError> {
+    let Some(request) = parsed.value else {
+        let mut errors = parsed.errors;
+        crate::models::fill_inputs(&mut errors, &parsed.document);
+        return Err(ApiError::Validation(errors));
+    };
+    let mut errors = validate(&request);
+    // A constraint error against a patched position describes the placeholder,
+    // not the request, and reporting it would invent a failure the caller never
+    // caused.
+    errors.retain(|error| {
+        let path: Vec<_> = error.loc.iter().skip(1).cloned().collect();
+        !parsed.patched.iter().any(|patched| path.starts_with(patched))
+    });
+    if parsed.errors.is_empty() && errors.is_empty() {
+        return Ok(request);
     }
+    // Constraint failures first: pydantic walks fields in declaration order and
+    // this is the order it produced for every mixed body checked against it.
+    errors.extend(parsed.errors);
+    crate::models::fill_inputs(&mut errors, &parsed.document);
+    Err(ApiError::Validation(errors))
 }
 
 #[utoipa::path(
@@ -154,11 +180,30 @@ fn build_graph(data: &Value, request: &MatrixRequest) -> Result<Value, OsrmError
     let durations = data.get("durations").and_then(Value::as_array).cloned().unwrap_or_default();
     let distances = data.get("distances").and_then(Value::as_array).cloned().unwrap_or_default();
 
-    let nodes: Vec<Value> = request.coordinates.iter().enumerate()
+    let mut nodes: Vec<Value> = request.coordinates.iter().enumerate()
         .map(|(index, coordinate)| json!({
             "lon": coordinate.longitude, "lat": coordinate.latitude, "id": index
         }))
         .collect();
+    // `G.add_edge(i, j)` creates a node on demand, so a matrix wider or taller
+    // than the coordinate list leaves bare `{"id": i}` nodes in networkx's
+    // output. Deriving nodes only from the coordinates dropped them.
+    let mut implied: Vec<usize> = Vec::new();
+    let note = |index: usize, implied: &mut Vec<usize>| {
+        if index >= request.coordinates.len() && !implied.contains(&index) {
+            implied.push(index);
+        }
+    };
+    for (i, row) in durations.iter().enumerate() {
+        let Some(row) = row.as_array() else { continue };
+        for j in 0..row.len() {
+            if i != j {
+                note(i, &mut implied);
+                note(j, &mut implied);
+            }
+        }
+    }
+    nodes.extend(implied.into_iter().map(|index| json!({ "id": index })));
 
     let mut edges = Vec::new();
     // Enumerate before filtering. `filter_map(..).enumerate()` renumbered every
@@ -296,7 +341,7 @@ fn tile_row(segment: &str) -> Result<i64, ApiError> {
 fn tile_int(raw: &str, name: &str) -> Result<i64, ApiError> {
     raw.parse().map_err(|_| ApiError::Validation(vec![
         ValidationError::path_param("int_parsing", name,
-            "Input should be a valid integer, unable to parse string as an integer")
+            "Input should be a valid integer, unable to parse string as an integer", raw)
     ]))
 }
 
@@ -350,6 +395,66 @@ pub async fn redoc(State(state): State<AppState>) -> Response {
     <script src="https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js"></script>
   </body>
 </html>"#);
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
+}
+
+/// Swagger UI's OAuth2 redirect target, which FastAPI registers with `/docs`.
+///
+/// No OAuth flow is configured on either side, so this only ever runs if a
+/// reader points their own Swagger UI at this schema; it exists because the
+/// route existed, not because the gateway authenticates anything.
+pub async fn oauth2_redirect() -> Response {
+    let html = r#"<!DOCTYPE html>
+<html>
+<head><title>Swagger UI: OAuth2 Redirect</title></head>
+<body>
+<script>
+'use strict';
+function run () {
+    var oauth2 = window.opener.swaggerUIRedirectOauth2;
+    var sentState = oauth2.state;
+    var redirectUrl = oauth2.redirectUrl;
+    var isValid, qp, arr;
+    if (/code|token|error/.test(window.location.hash)) {
+        qp = window.location.hash.substring(1).replace('?', '&');
+    } else {
+        qp = location.search.substring(1);
+    }
+    arr = qp.split('&');
+    arr.forEach(function (v, i, _arr) { _arr[i] = '"' + v.replace('=', '":"') + '"'; });
+    qp = qp ? JSON.parse('{' + arr.join() + '}', function (key, value) {
+        return key === '' ? value : decodeURIComponent(value);
+    }) : {};
+    isValid = qp.state === sentState;
+    if ((oauth2.auth.schema.get('flow') === 'accessCode' ||
+         oauth2.auth.schema.get('flow') === 'authorizationCode' ||
+         oauth2.auth.schema.get('flow') === 'authorization_code') && !oauth2.auth.code) {
+        if (!isValid) {
+            oauth2.errCb({authId: oauth2.auth.name, source: 'auth', level: 'warning',
+                message: 'Authorization may be unsafe, passed state was changed in server. '
+                       + 'The passed state wasn't returned from auth server.'});
+        }
+        if (qp.code) {
+            delete oauth2.state;
+            oauth2.auth.code = qp.code;
+            oauth2.callback({auth: oauth2.auth, redirectUrl: redirectUrl});
+        } else {
+            let oauthErrorMsg = qp.error === 'server_error' ? 'Server error.'
+                : qp.error === 'temporarily_unavailable' ? 'Temporarily unavailable.' : null;
+            oauth2.errCb({authId: oauth2.auth.name, source: 'auth', level: 'error',
+                message: oauthErrorMsg || 'Authorization failed: no accessCode received.'});
+        }
+    } else {
+        oauth2.callback({auth: oauth2.auth, token: qp, isValid: isValid,
+                         redirectUrl: redirectUrl});
+    }
+    window.close();
+}
+if (document.readyState !== 'loading') { run(); }
+else { document.addEventListener('DOMContentLoaded', function () { run(); }); }
+</script>
+</body>
+</html>"#;
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
@@ -500,13 +605,9 @@ async fn allocation(state: &AppState, request: &VrpRequest)
 }
 
 fn accept_vrp(state: &AppState, body: &[u8]) -> Result<VrpRequest, ApiError> {
-    let request: VrpRequest = parse_body(body)?;
-    let errors = request.validate_with(state.settings.vrp_max_stops);
-    if errors.is_empty() {
-        Ok(request)
-    } else {
-        Err(ApiError::Validation(errors))
-    }
+    let max_stops = state.settings.vrp_max_stops;
+    finish(crate::error::parse_collecting::<VrpRequest>(body)?,
+           |request| request.validate_with(max_stops))
 }
 
 /// Allocate stops to depots, then solve one TSP per vehicle load.
@@ -526,7 +627,7 @@ fn accept_vrp(state: &AppState, body: &[u8]) -> Result<VrpRequest, ApiError> {
 pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
     let request = accept_vrp(&state, &body)?;
     let _permit = vrp_slot(&state).await?;
-    let allocated = allocation(&state, &request).await?;
+    let allocated = allocation(&state, &request).await.map_err(as_solve_failure)?;
 
     let mut routes: Vec<VehicleRoute> = Vec::new();
     // Depots are solved one at a time, as in Python; only the chunks within a
@@ -539,16 +640,35 @@ pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response,
         let chunks = solve::build_chunk_requests(&request, depot_idx, stop_indices,
                                                  routes.len(), state.settings.vrp_chunk_size);
         routes.extend(solve::solve_depot_routes(Arc::clone(&state.client), chunks,
-                                                state.settings.vrp_chunk_concurrency).await?);
+                                                state.settings.vrp_chunk_concurrency)
+                          .await.map_err(as_solve_failure)?);
     }
 
-    // Same identifier convention the routes use: the caller's id when it gave
-    // one, the raw index otherwise.
-    let stop_ids: Vec<Option<Value>> = request.stops.iter().map(|s| s.id.clone()).collect();
-    let unreachable = allocated.unreachable.iter()
-        .map(|&i| id_or_index(i, &stop_ids))
-        .collect();
-    Ok(Json(VrpResponse::new(routes, unreachable)).into_response())
+    Ok(Json(VrpResponse::new(routes)).into_response())
+}
+
+/// Collapse an engine failure during a solve to 500, as Python's handler does.
+///
+/// `/vrp` and `/vrp/allocate` are the two endpoints with no
+/// `except httpx.HTTPStatusError` branch -- their bare `except Exception` turns
+/// an upstream 400 into `500 {"detail":"Internal server error"}`, unlike the
+/// other seven handlers which relay the engine's status. Reproduced here rather
+/// than improved, so the two implementations answer the same thing.
+///
+/// A gateway-side refusal is not an engine failure and keeps its own status:
+/// `RequestTooLong` has no counterpart in Python at all, so there is no
+/// behaviour to match.
+fn as_solve_failure(error: impl Into<ApiError>) -> ApiError {
+    match error.into() {
+        // A gateway-side refusal keeps its own status.
+        upstream @ ApiError::Upstream(OsrmError::RequestTooLong { .. }) => upstream,
+        ApiError::Upstream(other) => {
+            ApiError::Upstream(OsrmError::Unavailable(format!("{other:?}")))
+        }
+        // Validation and capacity shedding are decided before the solve runs
+        // and are not what the bare `except` was catching.
+        other => other,
+    }
 }
 
 /// The allocation phase alone, with caller IDs mapped back on.
@@ -569,7 +689,7 @@ pub async fn vrp_allocate(State(state): State<AppState>, body: Bytes)
     -> Result<Response, ApiError> {
     let request = accept_vrp(&state, &body)?;
     let _permit = vrp_slot(&state).await?;
-    let allocated = allocation(&state, &request).await?;
+    let allocated = allocation(&state, &request).await.map_err(as_solve_failure)?;
 
     let depot_ids: Vec<Option<Value>> = request.depots.iter().map(|d| d.id.clone()).collect();
     let stop_ids: Vec<Option<Value>> = request.stops.iter().map(|s| s.id.clone()).collect();

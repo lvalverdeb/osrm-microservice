@@ -142,7 +142,7 @@ settings! {
     // immediately rather than join a queue that is not draining. Without it the
     // queue timeout is the only bound, so every rejected caller pays the full
     // timeout before hearing no. 0 restores that wait-only behaviour.
-    vrp_max_queue_depth: usize = "VRP_MAX_QUEUE_DEPTH" / "4",
+    vrp_max_queue_depth: usize = "VRP_MAX_QUEUE_DEPTH" / "0",
 
     // --- Matrix capacity ---
     matrix_max_cells: usize = "MATRIX_MAX_CELLS" / "10000",

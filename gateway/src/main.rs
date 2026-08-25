@@ -82,6 +82,7 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
                                  Arc::clone(&metrics), Arc::clone(&l2),
                                  settings.max_url_bytes);
 
+    let l2_for_shutdown = Arc::clone(&l2);
     let bind = format!("{}:{}", settings.host, settings.port);
     let metrics_path = settings.metrics_endpoint.clone();
     let vrp_gate = Arc::new(admission::AdmissionGate::new(
@@ -112,6 +113,9 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    // The lifespan closed both of these after the server stopped; the reqwest
+    // client needs no counterpart, since dropping it closes its pool.
+    l2_for_shutdown.close().await;
     Ok(())
 }
 
@@ -133,6 +137,7 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         .route("/openapi.json", get(handlers::openapi))
         .route("/docs", get(handlers::docs))
         .route("/redoc", get(handlers::redoc))
+        .route("/docs/oauth2-redirect", get(handlers::oauth2_redirect))
         // Starlette answered these as JSON `{"detail": ...}`; axum's default
         // fallback sends an empty body with no content-type, so a client
         // parsing `detail` got nothing to parse.
@@ -230,7 +235,8 @@ async fn require_json_body(request: axum::extract::Request, next: Next) -> Respo
     }
     crate::error::ApiError::Validation(vec![crate::models::ValidationError::path_param(
         "model_attributes_type", "body",
-        "Input should be a valid dictionary or object to extract fields from")])
+        "Input should be a valid dictionary or object to extract fields from",
+        declared.as_deref().unwrap_or(""))])
         .into_response()
 }
 

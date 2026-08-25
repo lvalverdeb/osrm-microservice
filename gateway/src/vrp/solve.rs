@@ -59,24 +59,21 @@ pub struct VrpResponse {
     pub routes: Vec<VehicleRoute>,
     pub total_distance: f64,
     pub total_duration: f64,
-    /// Stops no vehicle was given: unroutable, or outside `max_radius_km`.
-    ///
-    /// Without this a caller sees fewer stops in the routes than it sent and no
-    /// reason why. `/vrp/allocate` has always reported them; this endpoint
-    /// dropped them silently.
-    #[schema(value_type = Vec<String>)]
-    pub unreachable_stops: Vec<Value>,
 }
 
 impl VrpResponse {
     /// Build the response, summing the totals from the routes themselves.
-    pub fn new(routes: Vec<VehicleRoute>, unreachable_stops: Vec<Value>) -> Self {
+    ///
+    /// Deliberately carries no `unreachable_stops`: Python declares
+    /// `response_model=VrpResponse` without it, so FastAPI stripped the field
+    /// and a caller saw only the routes. `/vrp/allocate` does report them --
+    /// that model declares the field -- so the information is still reachable.
+    pub fn new(routes: Vec<VehicleRoute>) -> Self {
         Self {
             total_distance: routes.iter().map(|r| r.distance_meters).sum(),
             total_duration: routes.iter().map(|r| r.duration_seconds).sum(),
             code: "Ok".to_string(),
             routes,
-            unreachable_stops,
         }
     }
 }

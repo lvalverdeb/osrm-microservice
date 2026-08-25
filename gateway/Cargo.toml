@@ -17,7 +17,11 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "
 serde = { version = "1", features = ["derive", "rc"] }
 # raw_value lets the VRP solver embed the engine's route geometry verbatim
 # instead of decoding and re-encoding its coordinates.
-serde_json = { version = "1", features = ["raw_value"] }
+# preserve_order keeps object keys in insertion order, as a Python dict does.
+# Without it every serde_json::Map came out key-sorted -- visible in `ctx`, in
+# `/vrp/allocate`'s allocations, and in the graph edge attributes. The cache key
+# is unaffected: it sorts through its own BTreeMap in cache.rs, deliberately.
+serde_json = { version = "1", features = ["raw_value", "preserve_order"] }
 # Reports which field failed to deserialise, not just that something did.
 # Without it every parse error lands on `body` with no path, and the path is
 # what clients branch on.

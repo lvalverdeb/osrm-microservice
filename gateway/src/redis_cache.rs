@@ -30,6 +30,9 @@ pub struct RedisCache {
     /// Python client got from `redis.from_url` at construction. Initialisation
     /// is retried on the next call if Redis is down at first contact.
     manager: tokio::sync::OnceCell<redis::aio::ConnectionManager>,
+    /// Set by `close`, so a post-shutdown lookup skips the tier entirely --
+    /// what Python's `_available = False` did.
+    closed: std::sync::atomic::AtomicBool,
     ttl: u64,
 }
 
@@ -43,13 +46,13 @@ impl RedisCache {
     pub fn new(url: &str, ttl: u64) -> Self {
         let manager = tokio::sync::OnceCell::new();
         if url.is_empty() {
-            return Self { client: None, manager, ttl };
+            return Self { client: None, manager, closed: Default::default(), ttl };
         }
         match redis::Client::open(url) {
-            Ok(client) => Self { client: Some(client), manager, ttl },
+            Ok(client) => Self { client: Some(client), manager, closed: Default::default(), ttl },
             Err(error) => {
                 eprintln!("redis: unusable URL, L2 cache disabled: {error}");
-                Self { client: None, manager, ttl }
+                Self { client: None, manager, closed: Default::default(), ttl }
             }
         }
     }
@@ -65,6 +68,9 @@ impl RedisCache {
 
     /// The shared connection, built once and reused.
     async fn connection(&self) -> Option<redis::aio::ConnectionManager> {
+        if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
         let client = self.client.as_ref()?;
         self.manager
             .get_or_try_init(|| {
@@ -133,6 +139,21 @@ impl RedisCache {
             }
         }
         Some(count)
+    }
+
+    /// Close the shared connection, as the lifespan's `redis_cache.close()` did.
+    ///
+    /// `ConnectionManager` has no explicit close, so this drops it and marks the
+    /// tier unusable; a lookup after shutdown then skips L2 rather than
+    /// reconnecting to a server the process is finished with.
+    pub async fn close(&self) {
+        if let Some(manager) = self.manager.get() {
+            let mut connection = manager.clone();
+            // Best effort: the server drops the connection on our exit anyway,
+            // and a failure here must not delay shutdown.
+            let _: Result<(), _> = redis::cmd("QUIT").query_async(&mut connection).await;
+        }
+        self.closed.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// How long entries live, for callers that report configuration.
