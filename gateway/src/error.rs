@@ -94,7 +94,7 @@ pub fn parse_body<T: for<'de> serde::Deserialize<'de>>(body: &[u8]) -> Result<T,
     serde_path_to_error::deserialize(deserializer).map_err(|err| {
         let parsed = classify(&err.inner().to_string());
         ApiError::Validation(vec![ValidationError {
-            kind: parsed.kind.to_string(),
+            kind: parsed.kind,
             loc: location(&err.path().to_string(), parsed.field.as_deref()),
             msg: parsed.message,
         }])
@@ -103,7 +103,7 @@ pub fn parse_body<T: for<'de> serde::Deserialize<'de>>(body: &[u8]) -> Result<T,
 
 /// One serde failure, translated.
 struct ParseFailure {
-    kind: &'static str,
+    kind: String,
     message: String,
     /// Set when the failure names a field serde could not attribute to a path,
     /// i.e. a missing key, which is reported against its containing object.
@@ -129,9 +129,21 @@ fn classify(raw: &str) -> ParseFailure {
     // Drop serde's position suffix before anything else.
     let text = raw.split(" at line ").next().unwrap_or(raw).trim();
 
+    // `models::lax` emits `type|message`, which is how a pydantic error slug
+    // survives the trip through `serde` and `serde_path_to_error`.
+    if let Some((kind, message)) = text.split_once('|') {
+        if !kind.is_empty() && kind.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+            return ParseFailure {
+                kind: kind.to_string(),
+                message: message.to_string(),
+                field: None,
+            };
+        }
+    }
+
     if let Some(field) = text.strip_prefix("missing field ") {
         return ParseFailure {
-            kind: "missing",
+            kind: "missing".to_string(),
             message: "Field required".to_string(),
             field: Some(field.trim().trim_matches('`').to_string()),
         };
@@ -139,7 +151,7 @@ fn classify(raw: &str) -> ParseFailure {
     if text.starts_with("unknown variant ") {
         if let Some(expected) = text.split("expected one of ").nth(1) {
             return ParseFailure {
-                kind: "literal_error",
+                kind: "literal_error".to_string(),
                 message: format!("Input should be {}", oxford(expected)),
                 field: None,
             };
@@ -147,13 +159,13 @@ fn classify(raw: &str) -> ParseFailure {
     }
     if text.starts_with("invalid type: string") {
         return ParseFailure {
-            kind: "float_parsing",
+            kind: "float_parsing".to_string(),
             message: "Input should be a valid number, unable to parse string as a number"
                 .to_string(),
             field: None,
         };
     }
-    ParseFailure { kind: "model_attributes_type", message: text.to_string(), field: None }
+    ParseFailure { kind: "model_attributes_type".to_string(), message: text.to_string(), field: None }
 }
 
 /// Render serde's backtick-quoted alternatives as pydantic renders them:

@@ -137,6 +137,7 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         // parsing `detail` got nothing to parse.
         .fallback(handlers::not_found)
         .method_not_allowed_fallback(handlers::method_not_allowed)
+        .layer(middleware::from_fn(require_json_body))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         // Innermost of the three, so `observe` still counts a panicking request
@@ -199,6 +200,36 @@ async fn observe(State(state): State<AppState>, request: axum::extract::Request,
                              crate::metrics::status_label(parts.status.as_u16())])
         .inc();
     Response::from_parts(parts, axum::body::Body::from(bytes))
+}
+
+/// Refuse a request body that is not declared as JSON.
+///
+/// FastAPI parsed a body as JSON only when the media type said so, and answered
+/// 422 otherwise; `parse_body` deserialises unconditionally, so a `text/plain`
+/// body carrying JSON was accepted here and rejected there. Every POST this
+/// gateway routes takes a JSON body -- there is no form or upload endpoint --
+/// so the method alone identifies the requests this applies to.
+async fn require_json_body(request: axum::extract::Request, next: Next) -> Response {
+    if request.method() != axum::http::Method::POST {
+        return next.run(request).await;
+    }
+    let declared = request.headers().get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or("").trim().to_ascii_lowercase());
+    let acceptable = match declared.as_deref() {
+        // FastAPI accepts `application/json` and the `+json` structured suffix.
+        Some(media) => media == "application/json" || media.ends_with("+json"),
+        // An absent Content-Type is what a bare `curl -d` sends; FastAPI treats
+        // it as a form body and fails the model, so it is refused here too.
+        None => false,
+    };
+    if acceptable {
+        return next.run(request).await;
+    }
+    crate::error::ApiError::Validation(vec![crate::models::ValidationError::path_param(
+        "model_attributes_type", "body",
+        "Input should be a valid dictionary or object to extract fields from")])
+        .into_response()
 }
 
 /// Turn a panic into the 500 Starlette's `ServerErrorMiddleware` produced.

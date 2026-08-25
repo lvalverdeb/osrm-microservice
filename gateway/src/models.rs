@@ -42,6 +42,135 @@ pub mod bounds {
     pub const POSITIVE: f64 = 0.0;
 }
 
+/// pydantic's lax-mode scalar coercions.
+///
+/// pydantic accepts `"-84.09"` for a float, `"true"` for a bool and `35.0` for
+/// an int; serde accepts none of them, so a payload that worked against the
+/// FastAPI gateway got a 422 here. These deserialisers close that gap on the
+/// scalar fields, and reject what pydantic rejects with pydantic's own wording.
+///
+/// Errors are emitted as `type|message` and split apart in `error.rs`, which is
+/// the only way a `serde` error can carry a pydantic error slug through
+/// `serde_path_to_error`.
+pub mod lax {
+    use serde::de::{Deserializer, Error};
+    use serde_json::Value;
+
+    fn fail<E: Error>(kind: &str, message: &str) -> E {
+        E::custom(format!("{kind}|{message}"))
+    }
+
+    /// Coerce to a float, accepting a numeric string as pydantic does.
+    fn to_f64<E: Error>(value: &Value) -> Result<f64, E> {
+        match value {
+            Value::Number(number) => number.as_f64()
+                .ok_or_else(|| fail("float_parsing", "Input should be a valid number")),
+            // Note bools are not accepted: pydantic does not coerce them either.
+            Value::String(text) => text.trim().parse::<f64>().map_err(|_| fail(
+                "float_parsing",
+                "Input should be a valid number, unable to parse string as a number")),
+            _ => Err(fail("float_type", "Input should be a valid number")),
+        }
+    }
+
+    /// Coerce to an integer. A float is accepted only when it is integral,
+    /// which is exactly pydantic's rule -- `35.0` yes, `35.5` no.
+    fn to_i64<E: Error>(value: &Value) -> Result<i64, E> {
+        let fractional = || fail::<E>(
+            "int_from_float",
+            "Input should be a valid integer, got a number with a fractional part");
+        match value {
+            Value::Number(number) if number.is_i64() || number.is_u64() => number.as_i64()
+                .ok_or_else(|| fail("int_parsing", "Input should be a valid integer")),
+            Value::Number(number) => {
+                let float = number.as_f64().ok_or_else(fractional)?;
+                (float.fract() == 0.0).then_some(float as i64).ok_or_else(fractional)
+            }
+            Value::String(text) => {
+                let text = text.trim();
+                if let Ok(integer) = text.parse::<i64>() {
+                    return Ok(integer);
+                }
+                let float = text.parse::<f64>().map_err(|_| fail::<E>(
+                    "int_parsing",
+                    "Input should be a valid integer, unable to parse string as an integer"))?;
+                (float.fract() == 0.0).then_some(float as i64).ok_or_else(fractional)
+            }
+            _ => Err(fail("int_type", "Input should be a valid integer")),
+        }
+    }
+
+    /// Coerce to a bool over pydantic's full accepted spelling set.
+    fn to_bool<E: Error>(value: &Value) -> Result<bool, E> {
+        match value {
+            Value::Bool(flag) => Ok(*flag),
+            Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
+                "true" | "t" | "yes" | "y" | "on" | "1" => Ok(true),
+                "false" | "f" | "no" | "n" | "off" | "0" => Ok(false),
+                _ => Err(fail("bool_parsing",
+                              "Input should be a valid boolean, unable to interpret input")),
+            },
+            // Only 0 and 1; pydantic rejects any other number.
+            Value::Number(number) => match number.as_i64() {
+                Some(0) => Ok(false),
+                Some(1) => Ok(true),
+                _ => Err(fail("bool_parsing",
+                              "Input should be a valid boolean, unable to interpret input")),
+            },
+            _ => Err(fail("bool_type", "Input should be a valid boolean")),
+        }
+    }
+
+    macro_rules! coercion {
+        ($name:ident, $optional:ident, $ty:ty, $convert:ident, $null:literal, $noun:literal) => {
+            pub fn $name<'de, D: Deserializer<'de>>(d: D) -> Result<$ty, D::Error> {
+                let value = Value::deserialize(d)?;
+                if value.is_null() {
+                    // pydantic names the JSON type here, not the Rust one, and
+                    // reports an explicit null against the field rather than as
+                    // a whole-body shape error.
+                    return Err(fail($null, concat!("Input should be a valid ", $noun)));
+                }
+                $convert(&value)
+            }
+
+            pub fn $optional<'de, D: Deserializer<'de>>(d: D) -> Result<Option<$ty>, D::Error> {
+                let value = Value::deserialize(d)?;
+                if value.is_null() {
+                    return Ok(None);
+                }
+                $convert(&value).map(Some)
+            }
+        };
+    }
+
+    use serde::Deserialize as _;
+    coercion!(number, opt_number, f64, to_f64, "float_type", "number");
+    coercion!(integer, opt_integer, i64, to_i64, "int_type", "integer");
+    coercion!(boolean, opt_boolean, bool, to_bool, "bool_type", "boolean");
+
+    /// A stop or depot identifier: a string, an integer, or absent.
+    pub fn opt_id<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+        let value = Value::deserialize(d)?;
+        match &value {
+            Value::Null => Ok(None),
+            Value::String(_) => Ok(Some(value)),
+            Value::Number(number) if number.is_i64() || number.is_u64() => Ok(Some(value)),
+            _ => Err(fail("string_type", "Input should be a valid string")),
+        }
+    }
+
+    /// A list of integers, each coerced individually.
+    pub fn opt_integers<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<i64>>, D::Error> {
+        let value = Value::deserialize(d)?;
+        match value {
+            Value::Null => Ok(None),
+            Value::Array(items) => items.iter().map(to_i64).collect::<Result<_, _>>().map(Some),
+            _ => Err(fail("list_type", "Input should be a valid list")),
+        }
+    }
+}
+
 /// Render one `loc` segment the way pydantic does.
 ///
 /// A segment that is entirely digits is a list index and must serialise as a
@@ -143,8 +272,10 @@ fn hysteresis() -> f64 { 2000.0 }
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, ToSchema)]
 pub struct Coordinate {
     #[schema(minimum = -180.0, maximum = 180.0)]
+    #[serde(deserialize_with = "lax::number")]
     pub longitude: f64,
     #[schema(minimum = -90.0, maximum = 90.0)]
+    #[serde(deserialize_with = "lax::number")]
     pub latitude: f64,
 }
 
@@ -287,7 +418,7 @@ pub struct RouteRequest {
     pub overview: Overview,
     #[serde(default = "geojson")]
     pub geometries: Geometries,
-    #[serde(default = "yes")]
+    #[serde(default = "yes", deserialize_with = "lax::boolean")]
     pub steps: bool,
     #[serde(default = "distance_duration")]
     pub annotations: Option<String>,
@@ -322,19 +453,19 @@ impl Validate for RouteRequest {
 pub struct MatrixRequest {
     #[schema(min_items = 2, max_items = 5000)]
     pub coordinates: Vec<Coordinate>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lax::opt_integers")]
     pub sources: Option<Vec<i64>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lax::opt_integers")]
     pub destinations: Option<Vec<i64>>,
     #[serde(default = "driving")]
     pub profile: Profile,
     #[serde(default = "MatrixRequest::default_annotations")]
     pub annotations: MatrixAnnotation,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lax::opt_number")]
     pub fallback_speed: Option<f64>,
     #[serde(default)]
     pub fallback_coordinate: Option<FallbackCoordinate>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lax::opt_number")]
     pub scale_factor: Option<f64>,
     #[serde(flatten)]
     pub common: CommonRoutingOptions,
@@ -408,14 +539,18 @@ impl Validate for MatrixRequest {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GpsBreadcrumb {
     #[schema(minimum = -180.0, maximum = 180.0)]
+    #[serde(deserialize_with = "lax::number")]
     pub longitude: f64,
     #[schema(minimum = -90.0, maximum = 90.0)]
+    #[serde(deserialize_with = "lax::number")]
     pub latitude: f64,
     #[schema(minimum = 0)]
+    #[serde(deserialize_with = "lax::integer")]
     pub timestamp: i64,
     /// Defaults to 5.0 rather than null, so it is always present in the
     /// `radiuses` the gateway derives.
-    #[serde(default = "GpsBreadcrumb::default_accuracy")]
+    #[serde(default = "GpsBreadcrumb::default_accuracy",
+            deserialize_with = "lax::opt_number")]
     pub accuracy_meters: Option<f64>,
 }
 
@@ -506,7 +641,7 @@ impl Validate for MatchRequest {
 pub struct TripRequest {
     #[schema(min_items = 2, max_items = 200)]
     pub coordinates: Vec<Coordinate>,
-    #[serde(default = "yes")]
+    #[serde(default = "yes", deserialize_with = "lax::boolean")]
     pub roundtrip: bool,
     #[serde(default = "TripRequest::default_source")]
     pub source: TripSource,
@@ -518,7 +653,7 @@ pub struct TripRequest {
     pub overview: Overview,
     #[serde(default = "geojson")]
     pub geometries: Geometries,
-    #[serde(default = "yes")]
+    #[serde(default = "yes", deserialize_with = "lax::boolean")]
     pub steps: bool,
     #[serde(default = "distance_duration")]
     pub annotations: Option<String>,
@@ -570,6 +705,7 @@ pub struct NearestRequest {
     /// No upper bound, matching the Python schema.
     #[serde(default = "one")]
     #[schema(minimum = 1)]
+    #[serde(deserialize_with = "lax::integer")]
     pub number: i64,
     #[serde(default = "driving")]
     pub profile: Profile,
@@ -592,10 +728,17 @@ impl Validate for NearestRequest {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct Stop {
     #[schema(minimum = -180.0, maximum = 180.0)]
+    #[serde(deserialize_with = "lax::number")]
     pub longitude: f64,
     #[schema(minimum = -90.0, maximum = 90.0)]
+    #[serde(deserialize_with = "lax::number")]
     pub latitude: f64,
-    #[serde(default)]
+    /// `str | int | None` in the pydantic schema. Left as a bare `Value` this
+    /// accepted a float, a bool or an object and echoed it straight back into
+    /// `stop_ids` and the allocation keys, so the response carried a shape the
+    /// published schema forbids.
+    #[serde(default, deserialize_with = "lax::opt_id")]
+    #[schema(value_type = Option<String>)]
     pub id: Option<serde_json::Value>,
 }
 
@@ -613,22 +756,22 @@ pub struct VrpRequest {
     /// runtime configuration rather than a compile-time constant.
     #[schema(min_items = 1)]
     pub stops: Vec<Stop>,
-    #[serde(default = "default_capacity")]
+    #[serde(default = "default_capacity", deserialize_with = "lax::integer")]
     #[schema(minimum = 1, maximum = 10000)]
     pub capacity: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lax::opt_number")]
     pub max_radius_km: Option<f64>,
     /// Never read by the solver, but `gt=0` in the pydantic schema, so
     /// `{"vehicle_count": 0}` was a 422 and must stay one. Omitting the field
     /// entirely made it a silently-dropped unknown key.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lax::opt_integer")]
     #[schema(minimum = 1)]
     pub vehicle_count: Option<i64>,
     #[serde(default = "VrpRequest::default_mode")]
     pub clustering_mode: ClusteringMode,
-    #[serde(default = "hysteresis")]
+    #[serde(default = "hysteresis", deserialize_with = "lax::number")]
     pub hysteresis_m: f64,
-    #[serde(default = "yes")]
+    #[serde(default = "yes", deserialize_with = "lax::boolean")]
     pub roundtrip: bool,
 }
 
