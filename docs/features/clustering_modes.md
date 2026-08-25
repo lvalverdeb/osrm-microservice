@@ -95,9 +95,11 @@ When the Euclidean distance to the cost-optimal depot exceeds the **anchor depot
 
 A stop is marked **unreachable** when:
 - `max_radius_km` is set and the road distance from the assigned depot exceeds that limit.
-- The assigned depot has no valid road connection (`UNREACHABLE` sentinel in the matrix).
+- No depot has a valid road connection to it (`UNREACHABLE` sentinel in the matrix).
 
-Unreachable stops are returned in the `unreachable_stops` array of both `VrpResponse` and `VrpAllocationResponse`.
+Unreachable stops are returned in the `unreachable_stops` array of both `VrpResponse` and `VrpAllocationResponse`, identified the same way the routes identify their stops: by the caller's `id` where one was supplied, otherwise by index.
+
+The second condition was documented here well before it worked. Until then a stop the engine could not route to was assigned to a depot anyway, sent to `/trip` with the rest of its chunk, and answered `NoRoute` — and because a chunk failure cancels its siblings, a single unroutable stop failed the whole request with a 500. `VrpResponse` also had no `unreachable_stops` field at all.
 
 ---
 

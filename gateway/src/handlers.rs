@@ -424,7 +424,13 @@ pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response,
                                                 state.settings.vrp_chunk_concurrency).await?);
     }
 
-    Ok(Json(VrpResponse::new(routes)).into_response())
+    // Same identifier convention the routes use: the caller's id when it gave
+    // one, the raw index otherwise.
+    let stop_ids: Vec<Option<Value>> = request.stops.iter().map(|s| s.id.clone()).collect();
+    let unreachable = allocated.unreachable.iter()
+        .map(|&i| id_or_index(i, &stop_ids))
+        .collect();
+    Ok(Json(VrpResponse::new(routes, unreachable)).into_response())
 }
 
 /// The allocation phase alone, with caller IDs mapped back on.
