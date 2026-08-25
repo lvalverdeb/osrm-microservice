@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A hand-built map for end-to-end tests against a real routing engine.
+
+  The technique is borrowed from OSRM's own Cucumber suite, which builds a tiny
+  synthetic .osm per scenario rather than routing on real extracts. It closes a
+  gap the recorded fixtures in parity/fixtures/ structurally cannot: those key on
+  the outgoing URL and replay whatever was recorded, so a gateway that builds a
+  well formed but semantically wrong request (transposed lat/lon, swapped
+  sources and destinations) gets a plausible answer and the test still passes.
+
+  Geometry, chosen so distances are checkable by hand. At the equator 0.001 deg
+  of longitude is about 111 m, and latitude likewise.
+
+      n1 ========= n2 ========= n3     west to east, about 1113 m per leg
+    (0, 0)     (0, 0.01)    (0, 0.02)
+                                 |
+                                 |     about 1106 m north
+                                n4
+                             (0.01, 0.02)
+
+  So from n1: n2 is one leg away, n3 two, n4 three. Distances increase with each
+  hop, which is what the tests assert. That holds only if the gateway sends
+  coordinates in the order and orientation OSRM expects.
+
+  All ways are highway=primary with no access restrictions, so the stock car
+  profile routes them without special handling.
+-->
+<osm version="0.6" generator="handwritten for tests">
+  <bounds minlat="-0.005" minlon="-0.005" maxlat="0.015" maxlon="0.025"/>
+
+  <node id="1" lat="0.0"  lon="0.0"  version="1"/>
+  <node id="2" lat="0.0"  lon="0.01" version="1"/>
+  <node id="3" lat="0.0"  lon="0.02" version="1"/>
+  <node id="4" lat="0.01" lon="0.02" version="1"/>
+
+  <way id="100" version="1">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <tag k="highway" v="primary"/>
+    <tag k="name" v="East Road"/>
+  </way>
+
+  <way id="101" version="1">
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <tag k="highway" v="primary"/>
+    <tag k="name" v="North Road"/>
+  </way>
+</osm>

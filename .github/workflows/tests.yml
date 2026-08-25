@@ -45,6 +45,13 @@ jobs:
       - name: Build the gateway, so the binary-dependent tests run
         run: cargo build --locked --manifest-path gateway/Cargo.toml
 
+      # tests/test_synthetic_routing.py runs a real osrm-routed over the tiny
+      # map in tests/synthetic/. The toolchain is not packaged for ubuntu, so
+      # those tests use Docker; pulling it here keeps the pull out of the first
+      # test's timeout. They skip if this is unavailable.
+      - name: Fetch the OSRM image for the synthetic-map tests
+        run: docker pull ghcr.io/project-osrm/osrm-backend:latest
+
       - name: Test with pytest
         run: make test
 
