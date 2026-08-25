@@ -61,6 +61,15 @@ impl IntoResponse for ApiError {
             }
             // Transport failures and exhausted retries both land here, which is
             // why a persistently 503-ing engine surfaces as 500 rather than 503.
+            // A capacity refusal, like the matrix cell budget: the caller sent
+            // more than the engine can be asked for, and the message says so
+            // rather than surfacing the engine's 414 or a reset connection.
+            ApiError::Upstream(OsrmError::RequestTooLong { bytes, limit }) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "detail": [ValidationError::new_public("value_error", format!(
+                    "Value error, Request needs a {bytes}-byte upstream URL, over the \
+                     {limit}-byte limit; send fewer coordinates or split the request"))] })),
+            ).into_response(),
             ApiError::Upstream(OsrmError::Unavailable(_)) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "detail": "Internal server error" })),

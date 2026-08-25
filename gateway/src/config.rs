@@ -134,6 +134,20 @@ settings! {
     // --- Matrix capacity ---
     matrix_max_cells: usize = "MATRIX_MAX_CELLS" / "10000",
 
+    // --- Upstream request size ---
+    /// Largest upstream URL the gateway will construct, in bytes.
+    ///
+    /// OSRM carries coordinates in the path, so a long `/match` trace or a wide
+    /// `/matrix` builds a request line of tens of kilobytes. Measured against
+    /// osrm-routed 5.x directly: it answers up to ~24,750 bytes and drops the
+    /// connection from ~25,000, which is what turned an over-long `/match` into
+    /// a 500 rather than any kind of refusal. 24,000 sits under that with a
+    /// margin and well above the ~13 KB a default VRP `/table` batch builds.
+    ///
+    /// Lower it if a proxy sits in front of the engine -- nginx and Apache both
+    /// cap a request line near 8 KB, far below what osrm-routed itself takes.
+    max_url_bytes: usize = "OSRM_MAX_URL_BYTES" / "24000",
+
     // --- VRP chunk fan-out ---
     vrp_chunk_concurrency: usize = "VRP_CHUNK_CONCURRENCY" / "4",
 

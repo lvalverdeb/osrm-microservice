@@ -79,7 +79,8 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     let client = OsrmClient::new(http, cache, settings.osrm_base_url.clone(), retry,
                                  &settings.health_check_coords,
                                  Duration::from_secs(settings.health_check_timeout),
-                                 Arc::clone(&metrics), Arc::clone(&l2));
+                                 Arc::clone(&metrics), Arc::clone(&l2),
+                                 settings.max_url_bytes);
 
     let bind = format!("{}:{}", settings.host, settings.port);
     let metrics_path = settings.metrics_endpoint.clone();

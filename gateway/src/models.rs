@@ -206,6 +206,11 @@ impl ValidationError {
                msg: msg.to_string() }
     }
 
+    /// A failure against the body as a whole, for callers outside this module.
+    pub fn new_public(kind: &str, msg: String) -> Self {
+        Self::new(kind, &[], msg)
+    }
+
     fn new(kind: &str, loc: &[&str], msg: String) -> Self {
         let mut path = vec![loc_part("body")];
         path.extend(loc.iter().copied().map(loc_part));

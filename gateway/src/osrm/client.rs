@@ -28,6 +28,14 @@ pub enum OsrmError {
     /// The engine could not be reached, or kept failing until retries ran out.
     /// Surfaces as 500, matching Python's generic handler.
     Unavailable(String),
+    /// The request would need a longer URL than the engine will accept.
+    ///
+    /// OSRM takes coordinates in the path, so a long trace or a wide matrix
+    /// builds a request line of tens of kilobytes. Servers cap that around 8 KB
+    /// -- a real `osrm-routed` drops the connection, which retries could only
+    /// turn into a 500, and a proxy in front answers 414. Caught here instead,
+    /// so the caller is told which limit it crossed.
+    RequestTooLong { bytes: usize, limit: usize },
 }
 
 /// How many attempts, and how long to wait between them.
@@ -64,6 +72,8 @@ pub struct OsrmClient {
     cache: Cache<String, Arc<Vec<u8>>>,
     base_url: String,
     retry: RetryPolicy,
+    /// Ceiling on a constructed upstream URL. See `OsrmError::RequestTooLong`.
+    max_url_bytes: usize,
     probe_path: String,
     probe_timeout: Duration,
     metrics: Arc<Metrics>,
@@ -71,14 +81,16 @@ pub struct OsrmClient {
 }
 
 impl OsrmClient {
+    #[allow(clippy::too_many_arguments, reason = "one call site, all settings-derived")]
     pub fn new(http: reqwest::Client, cache: Cache<String, Arc<Vec<u8>>>, base_url: String,
                retry: RetryPolicy, health_check_coords: &str, probe_timeout: Duration,
-               metrics: Arc<Metrics>, l2: Arc<RedisCache>) -> Self {
+               metrics: Arc<Metrics>, l2: Arc<RedisCache>, max_url_bytes: usize) -> Self {
         Self {
             http,
             cache,
             base_url,
             retry,
+            max_url_bytes,
             probe_path: format!("/route/v1/driving/{health_check_coords}"),
             probe_timeout,
             metrics,
@@ -186,6 +198,12 @@ impl OsrmClient {
     /// Attempt the upstream call, retrying 5xx and transport failures.
     async fn fetch_with_retry(&self, endpoint: &str, params: &Params) -> Result<Vec<u8>, OsrmError> {
         let url = format!("{}{}?{}", self.base_url, endpoint, query_string(params));
+        // Checked before the first attempt, not inside the loop: a URL that is
+        // too long is too long every time, and retrying it only multiplies the
+        // wait before the same failure.
+        if url.len() > self.max_url_bytes {
+            return Err(OsrmError::RequestTooLong { bytes: url.len(), limit: self.max_url_bytes });
+        }
         let mut last = OsrmError::Unavailable("no attempt was made".to_string());
         for attempt in 1..=self.retry.attempts {
             match self.attempt(&url).await {
@@ -227,6 +245,8 @@ impl OsrmClient {
         match error {
             OsrmError::Status { status, .. } => is_retryable_status(*status),
             OsrmError::Unavailable(_) => true,
+            // Never: the URL is the same length on every attempt.
+            OsrmError::RequestTooLong { .. } => false,
         }
     }
 
@@ -248,6 +268,14 @@ mod tests {
     use super::*;
 
     const POLICY: RetryPolicy = RetryPolicy { attempts: 3, min_seconds: 1, max_seconds: 10 };
+
+    /// A URL that cannot fit is not worth three attempts and a backoff.
+    #[test]
+    fn an_oversized_url_is_never_retried() {
+        assert!(!OsrmClient::retryable(&OsrmError::RequestTooLong { bytes: 40_000, limit: 8_000 }));
+        // The two that are retried keep their existing classification.
+        assert!(OsrmClient::retryable(&OsrmError::Unavailable("reset".to_string())));
+    }
 
     #[test]
     fn only_server_errors_are_retried() {
