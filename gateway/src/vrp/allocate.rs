@@ -8,6 +8,7 @@
 //! thing, given the same iteration order.
 
 use crate::models::{ClusteringMode, Coordinate};
+use crate::osrm::client::OsrmError;
 
 /// Stands in for JSON `null` in a cost matrix: OSRM reports an unreachable
 /// pair as null, and the comparisons below need a number.
@@ -114,12 +115,19 @@ fn select_depot(stop_idx: usize, euclidean_m: &[f64], target: &[Vec<f64>],
 /// Returns:
 ///     The per-depot assignments and the stops ruled out by `max_radius_m`.
 pub fn allocate_stops(durations: &[Vec<f64>], distances: &[Vec<f64>], depots: &[Coordinate],
-                      stops: &[Coordinate], options: AllocationOptions) -> Allocation {
+                      stops: &[Coordinate], options: AllocationOptions)
+    -> Result<Allocation, OsrmError> {
     let mut assignments = vec![Vec::new(); depots.len()];
     let mut unreachable = Vec::new();
     if stops.is_empty() {
-        return Allocation { assignments, unreachable };
+        return Ok(Allocation { assignments, unreachable });
     }
+
+    // The loop is driven by the matrix width, as `range(dist_np.shape[1])` is:
+    // a short `/table` response leaves its trailing stops unassigned rather
+    // than being indexed past. Iterating `0..stops.len()` instead read
+    // `row[stop_idx]` out of bounds and panicked the worker.
+    let width = matrix_width(distances, durations, depots.len(), stops.len())?;
 
     let target = if options.mode == ClusteringMode::TravelTime { durations } else { distances };
     // A metre-denominated band means nothing against a matrix of seconds, so it
@@ -133,7 +141,7 @@ pub fn allocate_stops(durations: &[Vec<f64>], distances: &[Vec<f64>], depots: &[
     let centroid_lat = stops.iter().map(|s| s.latitude).sum::<f64>() / stops.len() as f64;
     let lon_scale = centroid_lat.to_radians().cos();
 
-    for stop_idx in 0..stops.len() {
+    for stop_idx in 0..width {
         let euclidean_m = euclidean_distances_m(&stops[stop_idx], depots, lon_scale);
         let depot = select_depot(stop_idx, &euclidean_m, target, options.mode,
                                  hysteresis, options.sanity_limit_m);
@@ -156,7 +164,34 @@ pub fn allocate_stops(durations: &[Vec<f64>], distances: &[Vec<f64>], depots: &[
             assignments[depot].push(stop_idx);
         }
     }
-    Allocation { assignments, unreachable }
+    Ok(Allocation { assignments, unreachable })
+}
+
+/// Width of the cost matrices, rejecting shapes that cannot be indexed.
+///
+/// Python built these with `np.array`, which raises on a ragged matrix, and
+/// then indexed `stops[stop_idx]` inside a width-bounded loop, which raises
+/// once the width exceeds the stop count. Both surfaced as 500 through the
+/// solve's bare `except`, so the same shapes are refused here rather than
+/// panicking on an unchecked index.
+fn matrix_width(distances: &[Vec<f64>], durations: &[Vec<f64>], depots: usize, stops: usize)
+    -> Result<usize, OsrmError> {
+    let ragged = |matrix: &[Vec<f64>]| -> Option<usize> {
+        let width = matrix.first().map(Vec::len).unwrap_or(0);
+        matrix.iter().all(|row| row.len() == width).then_some(width)
+    };
+    let (Some(width), Some(duration_width)) = (ragged(distances), ragged(durations)) else {
+        return Err(OsrmError::Unavailable("upstream cost matrix is ragged".to_string()));
+    };
+    if distances.len() != depots || durations.len() != depots || duration_width != width {
+        return Err(OsrmError::Unavailable(
+            "upstream cost matrix does not match the requested shape".to_string()));
+    }
+    if width > stops {
+        return Err(OsrmError::Unavailable(
+            "upstream cost matrix is wider than the stop list".to_string()));
+    }
+    Ok(width)
 }
 
 #[cfg(test)]
@@ -191,7 +226,7 @@ mod tests {
         let durations = vec![vec![900.0], vec![100.0]];
         let distances = vec![vec![9000.0], vec![1000.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert_eq!(result.assignments[1], vec![0]);
     }
 
@@ -204,7 +239,7 @@ mod tests {
         let durations = vec![vec![300.0], vec![200.0]];
         let distances = vec![vec![3000.0], vec![2000.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert_eq!(result.assignments[0], vec![0]);
     }
 
@@ -216,7 +251,7 @@ mod tests {
         let durations = vec![vec![9999.0], vec![1.0]];
         let distances = vec![vec![9999.0], vec![1.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::Radial));
+                                    options(ClusteringMode::Radial)).expect("well-formed matrix");
         assert_eq!(result.assignments[0], vec![0]);
     }
 
@@ -228,7 +263,7 @@ mod tests {
         let durations = vec![vec![9999.0], vec![1.0]];
         let distances = vec![vec![9999.0], vec![1.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert_eq!(result.assignments[0], vec![0]);
     }
 
@@ -239,7 +274,7 @@ mod tests {
         let durations = vec![vec![UNREACHABLE], vec![UNREACHABLE]];
         let distances = vec![vec![100.0], vec![100.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert_eq!(result.assignments[0], vec![0]);
     }
 
@@ -251,7 +286,7 @@ mod tests {
         let distances = vec![vec![20_000.0]];
         let mut opts = options(ClusteringMode::TravelTime);
         opts.max_radius_m = Some(5000.0);
-        let result = allocate_stops(&durations, &distances, &depots, &stops, opts);
+        let result = allocate_stops(&durations, &distances, &depots, &stops, opts).expect("well-formed matrix");
         assert_eq!(result.unreachable, vec![0]);
         assert!(result.assignments[0].is_empty());
     }
@@ -268,7 +303,7 @@ mod tests {
         let durations = vec![vec![UNREACHABLE]];
         let distances = vec![vec![UNREACHABLE]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert_eq!(result.unreachable, vec![0]);
         assert!(result.assignments[0].is_empty());
     }
@@ -283,7 +318,7 @@ mod tests {
         let distances = vec![vec![UNREACHABLE]];
         let mut opts = options(ClusteringMode::TravelTime);
         opts.max_radius_m = Some(5000.0);
-        let result = allocate_stops(&durations, &distances, &depots, &stops, opts);
+        let result = allocate_stops(&durations, &distances, &depots, &stops, opts).expect("well-formed matrix");
         assert_eq!(result.unreachable, vec![0]);
         assert!(result.assignments[0].is_empty());
     }
@@ -297,9 +332,42 @@ mod tests {
         let durations = vec![vec![600.0]];
         let distances = vec![vec![20_000.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert!(result.unreachable.is_empty());
         assert_eq!(result.assignments[0], vec![0]);
+    }
+
+    /// Python's loop ran over `dist_np.shape[1]`, so a short `/table` answer
+    /// left its trailing stops unassigned. Iterating `0..stops.len()` instead
+    /// read `row[stop_idx]` out of bounds and panicked the worker.
+    #[test]
+    fn a_short_matrix_leaves_its_trailing_stops_alone_rather_than_panicking() {
+        let depots = vec![at(0.0, 0.0)];
+        let stops = vec![at(0.1, 0.0), at(0.2, 0.0), at(0.3, 0.0)];
+        // The engine answered for one stop of the three.
+        let durations = vec![vec![60.0]];
+        let distances = vec![vec![600.0]];
+        let result = allocate_stops(&durations, &distances, &depots, &stops, options(ClusteringMode::TravelTime))
+            .expect("a short matrix is not an error");
+        assert_eq!(result.assignments[0], vec![0]);
+        assert!(result.unreachable.is_empty());
+    }
+
+    /// `np.array` raises on a ragged matrix and indexing `stops[stop_idx]`
+    /// raises once the width passes the stop count; both were 500s.
+    #[test]
+    fn an_unusable_matrix_shape_is_an_error() {
+        let depots = vec![at(0.0, 0.0)];
+        let stops = vec![at(0.1, 0.0)];
+        let ragged = vec![vec![60.0, 120.0], vec![60.0]];
+        assert!(allocate_stops(&ragged, &ragged, &depots, &stops, options(ClusteringMode::TravelTime)).is_err(),
+                "ragged rows");
+        let too_wide = vec![vec![60.0, 120.0]];
+        assert!(allocate_stops(&too_wide, &too_wide, &depots, &stops, options(ClusteringMode::TravelTime)).is_err(),
+                "wider than the stop list");
+        let wrong_depth = vec![vec![60.0], vec![60.0]];
+        assert!(allocate_stops(&wrong_depth, &wrong_depth, &depots, &stops, options(ClusteringMode::TravelTime)).is_err(),
+                "more rows than depots");
     }
 
     #[test]
@@ -309,7 +377,7 @@ mod tests {
         let durations = vec![vec![10.0, 20.0, 30.0]];
         let distances = vec![vec![100.0, 200.0, 300.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::TravelTime));
+                                    options(ClusteringMode::TravelTime)).expect("well-formed matrix");
         assert_eq!(result.assignments[0], vec![0, 1, 2]);
     }
 
@@ -321,7 +389,7 @@ mod tests {
         let durations = vec![vec![1.0], vec![9999.0]];
         let distances = vec![vec![90_000.0], vec![1000.0]];
         let result = allocate_stops(&durations, &distances, &depots, &stops,
-                                    options(ClusteringMode::Distance));
+                                    options(ClusteringMode::Distance)).expect("well-formed matrix");
         assert_eq!(result.assignments[1], vec![0]);
     }
 }

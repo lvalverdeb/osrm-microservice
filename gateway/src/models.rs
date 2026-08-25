@@ -35,6 +35,11 @@ pub mod bounds {
     pub const NEAREST_NUMBER_MIN: i64 = 1;
     pub const DEPOTS: (usize, usize) = (1, 500);
     pub const CAPACITY: (i64, i64) = (1, 10_000);
+    /// `gt=0` in the pydantic schema. Enforced here because forwarding an
+    /// out-of-range value changes results rather than being merely sloppy:
+    /// `max_radius_km: 0` reads as unlimited and a negative one rules every
+    /// stop unreachable, while a negative `hysteresis_m` inverts the band.
+    pub const POSITIVE: f64 = 0.0;
 }
 
 /// One validation failure, shaped like a pydantic error entry.
@@ -49,6 +54,13 @@ pub struct ValidationError {
 }
 
 impl ValidationError {
+    /// A failure on a path parameter, whose `loc` is rooted at `path`.
+    pub fn path_param(kind: &str, name: &str, msg: &str) -> Self {
+        Self { kind: kind.to_string(),
+               loc: vec!["path".to_string(), name.to_string()],
+               msg: msg.to_string() }
+    }
+
     fn new(kind: &str, loc: &[&str], msg: String) -> Self {
         let mut path = vec!["body".to_string()];
         path.extend(loc.iter().map(|s| s.to_string()));
@@ -156,6 +168,30 @@ pub fn join_coordinates(coordinates: &[Coordinate]) -> String {
 }
 
 /// Validate a list of coordinates and its length bounds.
+/// Reject a value that is not strictly positive, as pydantic's `gt=0` does.
+///
+/// `None` passes: an absent optional field is not a constraint violation.
+///
+/// The comparison is negated rather than written as `v <= 0.0` so that NaN is
+/// refused too -- every ordered comparison against NaN is false, so the direct
+/// form would admit it. pydantic rejects NaN here for the same reason.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn positive(value: Option<f64>, field: &[&str], errors: &mut Vec<ValidationError>) {
+    if value.is_some_and(|v| !(v > bounds::POSITIVE)) {
+        errors.push(ValidationError::new("greater_than", field,
+            "Input should be greater than 0".to_string()));
+    }
+}
+
+/// Reject a negative value, as pydantic's `ge=0` does. Negated for NaN, as above.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn non_negative(value: f64, field: &[&str], errors: &mut Vec<ValidationError>) {
+    if !(value >= bounds::POSITIVE) {
+        errors.push(ValidationError::new("greater_than_equal", field,
+            "Input should be greater than or equal to 0".to_string()));
+    }
+}
+
 fn validate_coordinates(coordinates: &[Coordinate], field: &str, min: usize,
                         max: usize) -> Vec<ValidationError> {
     let mut errors = length_errors(coordinates.len(), field, min, max);
@@ -345,8 +381,11 @@ impl MatrixRequest {
 
 impl Validate for MatrixRequest {
     fn validate(&self) -> Vec<ValidationError> {
-        validate_coordinates(&self.coordinates, "coordinates",
-                             bounds::MATRIX_COORDINATES.0, bounds::MATRIX_COORDINATES.1)
+        let mut errors = validate_coordinates(&self.coordinates, "coordinates",
+                             bounds::MATRIX_COORDINATES.0, bounds::MATRIX_COORDINATES.1);
+        positive(self.fallback_speed, &["fallback_speed"], &mut errors);
+        positive(self.scale_factor, &["scale_factor"], &mut errors);
+        errors
     }
 }
 
@@ -440,6 +479,8 @@ impl Validate for MatchRequest {
                     &["breadcrumbs", &index_str, "timestamp"],
                     "Input should be greater than or equal to 0".to_string()));
             }
+            positive(crumb.accuracy_meters,
+                     &["breadcrumbs", &index_str, "accuracy_meters"], &mut errors);
         }
         errors
     }
@@ -561,6 +602,12 @@ pub struct VrpRequest {
     pub capacity: i64,
     #[serde(default)]
     pub max_radius_km: Option<f64>,
+    /// Never read by the solver, but `gt=0` in the pydantic schema, so
+    /// `{"vehicle_count": 0}` was a 422 and must stay one. Omitting the field
+    /// entirely made it a silently-dropped unknown key.
+    #[serde(default)]
+    #[schema(minimum = 1)]
+    pub vehicle_count: Option<i64>,
     #[serde(default = "VrpRequest::default_mode")]
     pub clustering_mode: ClusteringMode,
     #[serde(default = "hysteresis")]
@@ -593,10 +640,18 @@ impl VrpRequest {
                 errors.extend(stop.coordinate().validate_at(&[field, &index_str]));
             }
         }
-        if self.capacity < bounds::CAPACITY.0 || self.capacity > bounds::CAPACITY.1 {
+        // pydantic reports the bound that was actually crossed, and a client
+        // branching on `type` sees `less_than_equal` for an over-large capacity.
+        if self.capacity < bounds::CAPACITY.0 {
             errors.push(ValidationError::new("greater_than", &["capacity"],
-                "Input should be greater than 0 and less than or equal to 10000".to_string()));
+                "Input should be greater than 0".to_string()));
+        } else if self.capacity > bounds::CAPACITY.1 {
+            errors.push(ValidationError::new("less_than_equal", &["capacity"],
+                format!("Input should be less than or equal to {}", bounds::CAPACITY.1)));
         }
+        positive(self.max_radius_km, &["max_radius_km"], &mut errors);
+        non_negative(self.hysteresis_m, &["hysteresis_m"], &mut errors);
+        positive(self.vehicle_count.map(|v| v as f64), &["vehicle_count"], &mut errors);
         errors
     }
 }
@@ -773,6 +828,93 @@ mod tests {
         let errors = request.validate_with(2000);
         assert_eq!(errors[0].loc, ["body", "stops", "0", "longitude"]);
         assert_eq!(errors[0].msg, "Input should be greater than or equal to -180");
+    }
+
+    /// The pydantic schema constrains these five, and forwarding an
+    /// out-of-range value changes results rather than being merely untidy.
+    #[test]
+    fn vrp_rejects_a_non_positive_radius_and_a_negative_hysteresis() {
+        let base = r#""depots":[{"longitude":0.0,"latitude":0.0}],
+                      "stops":[{"longitude":0.0,"latitude":0.0}]"#;
+        // Zero previously read as "unlimited" and a negative ruled every
+        // routable stop unreachable; both reached the solver untouched.
+        for radius in ["0.0", "-1.0"] {
+            let request: VrpRequest = parse(&format!("{{{base},\"max_radius_km\":{radius}}}"));
+            let errors = request.validate_with(2000);
+            assert_eq!(errors[0].loc, ["body", "max_radius_km"], "radius {radius}");
+            assert_eq!(errors[0].kind, "greater_than");
+        }
+        // A negative band inverted the hysteresis comparison into a penalty.
+        let request: VrpRequest = parse(&format!("{{{base},\"hysteresis_m\":-1.0}}"));
+        let errors = request.validate_with(2000);
+        assert_eq!(errors[0].loc, ["body", "hysteresis_m"]);
+        assert_eq!(errors[0].kind, "greater_than_equal");
+        // Zero is a legitimate band: no hysteresis at all.
+        let request: VrpRequest = parse(&format!("{{{base},\"hysteresis_m\":0.0}}"));
+        assert!(request.validate_with(2000).is_empty());
+    }
+
+    /// The bound helpers refuse NaN, which a direct `v <= 0.0` would admit.
+    ///
+    /// `serde_json` rejects a bare `NaN` literal, so this is unreachable over
+    /// HTTP today -- but Python's `json.loads` accepts it, so the guard is what
+    /// keeps the two the same if a value ever arrives by another route.
+    #[test]
+    fn the_bound_helpers_refuse_nan() {
+        let mut errors = Vec::new();
+        positive(Some(f64::NAN), &["field"], &mut errors);
+        non_negative(f64::NAN, &["field"], &mut errors);
+        assert_eq!(errors.len(), 2, "NaN satisfies neither bound");
+        // Infinity is genuinely greater than zero, and pydantic agrees.
+        let mut errors = Vec::new();
+        positive(Some(f64::INFINITY), &["field"], &mut errors);
+        assert!(errors.is_empty());
+    }
+
+    /// Unread by the solver, but published and constrained, so it stays a 422.
+    #[test]
+    fn vrp_rejects_a_non_positive_vehicle_count() {
+        let request: VrpRequest = parse(
+            r#"{"depots":[{"longitude":0.0,"latitude":0.0}],
+                "stops":[{"longitude":0.0,"latitude":0.0}],"vehicle_count":0}"#);
+        let errors = request.validate_with(2000);
+        assert_eq!(errors[0].loc, ["body", "vehicle_count"]);
+        assert_eq!(errors[0].kind, "greater_than");
+    }
+
+    /// pydantic names the bound that was crossed; a client branches on `type`.
+    #[test]
+    fn capacity_reports_the_bound_it_crossed() {
+        let request = |capacity: &str| -> VrpRequest {
+            parse(&format!(
+                r#"{{"depots":[{{"longitude":0.0,"latitude":0.0}}],
+                     "stops":[{{"longitude":0.0,"latitude":0.0}}],"capacity":{capacity}}}"#))
+        };
+        assert_eq!(request("0").validate_with(2000)[0].kind, "greater_than");
+        assert_eq!(request("20000").validate_with(2000)[0].kind, "less_than_equal");
+        assert!(request("10000").validate_with(2000).is_empty());
+    }
+
+    #[test]
+    fn matrix_rejects_a_non_positive_fallback_speed_or_scale_factor() {
+        let request = |field: &str| -> MatrixRequest {
+            parse(&format!(
+                r#"{{"coordinates":[{{"longitude":0.0,"latitude":0.0}},
+                                    {{"longitude":1.0,"latitude":1.0}}],"{field}":0.0}}"#))
+        };
+        assert_eq!(request("fallback_speed").validate()[0].loc, ["body", "fallback_speed"]);
+        assert_eq!(request("scale_factor").validate()[0].kind, "greater_than");
+    }
+
+    #[test]
+    fn match_rejects_a_non_positive_accuracy() {
+        let request: MatchRequest = parse(
+            r#"{"breadcrumbs":[
+                 {"longitude":0.0,"latitude":0.0,"timestamp":0,"accuracy_meters":0.0},
+                 {"longitude":1.0,"latitude":1.0,"timestamp":1}]}"#);
+        let errors = request.validate();
+        assert_eq!(errors[0].loc, ["body", "breadcrumbs", "0", "accuracy_meters"]);
+        assert_eq!(errors[0].kind, "greater_than");
     }
 
     #[test]

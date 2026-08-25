@@ -321,12 +321,12 @@ pub async fn allocation_for(client: &OsrmClient, request: &VrpRequest, batch_siz
     let (durations, distances) =
         depot_to_stop_matrix(client, &depots, &stops, batch_size, max_cells).await?;
 
-    Ok(allocate::allocate_stops(&durations, &distances, &depots, &stops, AllocationOptions {
+    allocate::allocate_stops(&durations, &distances, &depots, &stops, AllocationOptions {
         mode: request.clustering_mode,
         hysteresis_m: request.hysteresis_m,
         max_radius_m: request.max_radius_km.filter(|km| *km != 0.0).map(|km| km * KM_TO_M),
         sanity_limit_m,
-    }))
+    })
 }
 
 #[cfg(test)]

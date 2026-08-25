@@ -13,9 +13,9 @@ use crate::config::Settings;
 use crate::error::{parse_body, ApiError};
 use crate::models::{
     join_coordinates, MatchRequest, MatrixRequest, NearestRequest, RouteRequest, TripRequest,
-    Validate, VrpRequest,
+    Validate, ValidationError, VrpRequest,
 };
-use crate::osrm::client::OsrmClient;
+use crate::osrm::client::{OsrmClient, OsrmError};
 use crate::osrm::params;
 use crate::vrp::solve::{self, VehicleRoute, VrpAllocationResponse, VrpResponse};
 
@@ -113,7 +113,7 @@ pub async fn matrix_graph(State(state): State<AppState>, body: Bytes)
     let (endpoint, params) = matrix_call(&request);
     // The one endpoint that computes on the matrix rather than relaying it.
     let data = state.client.get_json(&endpoint, &params).await?;
-    Ok(Json(build_graph(&data, &request)).into_response())
+    Ok(Json(build_graph(&data, &request)?).into_response())
 }
 
 /// Relay an upstream body verbatim.
@@ -148,7 +148,7 @@ fn matrix_call(request: &MatrixRequest) -> (String, crate::cache::Params) {
 /// before 3.4 emitted `"links"`. The Python handler passes `node_link_data`
 /// through unchanged, so this endpoint's public shape follows the resolved
 /// library version rather than any code in that repo -- worth pinning here.
-fn build_graph(data: &Value, request: &MatrixRequest) -> Value {
+fn build_graph(data: &Value, request: &MatrixRequest) -> Result<Value, OsrmError> {
     let durations = data.get("durations").and_then(Value::as_array).cloned().unwrap_or_default();
     let distances = data.get("distances").and_then(Value::as_array).cloned().unwrap_or_default();
 
@@ -159,7 +159,16 @@ fn build_graph(data: &Value, request: &MatrixRequest) -> Value {
         .collect();
 
     let mut edges = Vec::new();
-    for (i, row) in durations.iter().filter_map(Value::as_array).enumerate() {
+    // Enumerate before filtering. `filter_map(..).enumerate()` renumbered every
+    // row after a non-array one, so a single null row shifted each subsequent
+    // edge's `source` down by one and the endpoint answered 200 with a
+    // silently mislabelled graph. Python indexed by position and raised
+    // TypeError on such a row, which surfaced as 500.
+    for (i, row) in durations.iter().enumerate() {
+        let Some(row) = row.as_array() else {
+            return Err(OsrmError::Unavailable(
+                format!("upstream durations row {i} is not an array")));
+        };
         for (j, duration) in row.iter().enumerate() {
             if i == j {
                 continue;
@@ -174,7 +183,7 @@ fn build_graph(data: &Value, request: &MatrixRequest) -> Value {
             edges.push(Value::Object(edge));
         }
     }
-    json!({"directed": true, "multigraph": false, "graph": {}, "nodes": nodes, "edges": edges})
+    Ok(json!({"directed": true, "multigraph": false, "graph": {}, "nodes": nodes, "edges": edges}))
 }
 
 #[utoipa::path(
@@ -258,10 +267,25 @@ pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Respo
 pub async fn tile(State(state): State<AppState>,
                   Path((profile, z, x, y)): Path<(String, i64, i64, String)>)
     -> Result<Response, ApiError> {
-    // The route pattern captures `{y}.mvt` as one segment; strip the suffix.
-    let y: i64 = y.trim_end_matches(".mvt").parse().unwrap_or_default();
-    let bytes = state.client.get_tile(&profile, z, x, y).await?;
+    let bytes = state.client.get_tile(&profile, z, x, tile_row(&y)?).await?;
     Ok(([(header::CONTENT_TYPE, "application/x-protobuf")], bytes).into_response())
+}
+
+/// Decode the final path segment of a tile request.
+///
+/// FastAPI routed `/tile/{profile}/{z}/{x}/{y}.mvt` with `y: int`, so a segment
+/// without the suffix never matched the route at all (404) and a non-integer
+/// row was a 422. axum captures the whole segment, so both checks live here.
+///
+/// This was `trim_end_matches(".mvt").parse().unwrap_or_default()`, which
+/// collapsed every malformed row to **0** and answered 200 with a real tile
+/// from the wrong place -- the failure mode a caller cannot detect.
+fn tile_row(segment: &str) -> Result<i64, ApiError> {
+    let row = segment.strip_suffix(".mvt").ok_or(ApiError::NotFound)?;
+    row.parse().map_err(|_| ApiError::Validation(vec![
+        ValidationError::path_param("int_parsing", "y",
+            "Input should be a valid integer, unable to parse string as an integer")
+    ]))
 }
 
 /// The OpenAPI schema, generated from the types that serve the requests.
@@ -356,7 +380,7 @@ mod tests {
     #[test]
     fn graph_matches_networkx_node_link_data() {
         let data = json!({"durations": [[0, 60], [60, 0]], "distances": [[0, 600], [600, 0]]});
-        let graph = build_graph(&data, &request());
+        let graph = build_graph(&data, &request()).expect("well-formed matrix");
         assert_eq!(graph, json!({
             "directed": true, "multigraph": false, "graph": {},
             "nodes": [{"lon": 1.0, "lat": 2.0, "id": 0}, {"lon": 3.0, "lat": 4.0, "id": 1}],
@@ -367,10 +391,31 @@ mod tests {
         }));
     }
 
+    /// A null row must not renumber the rows after it.
+    ///
+    /// `filter_map(..).enumerate()` dropped the row and shifted every later
+    /// `source` down by one, answering 200 with a mislabelled graph. Python
+    /// indexed by position and raised TypeError, which surfaced as 500.
+    #[test]
+    fn a_null_durations_row_is_refused_rather_than_renumbering_the_rest() {
+        let data = json!({"durations": [null, [60, 0]], "distances": []});
+        assert!(build_graph(&data, &request()).is_err());
+    }
+
+    #[test]
+    fn tile_row_requires_the_mvt_suffix_and_an_integer() {
+        assert_eq!(tile_row("200.mvt").expect("a well-formed row"), 200);
+        // Previously y=0 plus a 200 response, for each of these.
+        assert!(matches!(tile_row("200"), Err(ApiError::NotFound)));
+        assert!(matches!(tile_row("200.png"), Err(ApiError::NotFound)));
+        assert!(matches!(tile_row("abc.mvt"), Err(ApiError::Validation(_))));
+        assert!(matches!(tile_row(".mvt"), Err(ApiError::Validation(_))));
+    }
+
     #[test]
     fn graph_omits_distance_when_the_matrix_does_not_cover_the_cell() {
         let data = json!({"durations": [[0, 60], [60, 0]], "distances": []});
-        let graph = build_graph(&data, &request());
+        let graph = build_graph(&data, &request()).expect("well-formed matrix");
         let edge = &graph["edges"][0];
         assert!(edge.get("distance").is_none());
         assert_eq!(edge["duration"], json!(60));
@@ -379,7 +424,7 @@ mod tests {
     #[test]
     fn graph_has_no_self_edges() {
         let data = json!({"durations": [[0, 60], [60, 0]], "distances": [[0, 600], [600, 0]]});
-        let graph = build_graph(&data, &request());
+        let graph = build_graph(&data, &request()).expect("well-formed matrix");
         assert_eq!(graph["edges"].as_array().unwrap().len(), 2);
     }
 }

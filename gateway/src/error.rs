@@ -21,6 +21,10 @@ pub enum ApiError {
     Upstream(OsrmError),
     /// The optimisation admission gate shed this request.
     CapacityExhausted { retry_after: u64 },
+    /// No route matched. Starlette answers `{"detail":"Not Found"}`; axum's
+    /// default fallback sends an empty body, so the tile handler raises this
+    /// explicitly for a path FastAPI's route pattern would not have matched.
+    NotFound,
 }
 
 impl From<OsrmError> for ApiError {
@@ -60,6 +64,10 @@ impl IntoResponse for ApiError {
             ApiError::Upstream(OsrmError::Unavailable(_)) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "detail": "Internal server error" })),
+            ).into_response(),
+            ApiError::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "detail": "Not Found" })),
             ).into_response(),
             ApiError::CapacityExhausted { retry_after } => (
                 StatusCode::SERVICE_UNAVAILABLE,

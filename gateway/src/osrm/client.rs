@@ -156,12 +156,15 @@ impl OsrmClient {
         let response = self.http.get(&url).send().await
             .map_err(|e| OsrmError::Unavailable(e.to_string()))?;
         let status = response.status().as_u16();
+        let bytes = response.bytes().await
+            .map_err(|e| OsrmError::Unavailable(e.to_string()))?;
         if status >= 400 {
-            return Err(OsrmError::Status { status, body: None });
+            // Parse the error body as every other endpoint does. Hardcoding
+            // `body: None` made `detail` the bare "Routing service error"
+            // string for tiles alone, dropping the engine's code and message.
+            return Err(OsrmError::Status { status, body: serde_json::from_slice(&bytes).ok() });
         }
-        response.bytes().await
-            .map(|b| b.to_vec())
-            .map_err(|e| OsrmError::Unavailable(e.to_string()))
+        Ok(bytes.to_vec())
     }
 
     /// Probe the engine. Any non-error status counts as up.
