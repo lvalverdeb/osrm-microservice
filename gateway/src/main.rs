@@ -166,6 +166,12 @@ async fn observe(State(state): State<AppState>, request: axum::extract::Request,
     let span = tracing::info_span!("http.server", otel.name = %format!("{method} {handler}"),
                                    http.request.method = %method, http.route = %handler,
                                    http.response.status_code = tracing::field::Empty);
+    // Parent this span on the caller's, when they sent one. Injecting
+    // downstream without extracting here left the gateway starting a fresh
+    // trace on every request, so a caller's trace ended at this hop --
+    // `FastAPIInstrumentor` extracted, and only fixing the outbound half of
+    // propagation looks like it works right up until someone traces end to end.
+    crate::telemetry::adopt_incoming_context(&span, request.headers());
     let response = {
         use tracing::Instrument as _;
         next.run(request).instrument(span.clone()).await
@@ -173,13 +179,23 @@ async fn observe(State(state): State<AppState>, request: axum::extract::Request,
     span.record("http.response.status_code", response.status().as_u16());
     timer.observe_duration();
     highr.observe_duration();
+
+    // Reading `Content-Length` off the response records zero for every request:
+    // axum does not set it, hyper adds it while encoding the wire, long after
+    // this layer has run. Starlette set it before its middleware saw the
+    // response, which is why the same code works on the Python side. Measure
+    // the body instead. Every response this gateway produces is already fully
+    // buffered -- relayed engine bytes, a serialised struct, a tile -- so this
+    // collects an in-memory body rather than draining a stream.
+    let (parts, body) = response.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
     state.metrics.request_size.observe(&handler, request_bytes);
-    state.metrics.response_size.observe(&handler, content_length(response.headers()));
+    state.metrics.response_size.observe(&handler, bytes.len() as f64);
     state.metrics.requests
         .with_label_values(&[&handler, &method,
-                             crate::metrics::status_label(response.status().as_u16())])
+                             crate::metrics::status_label(parts.status.as_u16())])
         .inc();
-    response
+    Response::from_parts(parts, axum::body::Body::from(bytes))
 }
 
 /// Body size from `Content-Length`, or zero when it is absent or unparseable.

@@ -133,6 +133,33 @@ pub fn inject_context(headers: &mut reqwest::header::HeaderMap) {
     });
 }
 
+/// Parent `span` on the trace context carried by an incoming request.
+///
+/// The counterpart to `inject_context`. With no propagator installed the
+/// extracted context is empty and the span stays a root, so this is safe to
+/// call whether or not OTLP is configured.
+pub fn adopt_incoming_context(span: &tracing::Span, headers: &axum::http::HeaderMap) {
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let parent = opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.extract(&HeaderExtractor(headers))
+    });
+    span.set_parent(parent);
+}
+
+/// Adapts an `axum` header map to OTel's extractor interface.
+struct HeaderExtractor<'a>(&'a axum::http::HeaderMap);
+
+impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(|value| value.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(axum::http::HeaderName::as_str).collect()
+    }
+}
+
 /// Adapts a `reqwest` header map to OTel's injector interface.
 struct HeaderInjector<'a>(&'a mut reqwest::header::HeaderMap);
 
@@ -266,6 +293,39 @@ mod tests {
         assert_eq!(parts[1].len(), 32, "trace id: {traceparent}");
         assert_eq!(parts[2].len(), 16, "span id: {traceparent}");
         assert_ne!(parts[1], "0".repeat(32), "trace id must not be all zeroes");
+    }
+
+    /// A caller's trace must continue through this hop, not restart.
+    ///
+    /// Injecting downstream without extracting inbound left every request
+    /// rooting its own trace, which looks correct in isolation and breaks the
+    /// moment anyone follows a request end to end.
+    #[test]
+    fn an_incoming_traceparent_becomes_the_parent_of_the_server_span() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+        use opentelemetry::trace::TraceContextExt as _;
+        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+        opentelemetry::global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new());
+        let provider = opentelemetry_sdk::trace::TracerProvider::builder().build();
+        let tracer = { use opentelemetry::trace::TracerProvider as _; provider.tracer("test") };
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        let mut headers = axum::http::HeaderMap::new();
+        let caller_trace = "4bf92f3577b34da6a3ce929d0e0e4736";
+        headers.insert("traceparent",
+            format!("00-{caller_trace}-00f067aa0ba902b7-01").parse().expect("valid header"));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("http.server");
+            adopt_incoming_context(&span, &headers);
+            let context = span.context();
+            let adopted = context.span().span_context().trace_id().to_string();
+            assert_eq!(adopted, caller_trace,
+                       "the server span must join the caller's trace, not start a new one");
+        });
     }
 
     /// With no propagator context available there is nothing to inject, and the

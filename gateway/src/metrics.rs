@@ -20,9 +20,13 @@ use prometheus::{proto, Encoder, Histogram, HistogramVec, IntCounterVec, Registr
 /// Python deployment over identical traffic.
 const LATENCY_BUCKETS: [f64; 3] = [0.1, 0.5, 1.0];
 
-/// The instrumentator's `highr` buckets, on the unlabelled duration histogram.
-const HIGHR_BUCKETS: [f64; 18] = [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5,
-                                  2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 7.5];
+/// The instrumentator's `latency_highr_buckets` default, all 21 boundaries.
+///
+/// Truncating this at 7.5 put every slow request in `+Inf`, so tail quantiles
+/// disagreed with the Python deployment over identical traffic -- the exact
+/// failure the bucket alignment was meant to prevent.
+const HIGHR_BUCKETS: [f64; 21] = [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5,
+                                  2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 7.5, 10.0, 30.0, 60.0];
 
 /// OSRM services that get their own `service` label value.
 ///
@@ -216,7 +220,9 @@ pub fn handler_label(path: &str) -> String {
         // The route template FastAPI registered carried the suffix, and the
         // label is the join key for any dashboard spanning the two.
         _ if path.starts_with("/tile/") => "/tile/{profile}/{z}/{x}/{y}.mvt".to_string(),
-        _ => "other".to_string(),
+        // `should_group_untemplated` is on by default in the instrumentator,
+        // and its bucket is spelled `none`; `other` matched no existing query.
+        _ => "none".to_string(),
     }
 }
 
@@ -253,7 +259,7 @@ mod tests {
         assert_eq!(handler_label("/vrp/allocate"), "/vrp/allocate");
         assert_eq!(handler_label("/docs"), "/docs");
         assert_eq!(handler_label("/openapi.json"), "/openapi.json");
-        assert_eq!(handler_label("/unrouted"), "other");
+        assert_eq!(handler_label("/unrouted"), "none");
     }
 
     #[test]
