@@ -33,10 +33,13 @@ impl FromEnv for String {
 
 impl FromEnv for bool {
     /// Accepts what pydantic-settings accepts, case-insensitively.
+    ///
+    /// That is twelve spellings, not eight: the single letters were missing, so
+    /// `DEBUG=t` parsed as nothing, fell back, and silently ran at info level.
     fn from_env_str(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
+            "1" | "true" | "t" | "yes" | "y" | "on" => Some(true),
+            "0" | "false" | "f" | "no" | "n" | "off" => Some(false),
             _ => None,
         }
     }
@@ -210,6 +213,19 @@ pub fn parse_dotenv(contents: &str) -> HashMap<String, String> {
 
 #[cfg(test)]
 mod tests {
+    /// pydantic-settings accepts twelve spellings; four were missing here, and
+    /// a value it accepts must not silently fall back to the default.
+    #[test]
+    fn bool_settings_accept_every_pydantic_spelling() {
+        for raw in ["1", "true", "t", "yes", "y", "on", "TRUE", "  T  "] {
+            assert_eq!(bool::from_env_str(raw), Some(true), "{raw:?}");
+        }
+        for raw in ["0", "false", "f", "no", "n", "off", "FALSE", " F "] {
+            assert_eq!(bool::from_env_str(raw), Some(false), "{raw:?}");
+        }
+        assert_eq!(bool::from_env_str("maybe"), None);
+    }
+
     use super::*;
 
     fn app_env() -> HashMap<String, String> {
