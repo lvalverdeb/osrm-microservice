@@ -125,6 +125,47 @@ mod tests {
         assert_eq!(body.as_str(), Some("#/components/schemas/RouteRequest"));
     }
 
+    /// Every value the document advertises for an enum must be one the API
+    /// actually accepts.
+    ///
+    /// This is the check that was missing. utoipa published the Rust variant
+    /// names -- `Driving`, `TravelTime` -- while serde accepted the wire names,
+    /// so the schema offered values that came straight back as 422 and any
+    /// client generated from it was broken on arrival. The equivalence tests
+    /// against FastAPI compared field *names* and required-lists, never the
+    /// values inside them, so they passed throughout.
+    #[test]
+    fn advertised_enum_values_are_accepted_by_the_api() {
+        let doc = doc();
+        let schemas = &doc["components"]["schemas"];
+
+        macro_rules! check {
+            ($name:literal, $ty:ty) => {{
+                let advertised = schemas[$name]["enum"].as_array()
+                    .unwrap_or_else(|| panic!("{} has no enum in the document", $name));
+                assert!(!advertised.is_empty(), "{} advertises no values", $name);
+                for value in advertised {
+                    let parsed: Result<$ty, _> = serde_json::from_value(value.clone());
+                    assert!(parsed.is_ok(),
+                            "{} advertises {value}, which the API rejects", $name);
+                }
+            }};
+        }
+
+        check!("Profile", crate::models::Profile);
+        check!("Overview", crate::models::Overview);
+        check!("Geometries", crate::models::Geometries);
+        check!("ContinueStraight", crate::models::ContinueStraight);
+        check!("Snapping", crate::models::Snapping);
+        check!("Approach", crate::models::Approach);
+        check!("MatrixAnnotation", crate::models::MatrixAnnotation);
+        check!("FallbackCoordinate", crate::models::FallbackCoordinate);
+        check!("TripSource", crate::models::TripSource);
+        check!("TripDestination", crate::models::TripDestination);
+        check!("Gaps", crate::models::Gaps);
+        check!("ClusteringMode", crate::models::ClusteringMode);
+    }
+
     #[test]
     fn the_document_declares_no_authentication() {
         assert!(doc().get("security").is_none());

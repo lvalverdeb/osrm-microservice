@@ -49,7 +49,13 @@ macro_rules! literal_enum {
     ($name:ident { $( $variant:ident => $wire:literal ),* $(,)? }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
         pub enum $name {
-            $( #[serde(rename = $wire)] $variant, )*
+            // Both renames are required and they are not interchangeable:
+            // `serde` decides what the API accepts, `schema` decides what the
+            // OpenAPI document advertises. With only the serde one, utoipa
+            // published the Rust variant names -- so the schema offered
+            // `Driving` while the gateway accepted `driving`, and any client
+            // generated from it sent values that came straight back as 422.
+            $( #[serde(rename = $wire)] #[schema(rename = $wire)] $variant, )*
         }
 
         impl $name {

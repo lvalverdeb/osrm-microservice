@@ -1,0 +1,95 @@
+{
+  "operation": "POST /trip",
+  "method": "POST",
+  "path_template": "/trip",
+  "fingerprint": "161273d6",
+  "case_id": "oMokHx",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"approaches\": [], \"bearings\": [], \"exclude\": [], \"hints\": [], \"radiuses\": [], \"skip_waypoints\": false, \"snapping\": null, \"annotations\": \"\", \"coordinates\": [], \"destination\": \"last\", \"geometries\": \"polyline\", \"overview\": \"simplified\", \"profile\": \"driving\", \"roundtrip\": false, \"source\": \"first\", \"steps\": true}' http://127.0.0.1:8011/trip",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:8011/trip",
+      "url_template": "http://127.0.0.1:8011/trip",
+      "headers": {
+        "User-Agent": "schemathesis/4.25.2",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "oMokHx",
+        "Content-Type": "application/json",
+        "Content-Length": "310"
+      },
+      "response": {
+        "status_code": 422,
+        "headers": {
+          "content-type": "application/json",
+          "content-length": "128",
+          "date": "Tue, 25 Aug 2026 15:34:58 GMT"
+        },
+        "body": "{\"detail\":[{\"loc\":[\"body\",\"coordinates\"],\"msg\":\"List should have at least 2 items after validation, not 0\",\"type\":\"too_short\"}]}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "positive_data_acceptance",
+          "status": "failure",
+          "message": "API rejected schema-compliant request\n\nValid data should have been accepted\nExpected: 2xx, 401, 403, 404, 409, 5xx"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 7.916998583823442e-06,
+          "mode": "positive"
+        },
+        "components": {
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "coverage",
+          "data": {
+            "type": "CoveragePhaseData",
+            "description": "Object with valid 'steps' value: Valid boolean value",
+            "location": null,
+            "parameter": "application/json",
+            "parameter_location": "BODY",
+            "scenario": "valid_object"
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/trip",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "approaches": [],
+          "bearings": [],
+          "exclude": [],
+          "hints": [],
+          "radiuses": [],
+          "skip_waypoints": false,
+          "snapping": null,
+          "annotations": "",
+          "coordinates": [],
+          "destination": "last",
+          "geometries": "polyline",
+          "overview": "simplified",
+          "profile": "driving",
+          "roundtrip": false,
+          "source": "first",
+          "steps": true
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}

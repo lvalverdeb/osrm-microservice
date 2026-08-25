@@ -1,0 +1,80 @@
+{
+  "operation": "GET /tile/{profile}/{z}/{x}/{y}",
+  "method": "GET",
+  "path_template": "/tile/{profile}/{z}/{x}/{y}",
+  "fingerprint": "c82f9b37",
+  "case_id": "loNqFk",
+  "code_sample": "curl -X GET http://127.0.0.1:8011/tile/0/1/1/0",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8011/tile/0/1/1/0",
+      "url_template": "http://127.0.0.1:8011/tile/{profile}/{z}/{x}/{y}",
+      "headers": {
+        "User-Agent": "schemathesis/4.25.2",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "loNqFk"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "content-type": "application/json",
+          "content-length": "34",
+          "date": "Tue, 25 Aug 2026 15:34:59 GMT"
+        },
+        "body": "{\"detail\":\"Routing service error\"}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0015125420177355409,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/tile/{profile}/{z}/{x}/{y}",
+      "path_parameters": {
+        "profile": "0",
+        "x": 1,
+        "y": "0",
+        "z": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}
