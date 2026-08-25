@@ -94,7 +94,13 @@ Two observations worth acting on separately:
   timeout to be told no. Shedding faster when the queue is already deep would be
   kinder than making callers pay for the queue they never got into.
 - **Two transport errors** in 121 requests, at a load where the rest were
-  cleanly refused. Not diagnosed; worth a look if it recurs.
+  cleanly refused. Investigated: a matched re-run of 120 requests reproduced the
+  status mix (22x200, 56x503, 42x429 against the original 24/76/19) with **zero**
+  transport errors, and the gateway logged no error or warning in either run.
+  Client-side and transient, most likely the network between the load host and
+  the jail; no evidence of a gateway defect. Note the first reproduction attempt
+  was worthless because it reused one payload and served 120 cache hits without
+  ever queueing -- randomised payloads are what make this workload real.
 
 ---
 
