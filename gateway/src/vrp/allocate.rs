@@ -139,13 +139,18 @@ pub fn allocate_stops(durations: &[Vec<f64>], distances: &[Vec<f64>], depots: &[
                                  hysteresis, options.sanity_limit_m);
 
         let road_distance = distances[depot][stop_idx];
-        // Note the `< UNREACHABLE` guard: a genuinely unroutable stop is *not*
-        // reported unreachable, it is assigned anyway. That contradicts
-        // docs/features/clustering_modes.md, and is reproduced deliberately --
-        // fixing it during a port would make every diff mean two things.
+        // Two ways a stop goes unserved, per docs/features/clustering_modes.md.
+        //
+        // The engine has no route to it at all -- every depot answered null, so
+        // even the best choice carries the sentinel. Assigning such a stop sent
+        // it to `/trip` with the rest of its chunk, where OSRM answers NoRoute;
+        // the chunk error then cancels its siblings, so a single unroutable stop
+        // failed the whole request with a 500.
+        let unroutable = road_distance >= UNREACHABLE;
+        // Or it is routable but further away than the caller will accept.
         let beyond_radius = options.max_radius_m
             .is_some_and(|limit| road_distance > limit && road_distance < UNREACHABLE);
-        if beyond_radius {
+        if unroutable || beyond_radius {
             unreachable.push(stop_idx);
         } else {
             assignments[depot].push(stop_idx);
@@ -251,10 +256,27 @@ mod tests {
         assert!(result.assignments[0].is_empty());
     }
 
-    /// The documented-but-untrue case: a truly unroutable stop is assigned
-    /// rather than reported, because of the `< UNREACHABLE` guard.
+    /// A stop the engine cannot route to is reported, not assigned.
+    ///
+    /// Assigning it sends it to `/trip` with the rest of its chunk, OSRM answers
+    /// NoRoute, and the chunk error cancels its siblings -- so one unroutable
+    /// stop failed the entire request with a 500.
     #[test]
-    fn a_genuinely_unroutable_stop_is_assigned_anyway() {
+    fn an_unroutable_stop_is_reported_not_assigned() {
+        let depots = [at(0.0, 0.0)];
+        let stops = [at(0.1, 0.0)];
+        let durations = vec![vec![UNREACHABLE]];
+        let distances = vec![vec![UNREACHABLE]];
+        let result = allocate_stops(&durations, &distances, &depots, &stops,
+                                    options(ClusteringMode::TravelTime));
+        assert_eq!(result.unreachable, vec![0]);
+        assert!(result.assignments[0].is_empty());
+    }
+
+    /// The same, with a radius configured -- the old guard only excluded the
+    /// sentinel when `max_radius_m` was set, so this is the path that was wrong.
+    #[test]
+    fn an_unroutable_stop_is_reported_even_with_a_radius_set() {
         let depots = [at(0.0, 0.0)];
         let stops = [at(0.1, 0.0)];
         let durations = vec![vec![UNREACHABLE]];
@@ -262,6 +284,20 @@ mod tests {
         let mut opts = options(ClusteringMode::TravelTime);
         opts.max_radius_m = Some(5000.0);
         let result = allocate_stops(&durations, &distances, &depots, &stops, opts);
+        assert_eq!(result.unreachable, vec![0]);
+        assert!(result.assignments[0].is_empty());
+    }
+
+    /// A reachable stop with no radius configured is still assigned: the
+    /// sentinel check must not turn into a blanket rejection.
+    #[test]
+    fn a_reachable_stop_is_unaffected_by_the_sentinel_check() {
+        let depots = [at(0.0, 0.0)];
+        let stops = [at(0.1, 0.0)];
+        let durations = vec![vec![600.0]];
+        let distances = vec![vec![20_000.0]];
+        let result = allocate_stops(&durations, &distances, &depots, &stops,
+                                    options(ClusteringMode::TravelTime));
         assert!(result.unreachable.is_empty());
         assert_eq!(result.assignments[0], vec![0]);
     }
