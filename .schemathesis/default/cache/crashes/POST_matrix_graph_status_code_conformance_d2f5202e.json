@@ -1,32 +1,32 @@
 {
-  "operation": "POST /route",
+  "operation": "POST /matrix-graph",
   "method": "POST",
-  "path_template": "/route",
-  "fingerprint": "060102e8",
-  "case_id": "TYj8HS",
-  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"approaches\": [], \"bearings\": [], \"exclude\": [], \"hints\": [], \"radiuses\": [], \"skip_waypoints\": false, \"snapping\": null, \"alternatives\": 0, \"annotations\": \"\", \"continue_straight\": null, \"destination\": {\"latitude\": 0, \"longitude\": 0}, \"geometries\": \"polyline\", \"origin\": {\"latitude\": 0, \"longitude\": 0}, \"overview\": \"simplified\", \"profile\": \"driving\", \"steps\": false, \"waypoints\": null}' http://127.0.0.1:8011/route",
+  "path_template": "/matrix-graph",
+  "fingerprint": "d2f5202e",
+  "case_id": "YTLvaU",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"approaches\": [], \"bearings\": [], \"exclude\": [], \"hints\": [], \"radiuses\": [], \"skip_waypoints\": false, \"snapping\": null, \"annotations\": \"duration\", \"coordinates\": [{\"latitude\": 0.0, \"longitude\": 0.0}, {\"latitude\": 0.0, \"longitude\": 0.0}], \"destinations\": [], \"fallback_coordinate\": null, \"fallback_speed\": 0, \"profile\": \"driving\", \"scale_factor\": 0, \"sources\": null}' http://127.0.0.1:8011/matrix-graph",
   "sequence": [
     {
       "method": "POST",
-      "url": "http://127.0.0.1:8011/route",
-      "url_template": "http://127.0.0.1:8011/route",
+      "url": "http://127.0.0.1:8011/matrix-graph",
+      "url_template": "http://127.0.0.1:8011/matrix-graph",
       "headers": {
         "User-Agent": "schemathesis/4.25.2",
         "Accept-Encoding": "gzip, deflate",
         "Accept": "*/*",
         "Connection": "keep-alive",
-        "X-Schemathesis-TestCaseId": "TYj8HS",
+        "X-Schemathesis-TestCaseId": "YTLvaU",
         "Content-Type": "application/json",
-        "Content-Length": "386"
+        "Content-Length": "367"
       },
       "response": {
         "status_code": 404,
         "headers": {
           "content-type": "application/json",
-          "content-length": "259",
-          "date": "Tue, 25 Aug 2026 15:34:58 GMT"
+          "content-length": "220",
+          "date": "Tue, 25 Aug 2026 15:55:15 GMT"
         },
-        "body": "{\"detail\":{\"code\":\"FixtureMiss\",\"message\":\"no fixture for /route/v1/driving/0.0,0.0;0.0,0.0?overview=simplified&geometries=polyline&steps=false&waypoints=0%3B1&alternatives=0&annotations=&bearings=&radiuses=&hints=&approaches=&exclude=&skip_waypoints=false\"}}"
+        "body": "{\"detail\":{\"code\":\"FixtureMiss\",\"message\":\"no fixture for /table/v1/driving/0.0,0.0;0.0,0.0?annotations=duration&fallback_speed=0.0&scale_factor=0.0&bearings=&radiuses=&hints=&approaches=&exclude=&skip_waypoints=false\"}}"
       },
       "link": null,
       "checks": [
@@ -38,7 +38,7 @@
       ],
       "meta": {
         "generation": {
-          "time": 6.737501826137304e-05,
+          "time": 8.583010639995337e-06,
           "mode": "positive"
         },
         "components": {
@@ -48,7 +48,7 @@
           "name": "coverage",
           "data": {
             "type": "CoveragePhaseData",
-            "description": "Object with valid 'waypoints' value: Value null value",
+            "description": "Object with valid 'sources' value: Value null value",
             "location": null,
             "parameter": "application/json",
             "parameter_location": "BODY",
@@ -62,7 +62,7 @@
         "constants_draws": [],
         "raw_containers": {}
       },
-      "path": "/route",
+      "path": "/matrix-graph",
       "path_parameters": {},
       "query": {},
       "case_headers": {},
@@ -77,22 +77,23 @@
           "radiuses": [],
           "skip_waypoints": false,
           "snapping": null,
-          "alternatives": 0,
-          "annotations": "",
-          "continue_straight": null,
-          "destination": {
-            "latitude": 0,
-            "longitude": 0
-          },
-          "geometries": "polyline",
-          "origin": {
-            "latitude": 0,
-            "longitude": 0
-          },
-          "overview": "simplified",
+          "annotations": "duration",
+          "coordinates": [
+            {
+              "latitude": 0.0,
+              "longitude": 0.0
+            },
+            {
+              "latitude": 0.0,
+              "longitude": 0.0
+            }
+          ],
+          "destinations": [],
+          "fallback_coordinate": null,
+          "fallback_speed": 0,
           "profile": "driving",
-          "steps": false,
-          "waypoints": null
+          "scale_factor": 0,
+          "sources": null
         }
       },
       "media_type": "application/json",

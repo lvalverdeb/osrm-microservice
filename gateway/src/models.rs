@@ -20,6 +20,23 @@ use utoipa::ToSchema;
 
 use crate::pyfloat::python_float;
 
+/// Bounds enforced by `validate()` and advertised in the OpenAPI document.
+///
+/// Named rather than inlined so the two cannot drift: `validate()` reads these,
+/// and `schema_bounds_match_validation` proves the document declares the same
+/// numbers by rejecting a value one past each of them.
+pub mod bounds {
+    pub const LONGITUDE: (f64, f64) = (-180.0, 180.0);
+    pub const LATITUDE: (f64, f64) = (-90.0, 90.0);
+    pub const ROUTE_WAYPOINTS_MAX: usize = 200;
+    pub const MATRIX_COORDINATES: (usize, usize) = (2, 5000);
+    pub const BREADCRUMBS: (usize, usize) = (2, 5000);
+    pub const TRIP_COORDINATES: (usize, usize) = (2, 200);
+    pub const NEAREST_NUMBER_MIN: i64 = 1;
+    pub const DEPOTS: (usize, usize) = (1, 500);
+    pub const CAPACITY: (i64, i64) = (1, 10_000);
+}
+
 /// One validation failure, shaped like a pydantic error entry.
 #[derive(Debug, Clone, serde::Serialize, ToSchema)]
 pub struct ValidationError {
@@ -97,7 +114,9 @@ fn hysteresis() -> f64 { 2000.0 }
 /// A longitude/latitude pair.
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, ToSchema)]
 pub struct Coordinate {
+    #[schema(minimum = -180.0, maximum = 180.0)]
     pub longitude: f64,
+    #[schema(minimum = -90.0, maximum = 90.0)]
     pub latitude: f64,
 }
 
@@ -125,8 +144,8 @@ impl Coordinate {
                     format!("Input should be less than or equal to {max}")));
             }
         };
-        check(self.longitude, "longitude", -180, 180);
-        check(self.latitude, "latitude", -90, 90);
+        check(self.longitude, "longitude", bounds::LONGITUDE.0 as i64, bounds::LONGITUDE.1 as i64);
+        check(self.latitude, "latitude", bounds::LATITUDE.0 as i64, bounds::LATITUDE.1 as i64);
         errors
     }
 }
@@ -206,6 +225,7 @@ pub struct RouteRequest {
     pub origin: Coordinate,
     pub destination: Coordinate,
     #[serde(default)]
+    #[schema(max_items = 200)]
     pub waypoints: Option<Vec<Coordinate>>,
     #[serde(default)]
     pub alternatives: Alternatives,
@@ -240,7 +260,7 @@ impl Validate for RouteRequest {
         let mut errors = self.origin.validate_at(&["origin"]);
         errors.extend(self.destination.validate_at(&["destination"]));
         if let Some(waypoints) = &self.waypoints {
-            errors.extend(validate_coordinates(waypoints, "waypoints", 0, 200));
+            errors.extend(validate_coordinates(waypoints, "waypoints", 0, bounds::ROUTE_WAYPOINTS_MAX));
         }
         errors
     }
@@ -248,6 +268,7 @@ impl Validate for RouteRequest {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct MatrixRequest {
+    #[schema(min_items = 2, max_items = 5000)]
     pub coordinates: Vec<Coordinate>,
     #[serde(default)]
     pub sources: Option<Vec<i64>>,
@@ -324,14 +345,18 @@ impl MatrixRequest {
 
 impl Validate for MatrixRequest {
     fn validate(&self) -> Vec<ValidationError> {
-        validate_coordinates(&self.coordinates, "coordinates", 2, 5000)
+        validate_coordinates(&self.coordinates, "coordinates",
+                             bounds::MATRIX_COORDINATES.0, bounds::MATRIX_COORDINATES.1)
     }
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GpsBreadcrumb {
+    #[schema(minimum = -180.0, maximum = 180.0)]
     pub longitude: f64,
+    #[schema(minimum = -90.0, maximum = 90.0)]
     pub latitude: f64,
+    #[schema(minimum = 0)]
     pub timestamp: i64,
     /// Defaults to 5.0 rather than null, so it is always present in the
     /// `radiuses` the gateway derives.
@@ -363,6 +388,7 @@ impl GpsBreadcrumb {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct MatchRequest {
+    #[schema(min_items = 2, max_items = 5000)]
     pub breadcrumbs: Vec<GpsBreadcrumb>,
     #[serde(default = "driving")]
     pub profile: Profile,
@@ -404,7 +430,8 @@ impl MatchRequest {
 
 impl Validate for MatchRequest {
     fn validate(&self) -> Vec<ValidationError> {
-        let mut errors = length_errors(self.breadcrumbs.len(), "breadcrumbs", 2, 5000);
+        let mut errors = length_errors(self.breadcrumbs.len(), "breadcrumbs",
+                                       bounds::BREADCRUMBS.0, bounds::BREADCRUMBS.1);
         for (index, crumb) in self.breadcrumbs.iter().enumerate() {
             let index_str = index.to_string();
             errors.extend(crumb.coordinate().validate_at(&["breadcrumbs", &index_str]));
@@ -420,6 +447,7 @@ impl Validate for MatchRequest {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct TripRequest {
+    #[schema(min_items = 2, max_items = 200)]
     pub coordinates: Vec<Coordinate>,
     #[serde(default = "yes")]
     pub roundtrip: bool,
@@ -474,7 +502,8 @@ impl TripRequest {
 
 impl Validate for TripRequest {
     fn validate(&self) -> Vec<ValidationError> {
-        validate_coordinates(&self.coordinates, "coordinates", 2, 200)
+        validate_coordinates(&self.coordinates, "coordinates",
+                             bounds::TRIP_COORDINATES.0, bounds::TRIP_COORDINATES.1)
     }
 }
 
@@ -483,6 +512,7 @@ pub struct NearestRequest {
     pub coordinate: Coordinate,
     /// No upper bound, matching the Python schema.
     #[serde(default = "one")]
+    #[schema(minimum = 1)]
     pub number: i64,
     #[serde(default = "driving")]
     pub profile: Profile,
@@ -493,7 +523,7 @@ pub struct NearestRequest {
 impl Validate for NearestRequest {
     fn validate(&self) -> Vec<ValidationError> {
         let mut errors = self.coordinate.validate_at(&["coordinate"]);
-        if self.number < 1 {
+        if self.number < bounds::NEAREST_NUMBER_MIN {
             errors.push(ValidationError::new("greater_than_equal", &["number"],
                 "Input should be greater than or equal to 1".to_string()));
         }
@@ -504,7 +534,9 @@ impl Validate for NearestRequest {
 /// A stop or depot: a coordinate that may carry a caller-supplied identifier.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct Stop {
+    #[schema(minimum = -180.0, maximum = 180.0)]
     pub longitude: f64,
+    #[schema(minimum = -90.0, maximum = 90.0)]
     pub latitude: f64,
     #[serde(default)]
     pub id: Option<serde_json::Value>,
@@ -518,9 +550,14 @@ impl Stop {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct VrpRequest {
+    #[schema(min_items = 1, max_items = 500)]
     pub depots: Vec<Stop>,
+    /// `maxItems` is patched at serve time from `VRP_MAX_STOPS`, which is
+    /// runtime configuration rather than a compile-time constant.
+    #[schema(min_items = 1)]
     pub stops: Vec<Stop>,
     #[serde(default = "default_capacity")]
+    #[schema(minimum = 1, maximum = 10000)]
     pub capacity: i64,
     #[serde(default)]
     pub max_radius_km: Option<f64>,
@@ -541,11 +578,22 @@ impl VrpRequest {
         ClusteringMode::TravelTime
     }
 
-    /// Validate, including the import-time-configured stop ceiling.
+    /// Validate, including the configured stop ceiling.
     pub fn validate_with(&self, max_stops: usize) -> Vec<ValidationError> {
-        let mut errors = length_errors(self.depots.len(), "depots", 1, 500);
+        let mut errors = length_errors(self.depots.len(), "depots", bounds::DEPOTS.0, bounds::DEPOTS.1);
         errors.extend(length_errors(self.stops.len(), "stops", 1, max_stops));
-        if self.capacity <= 0 || self.capacity > 10_000 {
+        // Depot and stop coordinates are range-checked like every other
+        // endpoint's. This was missed in the port: `Stop` inherits `Coordinate`
+        // in the pydantic schema, and pydantic validates nested models, so
+        // FastAPI rejected an out-of-range depot with 422 while this accepted it
+        // and forwarded it to the engine.
+        for (field, list) in [("depots", &self.depots), ("stops", &self.stops)] {
+            for (index, stop) in list.iter().enumerate() {
+                let index_str = index.to_string();
+                errors.extend(stop.coordinate().validate_at(&[field, &index_str]));
+            }
+        }
+        if self.capacity < bounds::CAPACITY.0 || self.capacity > bounds::CAPACITY.1 {
             errors.push(ValidationError::new("greater_than", &["capacity"],
                 "Input should be greater than 0 and less than or equal to 10000".to_string()));
         }
@@ -708,6 +756,31 @@ mod tests {
         assert_eq!(errors[0].kind, "too_long");
         assert_eq!(errors[0].loc, ["body", "stops"]);
         assert!(errors[0].msg.contains("at most 5 items"), "{}", errors[0].msg);
+    }
+
+    /// Out-of-range coordinates are rejected on the solve endpoints too.
+    ///
+    /// They were not: `validate_with` checked list lengths and capacity and
+    /// nothing else, so `/vrp` forwarded a longitude of -181 to the engine
+    /// where every other endpoint answered 422. Found by property-based
+    /// generation against the schema, which the hand-written corpus never
+    /// produced.
+    #[test]
+    fn vrp_rejects_out_of_range_coordinates() {
+        let request: VrpRequest = parse(
+            r#"{"depots":[{"longitude":0.0,"latitude":0.0}],
+                "stops":[{"longitude":-181.0,"latitude":0.0}]}"#);
+        let errors = request.validate_with(2000);
+        assert_eq!(errors[0].loc, ["body", "stops", "0", "longitude"]);
+        assert_eq!(errors[0].msg, "Input should be greater than or equal to -180");
+    }
+
+    #[test]
+    fn vrp_rejects_an_out_of_range_depot() {
+        let request: VrpRequest = parse(
+            r#"{"depots":[{"longitude":0.0,"latitude":91.0}],
+                "stops":[{"longitude":0.0,"latitude":0.0}]}"#);
+        assert_eq!(request.validate_with(2000)[0].loc, ["body", "depots", "0", "latitude"]);
     }
 
     #[test]

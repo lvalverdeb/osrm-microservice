@@ -53,6 +53,8 @@ fn accept<T: for<'de> serde::Deserialize<'de> + Validate>(body: &[u8]) -> Result
         (status = 200, description = "Calculate a route through an ordered list of points.", body = Object),
         (status = 422, description = "Request failed validation"),
         (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
     )
 )]
 pub async fn route(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
@@ -68,11 +70,16 @@ pub async fn route(State(state): State<AppState>, body: Bytes) -> Result<Respons
     post,
     path = "/matrix",
     tag = "Routing",
+    description = "Note a constraint this schema cannot express: `sources` x \
+`destinations` must not exceed MATRIX_MAX_CELLS, counting an omitted or empty \
+list as every coordinate. Exceeding it is a 422 naming the limit.",
     request_body = MatrixRequest,
     responses(
         (status = 200, description = "Duration and distance matrix between coordinates.", body = Object),
         (status = 422, description = "Request failed validation"),
         (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
     )
 )]
 pub async fn matrix(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
@@ -87,11 +94,16 @@ pub async fn matrix(State(state): State<AppState>, body: Bytes) -> Result<Respon
     post,
     path = "/matrix-graph",
     tag = "Routing",
+    description = "Note a constraint this schema cannot express: `sources` x \
+`destinations` must not exceed MATRIX_MAX_CELLS, counting an omitted or empty \
+list as every coordinate. Exceeding it is a 422 naming the limit.",
     request_body = MatrixRequest,
     responses(
         (status = 200, description = "The same matrix, returned as a node-link graph.", body = Object),
         (status = 422, description = "Request failed validation"),
         (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
     )
 )]
 pub async fn matrix_graph(State(state): State<AppState>, body: Bytes)
@@ -174,6 +186,8 @@ fn build_graph(data: &Value, request: &MatrixRequest) -> Value {
         (status = 200, description = "Snap a noisy GPS trace to the road network.", body = Object),
         (status = 422, description = "Request failed validation"),
         (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
     )
 )]
 pub async fn match_trace(State(state): State<AppState>, body: Bytes)
@@ -193,6 +207,8 @@ pub async fn match_trace(State(state): State<AppState>, body: Bytes)
         (status = 200, description = "Optimise the visiting order of a set of coordinates.", body = Object),
         (status = 422, description = "Request failed validation"),
         (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
     )
 )]
 pub async fn trip(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
@@ -211,6 +227,8 @@ pub async fn trip(State(state): State<AppState>, body: Bytes) -> Result<Response
         (status = 200, description = "Snap a coordinate to the nearest road segment.", body = Object),
         (status = 422, description = "Request failed validation"),
         (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
     )
 )]
 pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
@@ -231,7 +249,11 @@ pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Respo
         ("x" = i64, Path, description = "Tile column"),
         ("y" = String, Path, description = "Tile row, with the .mvt suffix"),
     ),
-    responses((status = 200, description = "Mapbox Vector Tile", content_type = "application/x-protobuf"))
+    responses(
+        (status = 200, description = "Mapbox Vector Tile", content_type = "application/x-protobuf"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
+    )
 )]
 pub async fn tile(State(state): State<AppState>,
                   Path((profile, z, x, y)): Path<(String, i64, i64, String)>)
@@ -246,10 +268,10 @@ pub async fn tile(State(state): State<AppState>,
 ///
 /// See `crate::openapi` for why this is generated rather than served from a
 /// snapshot of FastAPI's output.
-pub async fn openapi() -> Response {
+pub async fn openapi(State(state): State<AppState>) -> Response {
     // Embedded rather than read at runtime, so the binary stays a single file
     // and neither deployment path grows an extra artifact to install.
-    ([(header::CONTENT_TYPE, "application/json")], crate::openapi::document()).into_response()
+    ([(header::CONTENT_TYPE, "application/json")], crate::openapi::document(state.settings.vrp_max_stops)).into_response()
 }
 
 /// The interactive docs page.
@@ -403,6 +425,8 @@ fn accept_vrp(state: &AppState, body: &[u8]) -> Result<VrpRequest, ApiError> {
         (status = 200, description = "Routes, one per vehicle load", body = VrpResponse),
         (status = 422, description = "Request failed validation"),
         (status = 503, description = "Optimisation capacity exhausted; retry after the given interval"),
+        (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached, or a chunk solve failed"),
     )
 )]
 pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
@@ -443,6 +467,8 @@ pub async fn vrp(State(state): State<AppState>, body: Bytes) -> Result<Response,
         (status = 200, description = "Stops assigned to depots", body = VrpAllocationResponse),
         (status = 422, description = "Request failed validation"),
         (status = 503, description = "Optimisation capacity exhausted; retry after the given interval"),
+        (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached, or a chunk solve failed"),
     )
 )]
 pub async fn vrp_allocate(State(state): State<AppState>, body: Bytes)
