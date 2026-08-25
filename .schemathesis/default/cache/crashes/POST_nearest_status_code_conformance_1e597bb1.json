@@ -1,0 +1,83 @@
+{
+  "operation": "POST /nearest",
+  "method": "POST",
+  "path_template": "/nearest",
+  "fingerprint": "1e597bb1",
+  "case_id": "kspcPp",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"coordinate\": {\"latitude\": 0.0, \"longitude\": 0.0}}' http://127.0.0.1:8011/nearest",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:8011/nearest",
+      "url_template": "http://127.0.0.1:8011/nearest",
+      "headers": {
+        "User-Agent": "schemathesis/4.25.2",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "kspcPp",
+        "Content-Type": "application/json",
+        "Content-Length": "51"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "content-type": "application/json",
+          "content-length": "97",
+          "date": "Tue, 25 Aug 2026 15:34:59 GMT"
+        },
+        "body": "{\"detail\":{\"code\":\"FixtureMiss\",\"message\":\"no fixture for /nearest/v1/driving/0.0,0.0?number=1\"}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422, 429"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0021497090347111225,
+          "mode": "positive"
+        },
+        "components": {
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/nearest",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "coordinate": {
+            "latitude": 0.0,
+            "longitude": 0.0
+          }
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "operation": "POST /matrix",
+  "method": "POST",
+  "path_template": "/matrix",
+  "fingerprint": "76f649ab",
+  "case_id": "ntOrBf",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"approaches\": [], \"bearings\": [], \"exclude\": [], \"hints\": [], \"radiuses\": [], \"skip_waypoints\": false, \"snapping\": null, \"annotations\": \"duration\", \"coordinates\": [], \"destinations\": [], \"fallback_coordinate\": null, \"fallback_speed\": 0, \"profile\": \"driving\", \"scale_factor\": 0, \"sources\": null}' http://127.0.0.1:8011/matrix",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:8011/matrix",
+      "url_template": "http://127.0.0.1:8011/matrix",
+      "headers": {
+        "User-Agent": "schemathesis/4.25.2",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "ntOrBf",
+        "Content-Type": "application/json",
+        "Content-Length": "295"
+      },
+      "response": {
+        "status_code": 422,
+        "headers": {
+          "content-type": "application/json",
+          "content-length": "128",
+          "date": "Tue, 25 Aug 2026 15:34:58 GMT"
+        },
+        "body": "{\"detail\":[{\"loc\":[\"body\",\"coordinates\"],\"msg\":\"List should have at least 2 items after validation, not 0\",\"type\":\"too_short\"}]}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "positive_data_acceptance",
+          "status": "failure",
+          "message": "API rejected schema-compliant request\n\nValid data should have been accepted\nExpected: 2xx, 401, 403, 404, 409, 5xx"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 1.1541007552295923e-05,
+          "mode": "positive"
+        },
+        "components": {
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "coverage",
+          "data": {
+            "type": "CoveragePhaseData",
+            "description": "Object with valid 'sources' value: Value null value",
+            "location": null,
+            "parameter": "application/json",
+            "parameter_location": "BODY",
+            "scenario": "valid_object"
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/matrix",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "approaches": [],
+          "bearings": [],
+          "exclude": [],
+          "hints": [],
+          "radiuses": [],
+          "skip_waypoints": false,
+          "snapping": null,
+          "annotations": "duration",
+          "coordinates": [],
+          "destinations": [],
+          "fallback_coordinate": null,
+          "fallback_speed": 0,
+          "profile": "driving",
+          "scale_factor": 0,
+          "sources": null
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}

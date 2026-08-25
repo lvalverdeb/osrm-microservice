@@ -1,0 +1,7 @@
+{
+  "format_version": 1,
+  "schemathesis_version": "4.25.2",
+  "schema_location": "http://127.0.0.1:8011/openapi.json",
+  "base_url": "http://127.0.0.1:8011",
+  "created_at": "2026-08-25T15:34:58.212242+00:00"
+}

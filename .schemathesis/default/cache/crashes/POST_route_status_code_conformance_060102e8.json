@@ -1,0 +1,102 @@
+{
+  "operation": "POST /route",
+  "method": "POST",
+  "path_template": "/route",
+  "fingerprint": "060102e8",
+  "case_id": "TYj8HS",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"approaches\": [], \"bearings\": [], \"exclude\": [], \"hints\": [], \"radiuses\": [], \"skip_waypoints\": false, \"snapping\": null, \"alternatives\": 0, \"annotations\": \"\", \"continue_straight\": null, \"destination\": {\"latitude\": 0, \"longitude\": 0}, \"geometries\": \"polyline\", \"origin\": {\"latitude\": 0, \"longitude\": 0}, \"overview\": \"simplified\", \"profile\": \"driving\", \"steps\": false, \"waypoints\": null}' http://127.0.0.1:8011/route",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:8011/route",
+      "url_template": "http://127.0.0.1:8011/route",
+      "headers": {
+        "User-Agent": "schemathesis/4.25.2",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "TYj8HS",
+        "Content-Type": "application/json",
+        "Content-Length": "386"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "content-type": "application/json",
+          "content-length": "259",
+          "date": "Tue, 25 Aug 2026 15:34:58 GMT"
+        },
+        "body": "{\"detail\":{\"code\":\"FixtureMiss\",\"message\":\"no fixture for /route/v1/driving/0.0,0.0;0.0,0.0?overview=simplified&geometries=polyline&steps=false&waypoints=0%3B1&alternatives=0&annotations=&bearings=&radiuses=&hints=&approaches=&exclude=&skip_waypoints=false\"}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422, 429"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 6.737501826137304e-05,
+          "mode": "positive"
+        },
+        "components": {
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "coverage",
+          "data": {
+            "type": "CoveragePhaseData",
+            "description": "Object with valid 'waypoints' value: Value null value",
+            "location": null,
+            "parameter": "application/json",
+            "parameter_location": "BODY",
+            "scenario": "valid_object"
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/route",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "approaches": [],
+          "bearings": [],
+          "exclude": [],
+          "hints": [],
+          "radiuses": [],
+          "skip_waypoints": false,
+          "snapping": null,
+          "alternatives": 0,
+          "annotations": "",
+          "continue_straight": null,
+          "destination": {
+            "latitude": 0,
+            "longitude": 0
+          },
+          "geometries": "polyline",
+          "origin": {
+            "latitude": 0,
+            "longitude": 0
+          },
+          "overview": "simplified",
+          "profile": "driving",
+          "steps": false,
+          "waypoints": null
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}

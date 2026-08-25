@@ -1,0 +1,92 @@
+{
+  "operation": "POST /vrp/allocate",
+  "method": "POST",
+  "path_template": "/vrp/allocate",
+  "fingerprint": "a9d97238",
+  "case_id": "Ri3gMa",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"capacity\": 0, \"clustering_mode\": \"distance\", \"depots\": [], \"hysteresis_m\": 0, \"max_radius_km\": 0, \"roundtrip\": false, \"stops\": [{\"id\": {}, \"latitude\": 0, \"longitude\": 0}]}' http://127.0.0.1:8011/vrp/allocate",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:8011/vrp/allocate",
+      "url_template": "http://127.0.0.1:8011/vrp/allocate",
+      "headers": {
+        "User-Agent": "schemathesis/4.25.2",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "Ri3gMa",
+        "Content-Type": "application/json",
+        "Content-Length": "173"
+      },
+      "response": {
+        "status_code": 422,
+        "headers": {
+          "content-type": "application/json",
+          "content-length": "244",
+          "date": "Tue, 25 Aug 2026 15:34:59 GMT"
+        },
+        "body": "{\"detail\":[{\"loc\":[\"body\",\"depots\"],\"msg\":\"List should have at least 1 items after validation, not 0\",\"type\":\"too_short\"},{\"loc\":[\"body\",\"capacity\"],\"msg\":\"Input should be greater than 0 and less than or equal to 10000\",\"type\":\"greater_than\"}]}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "positive_data_acceptance",
+          "status": "failure",
+          "message": "API rejected schema-compliant request\n\nValid data should have been accepted\nExpected: 2xx, 401, 403, 404, 409, 5xx"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 1.2000033166259527e-05,
+          "mode": "positive"
+        },
+        "components": {
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "coverage",
+          "data": {
+            "type": "CoveragePhaseData",
+            "description": "Object with valid 'stops' value: Single-item array: Object with valid 'id' value: Valid object",
+            "location": null,
+            "parameter": "application/json",
+            "parameter_location": "BODY",
+            "scenario": "valid_object"
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/vrp/allocate",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "capacity": 0,
+          "clustering_mode": "distance",
+          "depots": [],
+          "hysteresis_m": 0,
+          "max_radius_km": 0,
+          "roundtrip": false,
+          "stops": [
+            {
+              "id": {},
+              "latitude": 0,
+              "longitude": 0
+            }
+          ]
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}
