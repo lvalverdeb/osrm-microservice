@@ -9,18 +9,18 @@ Also shows how to interpret the structured logging output format
 configured by logging_config.py.
 
 Usage:
-    uv run examples/src/infra/health_and_metrics.py
+    uv run --package osrm-api-gateway-examples examples/src/infra/health_and_metrics.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import os
 import time
 
 import httpx
+from config import settings
 
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_BASE_URL = settings.OSRM_API_URL
 
 
 def check_health() -> dict:

@@ -1,11 +1,11 @@
-import os
 import random
 
 import folium
 import requests
+from config import settings
 
 # Configuration
-API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_URL = settings.OSRM_API_URL
 OUTPUT_FILE = "examples/src/clustering/simple_vrp_map.html"
 
 def generate_multi_vehicle_data(num_depots=10, stops_per_depot=30):

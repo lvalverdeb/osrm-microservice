@@ -1,14 +1,18 @@
 import json
-import os
 import random
 import sys
 
 import folium
 import requests
+from config import settings
 from folium.plugins import MarkerCluster
 
 # Configuration
-API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_URL = settings.OSRM_API_URL
+
+# The gateway rejects more stops than VRP_MAX_STOPS (default 2000) with a 422.
+# See docs/configuration.md; raise both together if you need a bigger run.
+MAX_STOPS = 2000
 
 # Warehouse Presets
 WAREHOUSES = [
@@ -42,7 +46,7 @@ def is_in_costa_rica(lat, lon):
         p1x, p1y = p2x, p2y
     return inside
 
-def generate_random_stops(count=6500):
+def generate_random_stops(count=MAX_STOPS):
     """Generate random stops across Costa Rica mainland using precise bounds."""
     stops = []
     lat_min, lat_max = 8.046187, 11.217119
@@ -65,7 +69,7 @@ def generate_random_stops(count=6500):
 
 def run_stress_test():
     depots = [{"latitude": w["latitude"], "longitude": w["longitude"]} for w in WAREHOUSES]
-    stops = generate_random_stops(2500)
+    stops = generate_random_stops(MAX_STOPS)
     
     payload = {
         "depots": depots,
@@ -74,7 +78,7 @@ def run_stress_test():
         "max_radius_km": 25.0
     }
     
-    print("Sending VRP scale test: 6 depots, 2500 stops...")
+    print(f"Sending VRP scale test: {len(depots)} depots, {len(stops)} stops...")
     print(f"Constraints: Capacity={payload['capacity']}, Max Radius={payload['max_radius_km']}km")
     print("This may take a moment as OSRM processes many matrix batches and TSP chunks.")
     

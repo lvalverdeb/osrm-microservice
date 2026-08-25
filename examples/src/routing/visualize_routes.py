@@ -3,9 +3,10 @@ import sys
 
 import folium
 import httpx
+from config import settings
 
 # Configuration
-API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000") + "/route"
+API_URL = settings.OSRM_API_URL + "/route"
 # Use coordinates in San Jose that are likely to have multiple paths
 ORIGIN = {"longitude": -84.078, "latitude": 9.932}
 DESTINATION = {"longitude": -84.150, "latitude": 9.940}

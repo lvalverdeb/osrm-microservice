@@ -6,18 +6,18 @@ into a directed NetworkX graph. Prints node metadata and edge attributes
 (duration in seconds, distance in meters).
 
 Usage:
-    uv run examples/src/routing/matrix_graph_example.py
+    uv run --package osrm-api-gateway-examples examples/src/routing/matrix_graph_example.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import os
 from typing import Any
 
 import httpx
+from config import settings
 
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_BASE_URL = settings.OSRM_API_URL
 
 
 def fetch_matrix_graph(coordinates: list[dict[str, float]]) -> dict[str, Any]:

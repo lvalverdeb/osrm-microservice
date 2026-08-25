@@ -1,9 +1,9 @@
-import os
 
 import httpx
+from config import settings
 
 # Configuration - set OSRM_API_URL env var to point to your host
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
+API_BASE_URL = settings.OSRM_API_URL
 
 def get_nearest_segment():
     print("Requesting the 3 nearest road segments to a specific coordinate...")

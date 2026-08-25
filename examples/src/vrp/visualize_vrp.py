@@ -1,13 +1,13 @@
-import os
 import random
 import sys
 
 import folium
 import requests
+from config import settings
 from folium.plugins import MarkerCluster
 
 # Configuration
-API_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_URL = settings.OSRM_API_URL
 
 def get_random_color():
     """Generate a random hex color for each vehicle."""

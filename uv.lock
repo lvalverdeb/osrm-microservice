@@ -327,7 +327,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "osrm-api-gateway-examples"
 version = "0.1.0"
-source = { virtual = "examples" }
+source = { editable = "examples" }
 dependencies = [
     { name = "folium" },
     { name = "httpx" },

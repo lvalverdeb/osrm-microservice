@@ -9,7 +9,7 @@ Explores OSRM routing features beyond the basics:
   5. Step-by-step turn instructions with annotations
 
 Usage:
-    uv run examples/src/routing/route_advanced_options.py
+    uv run --package osrm-api-gateway-examples examples/src/routing/route_advanced_options.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000
@@ -19,8 +19,9 @@ import os
 
 import folium
 import httpx
+from config import settings
 
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_BASE_URL = settings.OSRM_API_URL
 
 
 def fetch_route(payload: dict, label: str) -> dict:

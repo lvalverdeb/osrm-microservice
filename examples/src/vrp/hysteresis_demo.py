@@ -15,17 +15,17 @@ This script runs /vrp/allocate three times:
   3. hysteresis_m=10000  — large buffer, almost never switches
 
 Usage:
-    uv run examples/src/vrp/hysteresis_demo.py
+    uv run --package osrm-api-gateway-examples examples/src/vrp/hysteresis_demo.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000
 """
 
-import os
 
 import httpx
+from config import settings
 
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_BASE_URL = settings.OSRM_API_URL
 
 
 def allocate(hysteresis_m: float) -> dict:

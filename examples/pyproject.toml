@@ -9,3 +9,15 @@ dependencies = [
     "folium>=0.16.0",
     "pydantic-settings>=2.2.0",
 ]
+
+# Installing this project puts `config` on sys.path, so every example -- not just
+# the launcher, which reaches it through a sys.path insert -- reads examples/.env
+# through the same typed settings object. Without it each script fell back to its
+# own hardcoded URL and silently ignored .env when run directly.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+only-include = ["src/config.py"]

@@ -5,17 +5,31 @@ Lists available example scripts organized by category and runs
 the selected one with proper workspace dependency resolution.
 
 Usage:
-    uv run examples/main.py
+    uv run --package osrm-api-gateway-examples examples/main.py
 """
 
 import subprocess
 import sys
 from pathlib import Path
 
-# Load .env into os.environ before any subprocess runs
-_src = Path(__file__).parent / "src"
-sys.path.insert(0, str(_src))
-from config import settings
+# Importing config loads examples/.env and exports it to os.environ, so the
+# subprocesses launched below inherit the same gateway URL this menu prints.
+#
+# The workspace shares one .venv at the repository root, and a bare `uv run`
+# from there syncs it to the root package -- whose dependencies are
+# httpx/starlette/uvicorn only. That evicts this project's, so say which
+# package you meant. Caught here because the raw ImportError names a missing
+# module rather than the wrong command, which is the actual mistake.
+try:
+    from config import settings
+except ImportError as exc:
+    sys.exit(
+        f"{exc}\n\n"
+        "The examples run in their own workspace package. Use:\n"
+        "    make examples\n"
+        "or:\n"
+        "    uv run --package osrm-api-gateway-examples examples/main.py"
+    )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_SRC = PROJECT_ROOT / "examples" / "src"
@@ -51,7 +65,12 @@ def show_menu(examples):
 
 def run_script(script_path):
     rel = script_path.relative_to(PROJECT_ROOT)
-    cmd = ["uv", "run", str(rel)]
+    # --package is required, not cosmetic: the workspace shares one .venv at the
+    # repository root, and a bare `uv run` from there syncs it to the root
+    # package, whose dependencies are httpx/starlette/uvicorn only. That evicts
+    # folium, requests and pydantic-settings, so every script needing them dies
+    # on ModuleNotFoundError.
+    cmd = ["uv", "run", "--package", "osrm-api-gateway-examples", str(rel)]
     print(f"\n{'=' * 60}")
     print(f"Running: {rel}")
     print(f"  API: {settings.OSRM_API_URL}")

@@ -2,11 +2,12 @@ import os
 
 import folium
 import httpx
+from config import settings
 from folium.features import DivIcon
 from folium.plugins import AntPath, DualMap
 
 # Configuration - set OSRM_API_URL env var to point to your host
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
+API_BASE_URL = settings.OSRM_API_URL
 
 # Warehouse location (Start and End)
 WAREHOUSE = {"longitude": -84.05157, "latitude": 9.93971}  # Montes de Oca

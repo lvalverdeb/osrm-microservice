@@ -1,16 +1,18 @@
-import os
 
 import httpx
+from config import settings
 
 # Configuration - set OSRM_API_URL env var to point to your host
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
+API_BASE_URL = settings.OSRM_API_URL
 
 def download_vector_tile():
-    # Tile coordinates (z, x, y)
-    # 13 is the zoom level. 2197, 3991 are the x,y tile coordinates (near San Jose, Costa Rica)
+    # Tile coordinates (z, x, y) in the standard Web Mercator (slippy map) scheme.
+    # This tile covers San Jose, Costa Rica (~9.928 N, -84.091 E). The previous
+    # values (2197, 3991) resolved to 4.6 N / -83.45 E -- open Pacific, ~590 km
+    # offshore -- so the gateway answered 200 with a zero-byte tile.
     zoom = 13
-    x = 2197
-    y = 3991
+    x = 2182
+    y = 3868
     
     url = f"{API_BASE_URL}/tile/driving/{zoom}/{x}/{y}.mvt"
     print(f"Downloading Mapbox Vector Tile (MVT) from: {url}")

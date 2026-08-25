@@ -1,15 +1,19 @@
 import json
-import os
 import random
 
 import folium
 import requests
+from config import settings
 
 # Configuration
-API_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
+API_URL = settings.OSRM_API_URL
 OUTPUT_DIR = "examples/src/clustering"
 MAP_FILE = f"{OUTPUT_DIR}/clustering_results_map.html"
 PAYLOAD_FILE = f"{OUTPUT_DIR}/clustering_payload.json"
+
+# The gateway rejects more stops than VRP_MAX_STOPS (default 2000) with a 422.
+# See docs/configuration.md; raise both together if you need a bigger run.
+MAX_STOPS = 2000
 
 # Core Warehouse Configuration (6 Depots)
 WAREHOUSES = [
@@ -91,8 +95,8 @@ def is_in_costa_rica(lat, lon):
         p1x, p1y = p2x, p2y
     return inside
 
-def generate_payload(total_stops=6500):
-    """Generate 6500 stops with 60/40 Valle Central distribution and precision snapping."""
+def generate_payload(total_stops=MAX_STOPS):
+    """Generate stops with a 60/40 Valle Central distribution and precision snapping."""
     depots = [{"latitude": w["latitude"], "longitude": w["longitude"]} for w in WAREHOUSES]
     
     stops = []
@@ -209,7 +213,7 @@ def print_report(mode, hyst, payload, results, metadata):
     print(f"Successfully Allocated: {reachable_count}/{total_stops} ({reachable_count/total_stops:.1%})")
 
 def main():
-    payload, metadata = generate_payload(6500)
+    payload, metadata = generate_payload(MAX_STOPS)
     
     # Scenario A: Road Distance
     print("\n" + "="*60)

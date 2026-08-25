@@ -1,10 +1,10 @@
-import os
 
 import folium
 import httpx
+from config import settings
 
 # Configuration - set OSRM_API_URL env var to point to your host
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://10.211.55.28:8080")
+API_BASE_URL = settings.OSRM_API_URL
 
 # Example GPS trace (simulating a car driving around San Jose)
 # These points might be noisy or slightly off the road

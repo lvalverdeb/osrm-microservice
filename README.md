@@ -161,25 +161,33 @@ The project includes Python tools to visualize and compare routes:
 
 **Usage**:
 
+The examples are their own workspace package, so `--package` is required: the
+workspace shares one `.venv` at the repository root, and a bare `uv run` there
+syncs it to the root package and evicts folium, requests and pydantic-settings.
+The gateway URL comes from `examples/.env`.
+
 ```bash
-# Or launch the interactive menu (discovers all scripts automatically)
-uv run examples/main.py
+# Interactive menu (discovers all scripts automatically)
+make examples
+
+# ...which is shorthand for:
+uv run --package osrm-api-gateway-examples examples/main.py
 
 # Routing examples
-uv run examples/src/routing/matrix_example.py
-uv run examples/src/routing/route_advanced_options.py
-uv run examples/src/routing/error_handling_demo.py
+uv run --package osrm-api-gateway-examples examples/src/routing/matrix_example.py
+uv run --package osrm-api-gateway-examples examples/src/routing/route_advanced_options.py
+uv run --package osrm-api-gateway-examples examples/src/routing/error_handling_demo.py
 
 # VRP examples
-uv run examples/src/vrp/clustering_mode_comparison.py
-uv run examples/src/vrp/hysteresis_demo.py
-uv run examples/src/clustering/simple_id_example.py
+uv run --package osrm-api-gateway-examples examples/src/vrp/clustering_mode_comparison.py
+uv run --package osrm-api-gateway-examples examples/src/vrp/hysteresis_demo.py
+uv run --package osrm-api-gateway-examples examples/src/clustering/simple_id_example.py
 
 # Infrastructure
-uv run examples/src/infra/health_and_metrics.py
+uv run --package osrm-api-gateway-examples examples/src/infra/health_and_metrics.py
 
 # Compare actual vs optimized sequences
-uv run examples/src/benchmarking/compare_tsp.py
+uv run --package osrm-api-gateway-examples examples/src/benchmarking/compare_tsp.py
 ```
 
 Maps are saved as interactive HTML files (`map.html`, `comparison_map.html`).

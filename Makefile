@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -53,6 +53,7 @@ help:
 	@echo "  publish        - Publish the Python package to PyPI (requires UV_PUBLISH_TOKEN in .env)"
 	@echo "  clean          - Remove downloaded and processed data"
 	@echo "  clean-pkg      - Remove Python build artifacts"
+	@echo "  examples       - Interactive menu of the example client scripts (examples/)"
 	@echo "  test           - Run the pytest suite"
 	@echo "  lint           - Run ruff checks"
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
@@ -219,6 +220,13 @@ parity-selfcheck:
 
 clean:
 	rm -rf $(DATA_DIR)
+
+# The examples are a separate workspace package. --package is required: the
+# workspace shares one .venv at the repository root, and a bare `uv run` there
+# syncs it to the root package, evicting folium, requests and pydantic-settings.
+# Reads examples/.env for the gateway URL.
+examples:
+	uv run --package osrm-api-gateway-examples examples/main.py
 
 test:
 	uv run python -m pytest tests/ -q --tb=short

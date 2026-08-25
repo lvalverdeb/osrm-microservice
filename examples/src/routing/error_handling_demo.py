@@ -13,7 +13,7 @@ Each scenario shows the HTTP status code, the error detail format,
 and the `_parse_osrm_error` helper output.
 
 Usage:
-    uv run examples/src/routing/error_handling_demo.py
+    uv run --package osrm-api-gateway-examples examples/src/routing/error_handling_demo.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000
@@ -22,13 +22,13 @@ Note: The rate limit test sends many requests rapidly and may require
       resetting the rate limiter between runs.
 """
 
-import os
 import sys
 import time
 
 import httpx
+from config import settings
 
-API_BASE_URL = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+API_BASE_URL = settings.OSRM_API_URL
 
 
 def try_request(method: str, path: str, json_body: dict | None = None,
