@@ -34,11 +34,11 @@ this number means anything.
 
 ## Status
 
-P0 is done and verified on the jail deployment (2026-08-20). P1 is implemented
-and unit-tested but its jail acceptance (stop the engine, watch `/ready` flip to
-503 and back) has not been run yet. P2-1 and P2-3 are implemented and
-unit-tested, P2-1 with its own jail acceptance still to run. P2-2 was measured
-and withdrawn: the block it was written to remove does not exist.
+P0 is done and verified on the jail deployment (2026-08-20). **P1 and P2-1 have
+now had their jail acceptance run (2026-08-25), against the Rust gateway rather
+than the FastAPI one they were written for.** P2-3 is implemented and
+unit-tested. P2-2 was measured and withdrawn: the block it was written to remove
+does not exist.
 
 Verifying P0-2 turned up a defect this plan had not predicted: Redis was
 unreachable from the jail, so both the L2 cache and the limiter's shared storage
@@ -50,13 +50,53 @@ had been silently inert. See "Redis needs the jail to have a real loopback" in
 | P0-1 metrics | done | 201 requests, counter delta 201 across 2 workers (was ~100) |
 | P0-2 limiter | done | 800 requests/8s at 600/min: 549 allowed with Redis vs 772 without |
 | P0-3 workers | done | `osrm_api_gateway_workers`, two workers under `daemon(8)` |
-| P1 readiness | done | `/ready` implemented; all three probes use it (`Makefile`, `Dockerfile`, `install.sh`) |
+| P1 readiness | done | jail acceptance run: engine stopped -> `/ready` 503 immediately, `/health` 200 `degraded`; restored -> both recover, routing returns |
 | Proxy-aware limits | done | `--forwarded-allow-ips` on both paths; without it every client behind a balancer shares one bucket |
 | Docker workers | done | `WORKERS` via `deploy/docker/entrypoint.sh`; P0-1/2/3 previously applied to the jail only |
-| P2-1 payload caps | implemented | `VRP_MAX_STOPS` 422 and per-worker semaphore 503, `tests/test_vrp_capacity.py`; jail RSS ceiling not measured yet |
+| P2-1 payload caps | done | `vrp` @ 4/s x 2000 stops: 76x503, 19x429, 24x200, gateway healthy throughout; peak RSS 320 MB |
 | P2-2 executor | withdrawn | measured 8-10 ms of CPU per 2000-stop solve, not 1.6 s; see below |
 | P2-3 matrix bound | implemented | `MATRIX_MAX_CELLS` mirrors the engine's own rule, `tests/test_matrix_capacity.py` |
 | TSP chunk fan-out | implemented | came out of the P2-2 measurement; 1293 ms -> 364 ms on a 2000-stop solve, `tests/test_vrp_fanout.py` |
+
+### Jail acceptance, 2026-08-25
+
+Run against the Rust gateway on the 2-core jail.
+
+**P1.** `service osrm_routed stop` flipped `/ready` to 503 immediately -- inside
+the one-`HEALTH_CHECK_TIMEOUT` budget -- while `/health` stayed 200 with
+`status=degraded`, `osrm_backend=down`. Restarting the engine restored both, and
+a real route returned. As specified.
+
+**P2-1.** `vrp` @ 4/s with 2000-stop payloads for 30s: **76x503, 19x429, 24x200,
+2 transport errors, and the gateway healthy throughout**. The 503s are the
+admission gate shedding once `VRP_MAX_CONCURRENCY` is saturated; the 429s are
+the limiter, since 4/s is well past `RATE_LIMIT_VRP` of 100/minute. Nothing died,
+which is the criterion.
+
+The single-request path is intact and faster than the figures in the baseline
+above: 500 / 1000 / 2000 stops returned in **0.4 / 0.4 / 0.6 s** producing 7 / 13
+/ 25 routes, against the recorded 0.9 / 0.8 / 1.6 s.
+
+**RSS ceiling: 320 MB**, and the shape of it matters more than the number. It is
+not a leak -- during the single-request runs above it fell from 321 to 304 MB as
+new entries evicted old ones. It is the **L1 cache**, which is bounded by
+`L1_CACHE_MAXSIZE` at 1024 *entries* with no bound on their size. A 2000-stop
+solve stores several large `/table` matrices, so the entry count is a poor proxy
+for memory here: 1024 entries of VRP-sized payloads would be far larger than
+this run happened to produce. On a 2 GB box shared with two other jails, that is
+worth knowing before raising the limit -- see "Caching" under "Not in this plan",
+which recommends raising it for throughput without noting this cost.
+
+Two observations worth acting on separately:
+
+- **A shed request costs the client 10 seconds.** p50 latency was 10,008 ms,
+  which is `VRP_QUEUE_TIMEOUT` exactly: under overload a client waits the full
+  timeout to be told no. Shedding faster when the queue is already deep would be
+  kinder than making callers pay for the queue they never got into.
+- **Two transport errors** in 121 requests, at a load where the rest were
+  cleanly refused. Not diagnosed; worth a look if it recurs.
+
+---
 
 ## Ordering
 
@@ -272,6 +312,11 @@ quantising coordinates to a grid is the single largest throughput lever
 available (10–40× on repeat traffic), but it is tuning, not breakage, and it
 belongs to a capacity exercise with real traffic patterns rather than to this
 list.
+
+One caveat from the 2026-08-25 acceptance run: `L1_CACHE_MAXSIZE` bounds
+*entries*, not bytes, and a VRP `/table` payload is orders of magnitude larger
+than a `/route` one. 1024 entries reached 320 MB there. Raise it against a
+measured RSS ceiling rather than by entry count alone.
 
 **Horizontal deployment** — replicating the read-only `.osrm.*` data across
 nodes, a balancer tier, shared Redis. That work is straightforward once P0 and
