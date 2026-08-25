@@ -4,6 +4,7 @@
 //! `docs/planning/SCALING_READINESS_PLAN.md` for why it exists and what the
 //! measurements behind it do and do not show.
 
+mod admission;
 mod cache;
 mod config;
 mod error;
@@ -78,13 +79,17 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
 
     let bind = format!("{}:{}", settings.host, settings.port);
     let metrics_path = settings.metrics_endpoint.clone();
-    let vrp_slots = Arc::new(tokio::sync::Semaphore::new(settings.vrp_max_concurrency.max(1)));
+    let vrp_gate = Arc::new(admission::AdmissionGate::new(
+        settings.vrp_max_concurrency,
+        settings.vrp_queue_timeout,
+        settings.vrp_max_queue_depth,
+    ));
     let limits = Limits::from_settings(&settings);
     let trusted_proxies = Arc::new(TrustedProxies::parse(&settings.forwarded_allow_ips));
     let state = AppState {
         client: Arc::new(client),
         settings: Arc::new(settings),
-        vrp_slots,
+        vrp_gate,
         limiter: Arc::new(RateLimiter::new()),
         limits,
         trusted_proxies,

@@ -23,11 +23,10 @@ use crate::vrp::solve::{self, VehicleRoute, VrpAllocationResponse, VrpResponse};
 pub struct AppState {
     pub client: Arc<OsrmClient>,
     pub settings: Arc<Settings>,
-    /// Bounds concurrent solves. The schema cap bounds one request; this bounds
-    /// how many run at once, because peak memory is the product of the two --
-    /// one 2000-stop solve peaked near 277 MB and four together reached 615 MB
-    /// on a 2 GB host.
-    pub vrp_slots: Arc<tokio::sync::Semaphore>,
+    /// Bounds concurrent solves and the queue for them. The schema cap bounds
+    /// one request; this bounds how many run at once, because peak memory is
+    /// the product of the two.
+    pub vrp_gate: Arc<crate::admission::AdmissionGate>,
     pub limiter: Arc<crate::ratelimit::RateLimiter>,
     pub limits: crate::ratelimit::Limits,
     pub trusted_proxies: Arc<crate::ratelimit::TrustedProxies>,
@@ -364,16 +363,16 @@ mod tests {
 }
 
 
-/// Wait for a solve slot, shedding rather than queueing indefinitely.
+/// Take a solve slot, or shed.
+///
+/// Both refusals answer 503 with the same `Retry-After`: a caller can do nothing
+/// different with "the queue was full" than with "the queue did not drain in
+/// time". The distinction shows up in latency, which is the point -- a
+/// depth refusal returns in microseconds where a timeout costs the full wait.
 async fn vrp_slot(state: &AppState) -> Result<tokio::sync::OwnedSemaphorePermit, ApiError> {
-    let wait = std::time::Duration::from_secs_f64(state.settings.vrp_queue_timeout);
-    let slots = Arc::clone(&state.vrp_slots);
-    match tokio::time::timeout(wait, slots.acquire_owned()).await {
-        Ok(Ok(permit)) => Ok(permit),
-        _ => Err(ApiError::CapacityExhausted {
-            retry_after: (state.settings.vrp_queue_timeout as u64).max(1),
-        }),
-    }
+    state.vrp_gate.enter().await.map_err(|_| ApiError::CapacityExhausted {
+        retry_after: (state.settings.vrp_queue_timeout as u64).max(1),
+    })
 }
 
 /// Allocation options shared by both VRP endpoints.
