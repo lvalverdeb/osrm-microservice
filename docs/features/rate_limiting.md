@@ -1,6 +1,8 @@
 # Rate Limiting
 
-All endpoints are protected by per-endpoint rate limits enforced via `slowapi` middleware. Rate limiting is applied per client IP address.
+Every routing endpoint carries a per-endpoint limit, counted per client IP
+(`gateway/src/ratelimit.rs`). `/health`, `/ready` and `/metrics` are never
+limited, so a probe or a scrape is never shed.
 
 ---
 
@@ -24,7 +26,9 @@ All endpoints are protected by per-endpoint rate limits enforced via `slowapi` m
 
 ## Format
 
-Rate limits follow the `slowapi` format: `<N>/<unit>`.
+Rate limits keep slowapi's spelling: `<N>/<unit>`. A value that cannot be parsed
+stops the process at startup, naming the setting — an endpoint that comes up
+silently unlimited is the one failure a rate limiter must not have.
 
 Supported units: `second`, `minute`, `hour`, `day`.
 
@@ -77,19 +81,22 @@ HTTP Status: `429 Too Many Requests`.
 
 ## Scaling Considerations
 
-`slowapi` uses in-memory rate tracking by default. For distributed deployments with multiple API replicas:
-
-- **Option A:** Place an API gateway (e.g., Nginx, Kong) upstream with global rate limiting.
-- **Option B:** Replace `slowapi`'s in-memory store with a Redis-backed store (requires custom `slowapi` storage backend).
-
-Neither is required for single-replica deployments.
+Counting in process memory alone makes the configured limit per-instance, so a
+fleet of M instances behind a balancer allows M times what the setting says.
+That is why Redis-backed counting is not optional here — see Storage below. An
+upstream gateway (Nginx, Kong) with a global limit remains a reasonable second
+layer, but it is not a substitute.
 
 ## Storage
 
 Limits are counted in Redis when `REDIS_URL` is set, and in process memory
-otherwise. This matters as soon as there is more than one process: slowapi's
-default in-memory storage is per worker, so `uvicorn --workers N` would make the
-effective limit `N x` the configured value, and a fleet behind a balancer `N x M x`.
+otherwise, falling back automatically when Redis does not answer — an outage
+degrades to per-instance counting rather than stopping enforcement.
+
+`WORKERS` is tokio worker threads inside one process, so the in-process counter
+is already global to an instance. What it cannot see is a second instance: a
+fleet of M behind a balancer allows M times the configured value unless the
+counting is shared.
 
 Measured on the jail deployment, 800 requests in 8s against `RATE_LIMIT_ROUTE`
 of 600/minute:

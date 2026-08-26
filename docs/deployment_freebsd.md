@@ -62,7 +62,7 @@ make jail-up JAIL_HOST=root@10.211.55.33
 ```sh
 make jail-doctor      # identity, arch, memory, escalation method, package state
 make jail-host        # host-level prerequisites: jail.conf loopback, jail resolver
-make jail-bootstrap   # packages + service user  (slow: numpy and pydantic-core are compiled)
+make jail-bootstrap   # packages + service user  (slow: installs the Rust toolchain)
 make jail-data        # osrm-extract / partition / customize  (slow, memory-hungry)
 make jail-up          # deploy the gateway, (re)start all three services, health-check
 make jail-health      # probes /ready (gateway + engine in one check)
@@ -77,8 +77,8 @@ First run is `jail-host` → `jail-bootstrap` → `jail-data` → `jail-up`. Aft
 only need `jail-up`. The two `publish` targets are host state and stand apart
 from that cycle — see "Reaching the gateway from outside the host".
 
-`jail-bootstrap` and `jail-data` are the slow ones: Rust compiles pydantic-core,
-numpy builds from source, and the extract is memory-hungry. Both are one-time,
+`jail-bootstrap` and `jail-data` are the slow ones: the gateway is compiled from
+source and the extract is memory-hungry. Both are one-time,
 and `jail-up` refuses to run without them rather than failing halfway.
 
 ### After a reboot
@@ -338,38 +338,24 @@ Then the gateway answers on `http://10.211.55.33:8000/docs`.
 
 Two things this route implies. The gateway has **no authentication** — `/docs`,
 `/metrics` and every routing endpoint become reachable by anything on the host's
-network, with only slowapi's per-IP rate limits in front. That is why publishing
+network, with only the gateway's per-IP rate limits in front. That is why publishing
 is its own target and not part of `make jail-up`: exposing an unauthenticated
 API is a policy decision, and `/etc/pf.conf` is host state shared with every
 other jail.
 
 ## Known constraints
 
-### numpy and pydantic-core are compiled from source
+### The gateway is compiled in the jail
 
-FreeBSD's default Python is 3.12 and modules are packaged for it only; there is
-no `py313-numpy`, and PyPI publishes no FreeBSD wheels. Since `pyproject.toml`
-requires `>=3.13`, every extension module is built in the venv. This is slow
-(tens of minutes on low-memory arm64) but happens only on first
-`jail-bootstrap`.
+`install.sh` installs exactly three packages: `osrm-backend`, `redis` and
+`rust`. There is no Python in the jail any more -- the gateway is a single
+static binary built from `gateway/` on the box.
 
-The `deps` phase installs the toolchain those builds need, and each package is
-there for a specific failure:
-
-- `pkgconf`, `openblas` — numpy's meson build and its BLAS backend.
-- `ninja` — meson-python asks for the PyPI `ninja` sdist only when no system
-  ninja is on `PATH`; that sdist builds CMake from source, which fails on
-  FreeBSD (`Unrecognized options in config-settings: setup-args`).
-- `rust` — pydantic-core is a Rust extension. Without `cargo` on `PATH`,
-  maturin's sdist falls back to downloading a rustup toolchain, and rustup has
-  no FreeBSD target (`Unsupported platform`).
-
-There is no BLAS fallback flag: numpy >= 2.0 already defaults to
-`allow-noblas=true`, and a `uv pip install -C setup-args=…` applies to every
-package in the resolution, so it breaks build backends that reject the option.
-
-The alternative — relaxing `requires-python` to `>=3.12` and using `py312-numpy` —
-is faster but diverges from the 3.13 CI pin.
+That build is the slow part of `jail-bootstrap`, and it is memory-hungry: the
+`jail` cargo profile exists for this, trading fat LTO and a single codegen unit
+for thin LTO and sixteen, because the release profile risks the OOM killer on a
+2 GB box shared with two other jails. Runtime difference is immaterial for an
+I/O-bound proxy.
 
 ### The port's osrm service is replaced, not configured
 
@@ -418,7 +404,7 @@ and no password is set for the default user.
 ```
 
 Nothing fails loudly when this happens: `RedisCache` logs a warning per
-operation and serves from L1, and slowapi silently falls back to per-process
+operation and serves from L1, and the rate limiter silently falls back to per-process
 limits. This deployment ran that way until it was measured.
 
 `make jail-host` fixes the addressing. `deploy/freebsd/redis-cache.conf` then
@@ -434,7 +420,7 @@ a small box would make Redis start refusing writes.
 
 ### Memory
 
-`osrm-extract` and the numpy/Rust builds are all memory-hungry, and the host has under
+`osrm-extract` and the Rust build are both memory-hungry, and the host has under
 2 GB shared across all jails. If either is OOM-killed, in order of preference:
 
 1. Add swap on the host.

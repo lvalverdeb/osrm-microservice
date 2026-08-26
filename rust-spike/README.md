@@ -25,7 +25,7 @@ OSRM_BASE_URL=http://127.0.0.1:5000 HOST=127.0.0.1 PORT=8001 WORKERS=1 \
     ./target/release/osrm-gateway-spike
 ```
 
-Settings mirror `src/app/config.py` by name: `OSRM_BASE_URL`, `HOST`, `PORT`,
+Settings mirror `gateway/src/config.rs` by name: `OSRM_BASE_URL`, `HOST`, `PORT`,
 `WORKERS`, `L1_CACHE_TTL`, `L1_CACHE_MAXSIZE`, `OSRM_CLIENT_TIMEOUT`,
 `MATRIX_MAX_CELLS`, `HEALTH_CHECK_COORDS`, `HEALTH_CHECK_TIMEOUT`. `WORKERS`
 defaults to 1 so a run matches a single uvicorn worker; raise it only alongside

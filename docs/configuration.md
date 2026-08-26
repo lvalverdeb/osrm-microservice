@@ -1,8 +1,10 @@
 # Configuration Reference
 
-All settings are defined by `Settings` in `src/app/config.py` and loaded via Pydantic
-`BaseSettings`. The reference for their **values** is `deploy/env/app.env`, which both
-deployment options load at runtime.
+All settings are defined by the `settings!` table in `gateway/src/config.rs`,
+which declares the name, type and committed default of each in one place. The
+reference for their **values** is `deploy/env/app.env`, which both deployment
+options load at runtime; tests in that module check the two agree in both
+directions, so a setting cannot exist in one and not the other.
 
 ## Where settings come from
 
@@ -17,7 +19,7 @@ Three tiers, highest priority last:
 Tier 2 beats tier 1 on both paths: Compose documents `environment:` as overriding
 `env_file:`, and dotenv takes the **last** occurrence of a duplicated key, which is
 why the jail appends its overlay rather than prepending it. Tier 3 beats both,
-because pydantic-settings reads the process environment ahead of any env file.
+because the real process environment is read ahead of any env file.
 
 **Only two settings are overridden per deployment** — the rest come from tier 1 in
 both:
@@ -56,7 +58,7 @@ in app/config.py`.
 
 ### Adding a setting
 
-Add the field to `src/app/config.py`, then add the key to `deploy/env/app.env` — a
+Add the field to the `settings!` table in `gateway/src/config.rs`, then add the key to `deploy/env/app.env` — a
 test fails if the two drift apart in either direction. Only touch a deployment file
 if the value must differ per deployment.
 
@@ -102,7 +104,7 @@ and nodes. If Redis becomes unreachable the limiter falls back to per-process
 in-memory counting rather than failing requests — available, but the effective
 limit then multiplies by the number of worker processes.
 
-Per-endpoint request rate limits enforced by `slowapi`. Format: `<N>/<unit>` (e.g. `600/minute`).
+Per-endpoint request rate limits. Format: `<N>/<unit>` (e.g. `600/minute`), kept from slowapi. An unparseable value stops the process at startup.
 
 | Variable | Default | Applies To |
 |----------|---------|------------|

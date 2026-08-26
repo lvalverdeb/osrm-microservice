@@ -108,7 +108,7 @@ repository root; `-p` pins the project name, which would otherwise be derived
 from the file's directory (`docker`) and rename the default network.
 
 The build contexts inside the compose file are `../..`, i.e. the repository root
-— the API image copies `src/app` and `pyproject.toml`, and the builder image
+— the API image builds `gateway/` from source, and the builder image
 copies `data/`. That also means `.dockerignore` stays at the repository root,
 since Docker reads it from the root of the build context rather than from beside
 the Dockerfile.

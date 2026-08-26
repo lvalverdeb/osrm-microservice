@@ -23,17 +23,31 @@ Client Request
 
 **Flow:**
 
-1. **L1 check** — `cachetools.TTLCache` (in-process, sub-millisecond reads).
-2. **L2 check** — `redis.asyncio.Redis` (shared across replicas, survives restarts). On hit, the entry is promoted into L1.
-3. **OSRM fetch** — On miss, the request hits OSRM with exponential-backoff retry (`tenacity`). The response populates both L2 and L1.
+1. **L1 check** — `moka`, in-process, sub-millisecond reads (`gateway/src/main.rs`).
+2. **L2 check** — Redis over a pooled, self-reconnecting connection, shared
+   across replicas and surviving restarts. On a hit the entry is promoted into
+   L1 (`gateway/src/redis_cache.rs`).
+3. **OSRM fetch** — on a miss the request reaches OSRM with exponential-backoff
+   retry, and the response populates both tiers (`gateway/src/osrm/client.rs`).
 
-Both layers are populated synchronously for L1 and asynchronously (non-blocking `await`) for L2, so a Redis failure never delays the response.
+Every Redis error is swallowed, so losing L2 costs cache hits and nothing else.
+Connect and command timeouts are bounded hard for the same reason: this tier is
+an optimisation, and waiting on it longer than a hit is worth defeats the point.
+
+Note the two tiers are not independent. L2 is consulted only after L1 misses, so
+its metric series are a subset of L1's misses; summing them for a single hit
+rate double-counts.
 
 ---
 
 ## Cache Key Generation
 
-Keys are built from the endpoint path plus a SHA-256 hash of the sorted query parameters (`build_cache_key` in `app/services/cache.py`). The hash uses `json.dumps` with `sort_keys=True`, making keys stable across process restarts and replicas sharing the same Redis instance.
+Keys are built from the endpoint path plus a SHA-256 hash of the sorted query
+parameters (`build_cache_key` in `gateway/src/cache.rs`). The hash reproduces
+Python's `json.dumps(params, sort_keys=True)` byte for byte — including its
+`", "` and `": "` separators, `ensure_ascii`, and float formatting — so keys are
+stable across restarts and across replicas sharing one Redis. Cross-language
+digests in that module's tests pin the reproduction.
 
 ```
 /route/v1/driving/<sha256_of_params>

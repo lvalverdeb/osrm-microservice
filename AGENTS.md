@@ -22,7 +22,7 @@ This repository is designed to be maintained and expanded by AI developer agents
 
 - **Tech Stack**: Python 3.13+, FastAPI, Redis, OSRM, NetworkX, Ruff.
 - **Core Principles**:
-  - **Separation of Concerns (SoC)**: Keep presentation logic (`main.py`), client adapters (`osrm_client.py`), and optimization algorithms (`vrp_service.py`, `graph_builder.py`) completely separated.
+  - **Separation of Concerns (SoC)**: Keep routing and handlers (`main.rs`, `handlers.rs`), the upstream adapter (`osrm/client.rs`), and the optimisation algorithms (`vrp/allocate.rs`, `vrp/solve.rs`) completely separated.
   - **Statelessness**: Compute endpoints must be stateless, delegating state cache to Redis or OSRM backend.
   - **Idempotency**: Optimization and calculation endpoints should be strictly side-effect free.
   - **Observability**: Include structured logging, OpenTelemetry tracing hooks, and Prometheus metric instrumentation.

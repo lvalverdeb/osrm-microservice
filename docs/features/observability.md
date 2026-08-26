@@ -6,12 +6,20 @@ The gateway provides three complementary observability layers: **structured logg
 
 ## Structured Logging
 
-Configured in `app/logging_config.py`, called at startup before any other module is imported.
+Configured in `gateway/src/telemetry.rs` at startup, before anything else runs.
+
+The line shape is Python's `logging` format, kept deliberately so log shippers
+and grok patterns written against the previous implementation still match.
+Colour is off unconditionally — both deployments send this to a file, and the
+default would have written escape sequences into it.
 
 **Format:**
 ```
-2026-06-25 14:32:01,123 [INFO] app.main: POST /route completed in 0.142s
+2026-08-25 23:48:18,154 [INFO] osrm_api_gateway: osrm-api-gateway listening bind=127.0.0.1:8000
 ```
+
+`DEBUG=true` selects debug level for this crate. `RUST_LOG` still tunes
+dependency noise, but it cannot override `DEBUG` for the gateway's own output.
 
 **Configuration:**
 
@@ -24,10 +32,12 @@ Configured in `app/logging_config.py`, called at startup before any other module
 
 | Component | Level | Content |
 |-----------|-------|---------|
-| `app.main` | `INFO` / `ERROR` | Request completion, OSRM errors, unexpected exceptions. |
-| `app.services.osrm_client` | `DEBUG` / `ERROR` | L1/L2 cache hits, OSRM API errors, retry attempts. |
-| `app.services.redis_cache` | `WARNING` / `INFO` | Redis connection status, get/set failures. |
-| `app.tracing` | `INFO` / `WARNING` | Tracing enable/disable, exporter failures. |
+| `osrm_api_gateway` | `INFO` / `ERROR` | Startup, bind address, panics caught before they reach the client. |
+| `osrm_api_gateway::telemetry` | `INFO` / `WARNING` | Tracing enabled or disabled, exporter failures. |
+
+Redis failures are written straight to stderr rather than through the subscriber
+(`gateway/src/redis_cache.rs`), so they carry no level and are not filtered by
+`DEBUG`. They are always visible and always swallowed.
 
 ---
 
@@ -35,19 +45,31 @@ Configured in `app/logging_config.py`, called at startup before any other module
 
 Endpoint: `GET /metrics` (configurable via `METRICS_ENDPOINT`).
 
-Auto-instrumented by `prometheus-fastapi-instrumentator`, which tracks per-route:
+Recorded by the gateway's own middleware (`gateway/src/metrics.rs`), matching
+the names, types, labels and bucket boundaries `prometheus-fastapi-instrumentator`
+produced, so existing dashboards and alerts keep working:
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `http_requests_total` | Counter | Total requests per endpoint, method, status code. |
-| `http_request_duration_seconds` | Histogram | Request latency distribution. |
-| `http_request_size_bytes` | Histogram | Request body size. |
-| `http_response_size_bytes` | Histogram | Response body size. |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `http_requests_total` | Counter | `handler`, `method`, `status` | Requests served. `status` is grouped as `2xx`/`4xx`/`5xx`, not the raw code. |
+| `http_request_duration_seconds` | Histogram | `handler`, `method` | Latency. Buckets are `0.1`, `0.5`, `1`. |
+| `http_request_duration_highr_seconds` | Histogram | — | Latency again at higher resolution, 21 boundaries out to 60s. |
+| `http_request_size_bytes` | Summary | `handler` | Request body size, from `Content-Length`. |
+| `http_response_size_bytes` | Summary | `handler` | Response body size, measured from the body itself. |
+
+An unrouted path is labelled `handler="none"`, and `/tile` collapses to its
+route template, so neither can give the label unbounded cardinality.
+
+**Process metrics.** `process_cpu_seconds_total`,
+`process_resident_memory_bytes`, `process_open_fds` and
+`process_start_time_seconds` are exported **on Linux only** — they are read from
+`/proc`. They appear under Docker and in CI, and not in the FreeBSD jail or on a
+macOS development box.
 
 ### Cache metrics
 
 The gateway also exports its own counter for the two-tier cache-aside path in
-`OSRMClient._get`:
+`OsrmClient::get`:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -84,8 +106,9 @@ sum by (service) (rate(cache_lookups_total{result="hit"}[5m]))
 ```
 
 A zero L2 hit rate under `make loadtest` is expected rather than a fault: the
-generator randomises payloads so keys rarely repeat, and with a single uvicorn
-worker the L1 tier absorbs the repeats that do occur before Redis is consulted.
+generator randomises payloads so keys rarely repeat, and the L1 tier absorbs the
+repeats that do occur before Redis is consulted. Drive the cached regime
+deliberately with `--distinct-payloads N`, which cycles a fixed set instead.
 See [../deployment.md](../deployment.md) for load-testing either deployment.
 
 **Scraping configuration** (Prometheus):

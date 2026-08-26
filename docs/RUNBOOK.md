@@ -23,10 +23,10 @@ One Rust binary (`gateway/`) in front of `osrm-routed`, with Redis as an
 optional second cache tier. The gateway is the only thing this repository
 builds; the engine and Redis are stock.
 
-There is no Python gateway any more. If you find a document referring to
-`src/app/`, `osrm_client.py`, `graph_builder.py` or `vrp_service.py`, it predates
-the port and is stale — the README's "Core Services" section is currently in
-that state.
+There is no Python gateway any more. A document referring to `src/app/`,
+`osrm_client.py`, `graph_builder.py` or `vrp_service.py` predates the port and is
+stale; the documentation set was swept for those in August 2026, so anything that
+turns up now arrived after.
 
 ---
 
@@ -289,7 +289,6 @@ Two things that will waste your time if you meet them cold:
   exist.** They went with the PyPI package when the FastAPI implementation was
   archived; the help text was not updated. Running them fails with
   `No rule to make target`.
-- **The README's "Core Services" section describes `osrm_client.py`,
-  `graph_builder.py` and `vrp_service.py`**, which no longer exist. The
-  equivalents are `gateway/src/osrm/client.rs`, the `build_graph` function in
-  `gateway/src/handlers.rs`, and `gateway/src/vrp/`.
+- **`make help` also lists `spaghetti` and `fenceline` in older copies.** Those
+  targets are not defined either; the scans they refer to ran against the Python
+  package.

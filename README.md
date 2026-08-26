@@ -1,6 +1,5 @@
 # OSRM Backend Microservice
 
-[English](https://github.com/lvalverde/osrm-microservice/blob/main/README.md) | [Español](https://github.com/lvalverde/osrm-microservice/blob/main/README.es.md) | [Français](https://github.com/lvalverde/osrm-microservice/blob/main/README.fr.md)
 
 > **The `osrm-api-gateway` PyPI package is no longer maintained.**
 > [0.2.1](https://pypi.org/project/osrm-api-gateway/0.2.1/) is its final release.
@@ -64,17 +63,29 @@ make jail-up          # deploy the gateway and start all services
 
 The gateway encapsulates its routing logic in several modules under [`gateway/src/`](gateway/src):
 
-### 1. OSRM Client (`osrm_client.py`)
-An asynchronous HTTP client that interacts directly with the C++ OSRM backend. It formats queries and standardizes responses.
-**Example Use Case**: Fetching the exact geometry and driving instructions for a trip between a warehouse and multiple delivery points.
+### 1. OSRM client (`osrm/client.rs`)
+Talks to the C++ OSRM backend: builds each service's query, retries transport
+failures and 5xx with exponential backoff, and relays the engine's bytes
+verbatim so response numbers are never re-encoded. Both cache tiers live behind
+it.
+**Example use case**: fetching the geometry and driving instructions for a trip
+between a warehouse and several delivery points.
 
-### 2. Graph Builder (`graph_builder.py`)
-Transforms raw OSRM distance and duration matrices into directed `NetworkX` graphs.
-**Example Use Case**: Generating a mathematical representation of the road network to feed into advanced optimization algorithms (like custom TSP solvers) or to identify isolated nodes in the delivery network.
+### 2. Graph builder (`build_graph`, in `handlers.rs`)
+Turns a duration/distance matrix into a directed node-link graph, reproducing
+the shape `networkx.node_link_data` emits.
+**Example use case**: producing a mathematical representation of the road
+network to feed a custom optimiser, or to find isolated nodes in a delivery
+network.
 
-### 3. VRP Service (`vrp_service.py`)
-A comprehensive Vehicle Routing Problem (VRP) solver. It implements a Location-Allocation strategy, assigning delivery stops to the nearest available warehouse (depot) and generating optimized delivery sequences.
-**Example Use Case**: A logistics company wants to distribute 500 daily packages across 5 drivers starting from 2 different warehouses, ensuring each driver takes the most optimal cluster of stops.
+### 3. VRP solver (`vrp/allocate.rs`, `vrp/solve.rs`)
+Location-allocation in two phases. `allocate` assigns each stop to a depot by
+road cost, with a hysteresis band that keeps territories stable between runs and
+a sanity override that refuses an implausible matrix answer. `solve` orders each
+depot's stops by sweep angle, cuts them into vehicle loads, and sequences every
+load through OSRM's `/trip`, fanning the chunks out concurrently.
+**Example use case**: distributing 500 daily packages across 5 drivers from 2
+warehouses, each driver taking a contiguous cluster of stops.
 
 ## Client Application Usage Examples
 
@@ -275,8 +286,6 @@ Interactive documentation is available once the service is running:
 For a detailed developer guide, see:
 
 - [API Reference (English)](docs/API_REFERENCE.md)
-- [Referencia de la API (Español)](docs/API_REFERENCE.es.md)
-- [Référence API (Français)](docs/API_REFERENCE.fr.md)
 
 ## Feature Documentation
 
