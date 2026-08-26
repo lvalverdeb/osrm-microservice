@@ -84,3 +84,9 @@ examples/**/*.html
 # explicitly rather than matching /*.html, which would silently swallow any
 # root page someone adds later.
 /match_example_map.html
+
+# Generated delivery dataset -- ~12 MB, and reproducible byte for byte from
+# examples/src/vrp/generate_delivery_dataset.py with its committed seed, so
+# committing it would add churn to every diff for no information.
+# See docs/dataset_prep.md.
+data/deliveries*.json
