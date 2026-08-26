@@ -467,3 +467,9 @@ class Solution:
     unassigned: tuple[dict[str, Any], ...] = ()
     objective_breakdown: dict[str, int] = field(default_factory=dict)
     status: str = "FEASIBLE"
+    # CON-4: wall-clock runs are permitted "but MUST record the deterministic
+    # iteration count actually achieved so that any run can be replayed". Until
+    # this existed the seed and the budget were arguments somebody happened to
+    # pass, surviving nowhere -- so a production plan could not be reproduced
+    # even in principle. Keys: solver, seed, iterations, matrix_version.
+    solver: dict[str, Any] | None = None

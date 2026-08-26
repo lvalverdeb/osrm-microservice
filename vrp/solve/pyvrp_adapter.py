@@ -289,7 +289,7 @@ def compile_problem(problem: Problem) -> _Compiled:
 
 
 def map_solution(problem: Problem, compiled: _Compiled, best,
-                 feasible: bool = True) -> Solution:
+                 feasible: bool = True, solver: dict | None = None) -> Solution:
     """Turn a PyVRP solution back into ours, keeping the solver's own timings.
 
     `feasible` is PyVRP's own verdict and must be passed through. An early
@@ -399,7 +399,8 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
     return Solution(problem_id=problem.id, routes=tuple(routes),
                     unassigned=unassigned,
                     objective_breakdown={},
-                    status="FEASIBLE" if feasible else "INFEASIBLE")
+                    status="FEASIBLE" if feasible else "INFEASIBLE",
+                    solver=dict(solver or {}) or None)
 
 
 def _depot_location_id(problem: Problem, route, activity) -> str:
@@ -414,10 +415,24 @@ def _depot_location_id(problem: Problem, route, activity) -> str:
     return vehicle.start_location_id if activity is first else vehicle.ends_at
 
 
+def _pyvrp_version() -> str:
+    """PyVRP's version, or "unknown" -- it exposes no __version__ attribute."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("pyvrp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def solve(problem: Problem, iterations: int = 500, seed: int = 0) -> Solution:
     """Compile, solve, and map back. Deterministic for a given seed (CON-4)."""
     compiled = compile_problem(problem)
     result = compiled.model.solve(stop=MaxIterations(iterations), seed=seed,
                                   display=False)
     return map_solution(problem, compiled, result.best,
-                        feasible=result.is_feasible())
+                        feasible=result.is_feasible(),
+                        # CON-4's replay record: everything needed to reproduce
+                        # this exact plan, written down rather than remembered.
+                        solver={"solver": f"pyvrp:{_pyvrp_version()}",
+                                "seed": seed, "iterations": iterations,
+                                "matrix_version": problem.matrix.version})
