@@ -75,8 +75,13 @@ def _eligible(problem: Problem, order: Order) -> list[Vehicle]:
     what makes LOCK_CONFLICT fall out of the ordinary checks instead of needing
     its own parallel set of them.
     """
+    # A vehicle forbidden to deploy is not eligible for anything. Missing this
+    # made an order pinned to a forbidden vehicle look perfectly servable --
+    # the pin said "only V2" and nothing said V2 was staying in the yard.
+    forbidden = {lock.vehicle_id for lock in problem.locks
+                 if lock.kind == "FORBID_DEPLOY"}
     fleet = [v for v in problem.vehicles
-             if order.required_skills <= v.skills]
+             if order.required_skills <= v.skills and v.id not in forbidden]
     for lock in problem.locks:
         if lock.order_id != order.id:
             continue
@@ -90,6 +95,14 @@ def _eligible(problem: Problem, order: Order) -> list[Vehicle]:
 
 
 def _pinned(problem: Problem, order: Order) -> bool:
+    """Whether an operator lock narrowed this order's options.
+
+    FORBID_DEPLOY counts: it does not name the order, but it is what removed
+    the vehicle the order needed, and a dispatcher told "no eligible vehicle"
+    would go looking for a missing skill rather than at the van they grounded.
+    """
+    if any(lock.kind == "FORBID_DEPLOY" for lock in problem.locks):
+        return True
     return any(lock.order_id == order.id
                and lock.kind in ("PIN_ORDER_TO_VEHICLE", "PIN_DEPOT",
                                  "FORBID_ORDER_ON_VEHICLE")
