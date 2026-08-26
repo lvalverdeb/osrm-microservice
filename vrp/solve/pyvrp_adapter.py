@@ -28,11 +28,11 @@ from pyvrp.stop import MaxIterations
 
 from vrp.model import Problem, Route, Solution, Step
 
-# PyVRP models one capacity dimension per index; this adapter handles the
-# single-dimension case. Multi-dimensional capacity is T-20/E-20 and needs the
-# dimension order pinned so a solution maps back unambiguously.
-_UNSUPPORTED_MULTI_DIMENSION = (
-    "multi-dimensional capacity is T-20; this adapter takes one dimension")
+# PyVRP addresses capacity dimensions positionally, so the order must be pinned
+# and used identically when compiling and when mapping back. Sorted rather than
+# insertion-ordered: two Problems describing the same fleet must compile to the
+# same model whichever order their dicts were built in, or a cached plan and a
+# fresh one disagree about which number is the pallets.
 
 # FR-07 lists a per-vehicle routing profile, and a profile is a matrix. A
 # Problem pins exactly one, so a mixed-profile fleet would route a bicycle and
@@ -48,7 +48,7 @@ _UNSUPPORTED_MIXED_PROFILES = (
 @dataclass(frozen=True)
 class _Compiled:
     model: Model
-    dimension: str | None
+    dimensions: tuple[str, ...]
     # PyVRP client index (0-based, in insertion order) -> our order id.
     order_by_client: dict[int, str]
     vehicle_ids: list[str]
@@ -83,17 +83,16 @@ def _single_profile(problem: Problem) -> str:
     return next(iter(profiles), "driving")
 
 
-def _single_dimension(problem: Problem) -> str | None:
-    dimensions = {d for order in problem.orders for d in order.quantities}
-    dimensions |= {d for vehicle in problem.vehicles for d in vehicle.capacities}
-    if len(dimensions) > 1:
-        raise NotImplementedError(_UNSUPPORTED_MULTI_DIMENSION)
-    return next(iter(dimensions), None)
+def _dimensions(problem: Problem) -> tuple[str, ...]:
+    """Every capacity dimension in play, in a stable order. FR-02, §6.1."""
+    names = {d for order in problem.orders for d in order.quantities}
+    names |= {d for vehicle in problem.vehicles for d in vehicle.capacities}
+    return tuple(sorted(names))
 
 
 def compile_problem(problem: Problem) -> _Compiled:
     """Build the PyVRP model. Travel comes from the matrix, never the geometry."""
-    dimension = _single_dimension(problem)
+    dimensions = _dimensions(problem)
     _single_profile(problem)
     model = Model()
 
@@ -135,7 +134,13 @@ def compile_problem(problem: Problem) -> _Compiled:
         if order.kind == "SHIPMENT":
             raise NotImplementedError("shipments are T-13")
         location = problem.location(stop.location_id)
-        quantity = order.quantities.get(dimension, 0) if dimension else 0
+        # §6.1's signed load: a quantity is applied at pickup and released at
+        # delivery, so which list it goes in is what makes the load profile
+        # rise or fall. A pickup-only order compiled as a delivery -- which is
+        # what happened before E-20 -- inverts the profile silently.
+        amounts = [order.quantities.get(name, 0) for name in dimensions]
+        delivered = amounts if order.delivery is not None else [0] * len(dimensions)
+        collected = amounts if order.delivery is None else [0] * len(dimensions)
         shift_end = max(v.shift.end for v in problem.vehicles)
         shift_start = min(v.shift.start for v in problem.vehicles)
         windows = stop.time_windows or (None,)
@@ -151,7 +156,8 @@ def compile_problem(problem: Problem) -> _Compiled:
             early, late = _bounds(window, shift_start, shift_end)
             client = model.add_client(
                 location=handles[location.matrix_index],
-                delivery=[quantity],
+                delivery=delivered,
+                pickup=collected,
                 service_duration=stop.service_fixed + location.dwell_overhead,
                 tw_early=early,
                 tw_late=late,
@@ -190,7 +196,7 @@ def compile_problem(problem: Problem) -> _Compiled:
 
         model.add_vehicle_type(
             num_available=1,
-            capacity=[vehicle.capacities.get(dimension, 0)] if dimension else [],
+            capacity=[vehicle.capacities.get(name, 0) for name in dimensions],
             start_depot=depots[vehicle.start_location_id],
             end_depot=open_sink if vehicle.open_route else depots[vehicle.ends_at],
             tw_early=vehicle.shift.start,
@@ -222,7 +228,7 @@ def compile_problem(problem: Problem) -> _Compiled:
             model.add_edge(handles[origin.matrix_index], sink_handle,
                            distance=0, duration=0)
 
-    return _Compiled(model=model, dimension=dimension,
+    return _Compiled(model=model, dimensions=dimensions,
                      order_by_client=order_by_client, vehicle_ids=vehicle_ids)
 
 
@@ -237,7 +243,7 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
     units=48 exceeds capacity 12` -- which is precisely the job it exists to
     do, but the adapter should not be the one lying.
     """
-    dimension = compiled.dimension
+    dimensions = compiled.dimensions
     index_to_location = {location.matrix_index: location
                          for location in problem.locations}
     routes: list[Route] = []
@@ -247,10 +253,21 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
         vehicle_id = compiled.vehicle_ids[route.vehicle_type()]
         # Load is reconstructed rather than read back: PyVRP reports a route
         # total, and INV-5 is about the load carried at each step.
-        on_board = sum(
-            problem.order(compiled.order_by_client[activity.idx]).quantities.get(dimension, 0)
-            for activity in route if activity.is_client()
-        ) if dimension else 0
+        # The vehicle leaves the depot carrying everything it will drop, and
+        # nothing it will collect. Reconstructed per dimension rather than read
+        # back: PyVRP reports a route total, and INV-5 is about the load at
+        # each step -- which for a route that both drops and collects is a
+        # different number (§6.1's peak, not the total).
+        on_board = {
+            name: sum(
+                problem.order(compiled.order_by_client[activity.idx])
+                .quantities.get(name, 0)
+                for activity in route
+                if activity.is_client()
+                and problem.order(
+                    compiled.order_by_client[activity.idx]).delivery is not None)
+            for name in dimensions
+        }
 
         steps: list[Step] = []
         for activity in route:
@@ -274,14 +291,15 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
                                   arrival=activity.start_time,
                                   start_service=activity.start_time,
                                   departure=activity.end_time,
-                                  load_after={dimension: on_board} if dimension else {}))
+                                  load_after=dict(on_board)))
                 continue
 
             order_id = compiled.order_by_client[activity.idx]
             order = problem.order(order_id)
             served.add(order_id)
-            quantity = order.quantities.get(dimension, 0) if dimension else 0
-            on_board -= quantity
+            for name in dimensions:
+                quantity = order.quantities.get(name, 0)
+                on_board[name] += -quantity if order.delivery else quantity
             stop = order.delivery or order.pickup
             steps.append(Step(
                 type="DELIVERY" if order.delivery is not None else "PICKUP",
@@ -292,7 +310,7 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
                 arrival=activity.start_time - activity.wait_duration,
                 start_service=activity.start_time,
                 departure=activity.end_time,
-                load_after={dimension: on_board} if dimension else {},
+                load_after=dict(on_board),
             ))
         routes.append(Route(vehicle_id=vehicle_id, steps=tuple(steps)))
 
