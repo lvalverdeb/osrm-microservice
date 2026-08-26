@@ -1,0 +1,338 @@
+"""Canonical domain model — SDD §4.1 and §4.2.
+
+Solver-independent by construction: nothing here knows how a route is produced,
+only what a legal one looks like. Both the evaluator and the independent
+verifier read these types, which is the one thing they are allowed to share.
+
+**Integers throughout.** Instants and durations are whole seconds, quantities
+whole units, distances whole metres. Floating-point seconds accumulate error
+along a route, and an arrival time out by a microsecond makes `INV-4`
+unfalsifiable — the invariant that catches most timeline bugs would silently
+stop catching them.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+
+class ValidationError(ValueError):
+    """A domain object was constructed in a state the specification forbids."""
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValidationError(message)
+
+
+def _require_int(value: Any, name: str) -> None:
+    # bool is an int in Python and is never a legal quantity or instant.
+    _require(isinstance(value, int) and not isinstance(value, bool),
+             f"{name} must be a whole number, got {value!r}")
+
+
+@dataclass(frozen=True)
+class TimeWindow:
+    """A window a stop may be served in. §4.1."""
+
+    start: int
+    end: int
+    hardness: str = "HARD"
+    earliness_cost_per_sec: int = 0
+    lateness_cost_per_sec: int = 0
+
+    def __post_init__(self) -> None:
+        _require_int(self.start, "start")
+        _require_int(self.end, "end")
+        _require(self.end >= self.start, f"end {self.end} precedes start {self.start}")
+        _require(self.hardness in ("HARD", "SOFT"), f"unknown hardness {self.hardness!r}")
+        for name in ("earliness_cost_per_sec", "lateness_cost_per_sec"):
+            cost = getattr(self, name)
+            _require_int(cost, name)
+            _require(cost >= 0, f"{name} must not be negative")
+            # A penalty on a hard window is a contradiction: a hard window
+            # cannot be violated, so the penalty could never apply.
+            _require(self.hardness == "SOFT" or cost == 0,
+                     f"{name} is only meaningful on a SOFT window")
+
+    def contains(self, instant: int) -> bool:
+        return self.start <= instant <= self.end
+
+
+@dataclass(frozen=True)
+class Location:
+    id: str
+    lat: float
+    lon: float
+    matrix_index: int
+    dwell_overhead: int = 0
+
+    def __post_init__(self) -> None:
+        _require(bool(self.id), "location id must not be empty")
+        _require(-90.0 <= self.lat <= 90.0, f"latitude {self.lat} out of range")
+        _require(-180.0 <= self.lon <= 180.0, f"longitude {self.lon} out of range")
+        _require_int(self.matrix_index, "matrix_index")
+        _require(self.matrix_index >= 0, "matrix_index must not be negative")
+        _require_int(self.dwell_overhead, "dwell_overhead")
+        _require(self.dwell_overhead >= 0, "dwell_overhead must not be negative")
+
+
+@dataclass(frozen=True)
+class StopSpec:
+    """One end of an order: where it happens, when it may, and for how long."""
+
+    location_id: str
+    time_windows: tuple[TimeWindow, ...] = ()
+    service_fixed: int = 0
+
+    def __post_init__(self) -> None:
+        _require(bool(self.location_id), "location_id must not be empty")
+        _require_int(self.service_fixed, "service_fixed")
+        _require(self.service_fixed >= 0, "service_fixed must not be negative")
+        # §4.1 says windows are disjoint and sorted. Enforced rather than
+        # assumed: an evaluator that trusts the ordering will pick the wrong
+        # window when it is violated, and do so silently.
+        previous_end: int | None = None
+        for w in self.time_windows:
+            _require(isinstance(w, TimeWindow), "time_windows must hold TimeWindow")
+            if previous_end is not None:
+                _require(w.start > previous_end,
+                         "time_windows must be sorted and disjoint")
+            previous_end = w.end
+
+
+@dataclass(frozen=True)
+class Order:
+    id: str
+    kind: str
+    quantities: dict[str, int] = field(default_factory=dict)
+    pickup: StopSpec | None = None
+    delivery: StopSpec | None = None
+    priority_tier: int = 0
+    prize: int = 0
+    release_time: int = 0
+    required_skills: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        _require(bool(self.id), "order id must not be empty")
+        _require(self.kind in ("JOB", "SHIPMENT"), f"unknown kind {self.kind!r}")
+        for dimension, amount in self.quantities.items():
+            _require_int(amount, f"quantities[{dimension}]")
+            _require(amount >= 0, f"quantities[{dimension}] must not be negative")
+        if self.kind == "SHIPMENT":
+            _require(self.pickup is not None and self.delivery is not None,
+                     "a SHIPMENT needs both a pickup and a delivery")
+        else:
+            _require((self.pickup is None) != (self.delivery is None),
+                     "a JOB needs exactly one of pickup or delivery")
+        _require_int(self.priority_tier, "priority_tier")
+        _require_int(self.prize, "prize")
+        _require_int(self.release_time, "release_time")
+
+    @property
+    def stops(self) -> tuple[StopSpec, ...]:
+        return tuple(s for s in (self.pickup, self.delivery) if s is not None)
+
+
+@dataclass(frozen=True)
+class Vehicle:
+    id: str
+    capacities: dict[str, int]
+    shift: TimeWindow
+    start_location_id: str
+    end_location_id: str | None = None
+    max_duration: int | None = None
+    max_distance: int | None = None
+    skills: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        _require(bool(self.id), "vehicle id must not be empty")
+        for dimension, limit in self.capacities.items():
+            _require_int(limit, f"capacities[{dimension}]")
+            _require(limit >= 0, f"capacities[{dimension}] must not be negative")
+        _require(isinstance(self.shift, TimeWindow), "shift must be a TimeWindow")
+        _require(bool(self.start_location_id), "start_location_id must not be empty")
+        for name in ("max_duration", "max_distance"):
+            limit = getattr(self, name)
+            if limit is not None:
+                _require_int(limit, name)
+                _require(limit >= 0, f"{name} must not be negative")
+
+    @property
+    def ends_at(self) -> str:
+        """Where the route finishes. An open route ends where it last stopped."""
+        return self.end_location_id or self.start_location_id
+
+
+@dataclass(frozen=True)
+class TravelMatrix:
+    """Pinned travel data. `version` is what INV-4 checks a solution against."""
+
+    version: str
+    durations: tuple[tuple[int, ...], ...]
+    distances: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        _require(bool(self.version), "matrix version must not be empty")
+        size = len(self.durations)
+        for name, grid in (("durations", self.durations), ("distances", self.distances)):
+            _require(len(grid) == size, f"{name} must have {size} rows")
+            for row in grid:
+                _require(len(row) == size, f"{name} must be square ({size}x{size})")
+                for cell in row:
+                    _require_int(cell, f"{name} cell")
+
+    def duration(self, origin: int, destination: int) -> int:
+        return self.durations[origin][destination]
+
+    def distance(self, origin: int, destination: int) -> int:
+        return self.distances[origin][destination]
+
+
+@dataclass(frozen=True)
+class Problem:
+    id: str
+    locations: tuple[Location, ...]
+    orders: tuple[Order, ...]
+    vehicles: tuple[Vehicle, ...]
+    matrix: TravelMatrix
+    horizon: TimeWindow | None = None
+
+    def __post_init__(self) -> None:
+        _require(bool(self.id), "problem id must not be empty")
+        by_id = {location.id: location for location in self.locations}
+        _require(len(by_id) == len(self.locations), "duplicate location id")
+        indices = {location.matrix_index for location in self.locations}
+        _require(len(indices) == len(self.locations), "duplicate matrix_index")
+        _require(all(i < len(self.matrix.durations) for i in indices),
+                 "matrix_index outside the matrix")
+
+        order_ids = {order.id for order in self.orders}
+        _require(len(order_ids) == len(self.orders), "duplicate order id")
+        for order in self.orders:
+            for stop in order.stops:
+                _require(stop.location_id in by_id,
+                         f"order {order.id} references unknown location "
+                         f"{stop.location_id!r}")
+        for vehicle in self.vehicles:
+            for name in ("start_location_id", "end_location_id"):
+                location_id = getattr(vehicle, name)
+                _require(location_id is None or location_id in by_id,
+                         f"vehicle {vehicle.id} references unknown location "
+                         f"{location_id!r}")
+
+    def location(self, location_id: str) -> Location:
+        for candidate in self.locations:
+            if candidate.id == location_id:
+                return candidate
+        raise ValidationError(f"unknown location {location_id!r}")
+
+    def order(self, order_id: str) -> Order:
+        for candidate in self.orders:
+            if candidate.id == order_id:
+                return candidate
+        raise ValidationError(f"unknown order {order_id!r}")
+
+    def vehicle(self, vehicle_id: str) -> Vehicle:
+        for candidate in self.vehicles:
+            if candidate.id == vehicle_id:
+                return candidate
+        raise ValidationError(f"unknown vehicle {vehicle_id!r}")
+
+    # --- serialisation ---------------------------------------------------
+    # A problem arrives as JSON, so the model has to survive the round trip.
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> Problem:
+        return cls(
+            id=raw["id"],
+            locations=tuple(Location(**location) for location in raw["locations"]),
+            orders=tuple(_order_from_dict(order) for order in raw["orders"]),
+            vehicles=tuple(_vehicle_from_dict(vehicle) for vehicle in raw["vehicles"]),
+            matrix=TravelMatrix(
+                version=raw["matrix"]["version"],
+                durations=tuple(tuple(row) for row in raw["matrix"]["durations"]),
+                distances=tuple(tuple(row) for row in raw["matrix"]["distances"]),
+            ),
+            horizon=TimeWindow(**raw["horizon"]) if raw.get("horizon") else None,
+        )
+
+
+def _stop_from_dict(raw: dict[str, Any] | None) -> StopSpec | None:
+    if raw is None:
+        return None
+    return StopSpec(
+        location_id=raw["location_id"],
+        time_windows=tuple(TimeWindow(**w) for w in raw.get("time_windows", ())),
+        service_fixed=raw.get("service_fixed", 0),
+    )
+
+
+def _order_from_dict(raw: dict[str, Any]) -> Order:
+    return Order(
+        id=raw["id"],
+        kind=raw["kind"],
+        quantities=dict(raw.get("quantities", {})),
+        pickup=_stop_from_dict(raw.get("pickup")),
+        delivery=_stop_from_dict(raw.get("delivery")),
+        priority_tier=raw.get("priority_tier", 0),
+        prize=raw.get("prize", 0),
+        release_time=raw.get("release_time", 0),
+        required_skills=frozenset(raw.get("required_skills", ())),
+    )
+
+
+def _vehicle_from_dict(raw: dict[str, Any]) -> Vehicle:
+    return Vehicle(
+        id=raw["id"],
+        capacities=dict(raw["capacities"]),
+        shift=TimeWindow(**raw["shift"]),
+        start_location_id=raw["start_location_id"],
+        end_location_id=raw.get("end_location_id"),
+        max_duration=raw.get("max_duration"),
+        max_distance=raw.get("max_distance"),
+        skills=frozenset(raw.get("skills", ())),
+    )
+
+
+# --- Solution side (§4.2) -------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Step:
+    type: str
+    location_id: str
+    arrival: int
+    start_service: int
+    departure: int
+    order_id: str | None = None
+    load_after: dict[str, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _require(self.type in ("START", "PICKUP", "DELIVERY", "BREAK", "RELOAD", "END"),
+                 f"unknown step type {self.type!r}")
+        for name in ("arrival", "start_service", "departure"):
+            _require_int(getattr(self, name), name)
+
+    @property
+    def waiting(self) -> int:
+        return self.start_service - self.arrival
+
+
+@dataclass(frozen=True)
+class Route:
+    vehicle_id: str
+    steps: tuple[Step, ...]
+
+
+@dataclass(frozen=True)
+class Solution:
+    problem_id: str
+    routes: tuple[Route, ...]
+    unassigned: tuple[dict[str, Any], ...] = ()
+    objective_breakdown: dict[str, int] = field(default_factory=dict)
+    status: str = "FEASIBLE"

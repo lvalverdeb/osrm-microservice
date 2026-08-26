@@ -62,9 +62,23 @@ So the first three examples are not about routing at all:
 
 | # | Example | Task | Level | Passes when |
 |---|---|---|---|---|
-| **E-01** | `tests/vrp/test_domain_model.py` | `T-02` | L1 | Every entity in §4 round-trips through validation; integer units throughout; out-of-range values rejected with the field named |
-| **E-02** | `tests/vrp/test_canonical_evaluator.py` | `T-03` | L1 | Objective and timeline recomputed from a solution match hand-worked fixtures to the unit; deterministic across runs |
-| **E-03** | `tests/vrp/test_independent_verifier.py` | `T-04` **[GATE]** | L1+L2 | INV-1…INV-9 each have a violating fixture that is caught, and a legal fixture that passes. Imports no solver code |
+| **E-01** | `tests/vrp/test_domain_model.py` | `T-02` | L1 | **Done.** Every entity in §4 round-trips through validation; integer units throughout; out-of-range values rejected with the field named |
+| **E-02** | `tests/vrp/test_canonical_evaluator.py` | `T-03` | L1 | **Done.** Objective and timeline recomputed from a solution match hand-worked fixtures to the unit; deterministic across runs |
+| **E-03** | `tests/vrp/test_independent_verifier.py` | `T-04` **[GATE]** | L1+L2 | **Done.** INV-1…INV-6 and INV-9 each have a violating fixture that is caught and a legal one that passes; INV-7 and INV-8 report *not applicable* rather than passing. The no-solver-imports rule is enforced by reading the module's imports |
+
+A fourth landed alongside them, not in the original plan:
+
+| # | Example | Covers | Level | Passes when |
+|---|---|---|---|---|
+| **E-03b** | `tests/vrp/test_evaluator_verifier_agreement.py` | §11.2 | L2 | 300 generated instances: every timeline the evaluator builds satisfies the verifier, and the two recompute the same distance |
+
+§11.2 calls a discrepancy between evaluator and verifier a P1 defect, which is
+only a meaningful claim if something compares them. This is also the cheapest
+approximation of the L2 property level until the real generator arrives in
+`T-05`.
+
+**Implementation lives in `vrp/`**: `model.py`, `evaluator.py`, and
+`verify/verifier.py` in its own package, importing neither.
 
 **E-03 is the highest-value example in this document.** It is cheap, depends on
 nothing, and every later row is judged by it. Write it first even if the rest of
