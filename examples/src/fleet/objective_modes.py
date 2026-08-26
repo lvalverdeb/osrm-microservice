@@ -35,11 +35,18 @@ Requires a running gateway with an engine behind it, for real road distances:
     make compose-up                      # note: compose publishes on :8080
     # dataset: see docs/dataset_prep.md
 
+`OSRM_API_URL` must point at whichever host actually runs the containers. If
+`DOCKER_HOST` is set to a remote daemon, that is *not* localhost -- published
+ports live on the remote host, and localhost will refuse the connection while
+`docker ps` cheerfully reports the port as published.
+
 Without a gateway, pass --straight-line to substitute great-circle distances.
-The comparison still holds; the numbers are no longer road numbers.
+The comparison still holds; the numbers are no longer road numbers. Measured on
+a 20-stop slice with 2 outliers, the two agree on every mode and differ only in
+magnitude: 572,007 m saved by road against 381,299 m straight-line.
 
 Usage:
-    OSRM_API_URL=http://localhost:8080 uv run \\
+    OSRM_API_URL=http://<docker-host>:8080 uv run \\
         --package osrm-api-gateway-examples \\
         examples/src/fleet/objective_modes.py --stops 20 --outliers 2
 """
