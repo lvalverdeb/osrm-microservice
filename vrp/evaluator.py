@@ -145,7 +145,8 @@ def route_metrics(problem: Problem, timeline: tuple[Step, ...]) -> dict[str, int
     """Distance, driving, waiting and service for one expanded timeline."""
     matrix = problem.matrix
     metrics = {"distance": 0, "driving_seconds": 0,
-               "waiting_seconds": 0, "service_seconds": 0}
+               "waiting_seconds": 0, "service_seconds": 0,
+               "earliness_penalty": 0, "lateness_penalty": 0}
     for previous, current in pairwise(timeline):
         origin = problem.location(previous.location_id).matrix_index
         destination = problem.location(current.location_id).matrix_index
@@ -153,7 +154,38 @@ def route_metrics(problem: Problem, timeline: tuple[Step, ...]) -> dict[str, int
         metrics["driving_seconds"] += matrix.duration(origin, destination)
         metrics["waiting_seconds"] += current.waiting
         metrics["service_seconds"] += current.departure - current.start_service
+        early, late = soft_penalties(problem, current)
+        metrics["earliness_penalty"] += early
+        metrics["lateness_penalty"] += late
     return metrics
+
+
+def soft_penalties(problem: Problem, step: Step) -> tuple[int, int]:
+    """Earliness and lateness cost for one step's soft windows. §6.2, FR-04.
+
+    Only SOFT windows are costed. A breached HARD window is a violation the
+    verifier reports (INV-3), not a price the evaluator quietly absorbs --
+    costing it here as well would let an illegal plan look merely expensive,
+    and would double-count it against a verifier that already rejected it.
+
+    Earliness is measured from arrival rather than from service start, because
+    arriving early and waiting is exactly what §6.2 says must be costed: "
+    uncosted waiting produces plans that look cheap and consume the whole
+    driver day".
+    """
+    if step.order_id is None:
+        return 0, 0
+    order = problem.order(step.order_id)
+    stop = order.delivery or order.pickup
+    early = late = 0
+    for window in stop.time_windows:
+        if window.hardness != "SOFT":
+            continue
+        if step.arrival < window.start:
+            early += (window.start - step.arrival) * window.earliness_cost_per_sec
+        if step.start_service > window.end:
+            late += (step.start_service - window.end) * window.lateness_cost_per_sec
+    return early, late
 
 
 def evaluate(problem: Problem, assignment: dict[str, list[str]],
@@ -168,7 +200,8 @@ def evaluate(problem: Problem, assignment: dict[str, list[str]],
     """
     weights = weights or ObjectiveWeights()
     totals = {"distance": 0, "driving_seconds": 0,
-              "waiting_seconds": 0, "service_seconds": 0}
+              "waiting_seconds": 0, "service_seconds": 0,
+              "earliness_penalty": 0, "lateness_penalty": 0}
     timelines: dict[str, tuple[Step, ...]] = {}
     deployed = 0
 
@@ -194,5 +227,6 @@ def evaluate(problem: Problem, assignment: dict[str, list[str]],
              + (totals["driving_seconds"] + totals["waiting_seconds"]
                 + totals["service_seconds"]) * weights.per_second
              + breakdown["vehicles"]
+             + totals["earliness_penalty"] + totals["lateness_penalty"]
              + penalty)
     return Evaluation(total=total, breakdown=breakdown, timelines=timelines)

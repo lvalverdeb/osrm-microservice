@@ -216,11 +216,18 @@ def total(values: TierValues, scales: dict[Tier, int]) -> int:
 def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
     """Score a solution across the tiers this module can observe.
 
-    Tiers 5 and 6 stay zero: soft windows are `T-23` and the quality
-    tie-breakers are `T-47`. They are left in the hierarchy rather than removed
-    so adding them later cannot renumber anything, and they are reported as
-    zero rather than omitted so nobody reads a missing tier as a passing one.
+    Tier 6 stays zero: the quality tie-breakers are `T-47`. It is left in the
+    hierarchy rather than removed so adding it later cannot renumber anything,
+    and reported as zero rather than omitted so nobody reads a missing tier as
+    a passing one.
+
+    Tier 5 is the soft-violation total, and it is taken from the canonical
+    evaluator rather than recomputed here. Two implementations of "how late is
+    this" would be two chances to disagree, and there is no independence
+    argument for separating them -- that argument applies to the verifier,
+    which shares nothing with either.
     """
+    from vrp.evaluator import soft_penalties
     served = {step.order_id for route in solution.routes
               for step in route.steps if step.order_id}
     unassigned = [o for o in problem.orders if o.id not in served]
@@ -245,13 +252,16 @@ def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
         # §5.2: cost per second only, distance ignored.
         operating = duration * max(spec.cost_per_second, 1)
 
+    soft = sum(sum(soft_penalties(problem, step))
+               for route in solution.routes for step in route.steps)
+
     values = TierValues({
         Tier.HARD: 0,                 # the verifier owns this; see §11.2
         Tier.UNSERVED_P0: unserved_p0,
         Tier.UNSERVED: unserved_rest,
         Tier.FLEET: deployed,
         Tier.OPERATING: operating,
-        Tier.SOFT: 0,
+        Tier.SOFT: soft,
         Tier.QUALITY: 0,
     })
     return Score(values=values, total=total(values, tier_scales(problem, spec)))

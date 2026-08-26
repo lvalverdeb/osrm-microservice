@@ -54,6 +54,26 @@ class _Compiled:
     vehicle_ids: list[str]
 
 
+def _bounds(window, shift_start: int, shift_end: int) -> tuple[int, int]:
+    """PyVRP bounds for one window. FR-04's hard/soft distinction lives here.
+
+    PyVRP has no soft time windows -- `PenaltyManager` is its internal search
+    mechanism, not a user-facing feature -- so a soft window is widened to the
+    shift and its breach costed afterwards by the evaluator. That is a real
+    limitation and worth naming: the solver will not *search* for the cheapest
+    lateness, it merely stops treating a soft window as a wall.
+
+    Passing a soft window through as a hard bound, which is what this did
+    before T-23, made a stop 600 s away with a soft 100 s window come back
+    INFEASIBLE -- refusing a plan that any dispatcher would call "late".
+    """
+    if window is None:
+        return shift_start, shift_end
+    if window.hardness == "SOFT":
+        return shift_start, shift_end
+    return window.start, window.end
+
+
 def _single_profile(problem: Problem) -> str:
     """The fleet's shared routing profile, or a refusal. FR-07."""
     profiles = {vehicle.profile for vehicle in problem.vehicles}
@@ -115,27 +135,37 @@ def compile_problem(problem: Problem) -> _Compiled:
         if order.kind == "SHIPMENT":
             raise NotImplementedError("shipments are T-13")
         location = problem.location(stop.location_id)
-        # One window per client here; disjoint windows are T-23. Taking the
-        # first silently would plan against a constraint the caller did not
-        # state, so anything past one is refused.
-        if len(stop.time_windows) > 1:
-            raise NotImplementedError("multiple time windows are T-23")
-        window = stop.time_windows[0] if stop.time_windows else None
         quantity = order.quantities.get(dimension, 0) if dimension else 0
-        model.add_client(
-            location=handles[location.matrix_index],
-            delivery=[quantity],
-            service_duration=stop.service_fixed + location.dwell_overhead,
-            tw_early=window.start if window else 0,
-            tw_late=window.end if window else max(v.shift.end for v in problem.vehicles),
-            release_time=order.release_time,
-            prize=order.prize,
-            # Optional orders are T-27. Until then everything is required, and a
-            # solver that cannot place an order must say so rather than drop it.
-            required=order.prize == 0,
-            name=order.id,
-        )
-        order_by_client[index] = order.id
+        shift_end = max(v.shift.end for v in problem.vehicles)
+        shift_start = min(v.shift.start for v in problem.vehicles)
+        windows = stop.time_windows or (None,)
+
+        # FR-04: several disjoint windows become several clients at the same
+        # place in one mutually-exclusive group, so exactly one is visited.
+        # PyVRP requires group members to be optional and the *group* to carry
+        # the requirement -- a required client inside a group is rejected.
+        group = (model.add_client_group(required=True)
+                 if len(windows) > 1 else None)
+
+        for window in windows:
+            early, late = _bounds(window, shift_start, shift_end)
+            client = model.add_client(
+                location=handles[location.matrix_index],
+                delivery=[quantity],
+                service_duration=stop.service_fixed + location.dwell_overhead,
+                tw_early=early,
+                tw_late=late,
+                release_time=order.release_time,
+                prize=order.prize,
+                # Optional orders are T-27. Until then everything is required,
+                # and a solver that cannot place an order must say so rather
+                # than drop it. Group members are the exception PyVRP demands.
+                required=False if group is not None else order.prize == 0,
+                group=group,
+                name=order.id,
+            )
+            order_by_client[len(order_by_client)] = order.id
+            del client
 
     vehicle_ids: list[str] = []
     for vehicle in problem.vehicles:
