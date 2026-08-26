@@ -51,7 +51,18 @@ class _Compiled:
     dimensions: tuple[str, ...]
     # PyVRP client index (0-based, in insertion order) -> our order id.
     order_by_client: dict[int, str]
+    # PyVRP numbers shipments in their own space, from zero, overlapping the
+    # client indices. Two maps, because one would silently conflate them.
+    order_by_shipment: dict[int, str]
     vehicle_ids: list[str]
+
+
+def shift_start_of(problem: Problem) -> int:
+    return min(v.shift.start for v in problem.vehicles)
+
+
+def shift_end_of(problem: Problem) -> int:
+    return max(v.shift.end for v in problem.vehicles)
 
 
 def _bounds(window, shift_start: int, shift_end: int) -> tuple[int, int]:
@@ -129,10 +140,42 @@ def compile_problem(problem: Problem) -> _Compiled:
             name="__open_route_sink__")
 
     order_by_client: dict[int, str] = {}
+    order_by_shipment: dict[int, str] = {}
     for index, order in enumerate(problem.orders):
-        stop = order.delivery or order.pickup
         if order.kind == "SHIPMENT":
-            raise NotImplementedError("shipments are T-13")
+            # FR-01: goods move from one place to another, so PyVRP models it
+            # as a pair with precedence and same-vehicle built in rather than
+            # as two clients we would then have to constrain ourselves.
+            if len(order.pickup.time_windows) > 1 or len(order.delivery.time_windows) > 1:
+                raise NotImplementedError(
+                    "a shipment end with several windows needs client groups, "
+                    "which add_shipment does not take")
+            collect = problem.location(order.pickup.location_id)
+            drop = problem.location(order.delivery.location_id)
+            model.add_shipment(
+                pickup_location=handles[collect.matrix_index],
+                delivery_location=handles[drop.matrix_index],
+                pickup_tw_early=order.pickup.time_windows[0].start
+                if order.pickup.time_windows else shift_start_of(problem),
+                pickup_tw_late=order.pickup.time_windows[0].end
+                if order.pickup.time_windows else shift_end_of(problem),
+                pickup_service_duration=order.pickup.service_fixed
+                + collect.dwell_overhead,
+                delivery_tw_early=order.delivery.time_windows[0].start
+                if order.delivery.time_windows else shift_start_of(problem),
+                delivery_tw_late=order.delivery.time_windows[0].end
+                if order.delivery.time_windows else shift_end_of(problem),
+                delivery_service_duration=order.delivery.service_fixed
+                + drop.dwell_overhead,
+                amount=[order.quantities.get(name, 0) for name in dimensions],
+                prize=order.prize,
+                required=order.prize == 0,
+                name=order.id,
+            )
+            order_by_shipment[len(order_by_shipment)] = order.id
+            continue
+
+        stop = order.delivery or order.pickup
         location = problem.location(stop.location_id)
         # §6.1's signed load: a quantity is applied at pickup and released at
         # delivery, so which list it goes in is what makes the load profile
@@ -229,7 +272,9 @@ def compile_problem(problem: Problem) -> _Compiled:
                            distance=0, duration=0)
 
     return _Compiled(model=model, dimensions=dimensions,
-                     order_by_client=order_by_client, vehicle_ids=vehicle_ids)
+                     order_by_client=order_by_client,
+                     order_by_shipment=order_by_shipment,
+                     vehicle_ids=vehicle_ids)
 
 
 def map_solution(problem: Problem, compiled: _Compiled, best,
@@ -258,6 +303,12 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
         # back: PyVRP reports a route total, and INV-5 is about the load at
         # each step -- which for a route that both drops and collects is a
         # different number (§6.1's peak, not the total).
+        # Only job deliveries are loaded at the depot. A shipment's goods sit
+        # somewhere else until the vehicle collects them -- and they are
+        # excluded here by `is_client()` alone, because a shipment activity is
+        # never a client. An explicit `kind == "JOB"` test alongside it was
+        # unfalsifiable: perturbation could not make it fail, which is the
+        # signature of a guard that reads as protection and provides none.
         on_board = {
             name: sum(
                 problem.order(compiled.order_by_client[activity.idx])
@@ -294,15 +345,29 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
                                   load_after=dict(on_board)))
                 continue
 
-            order_id = compiled.order_by_client[activity.idx]
-            order = problem.order(order_id)
+            # Which index space this activity belongs to decides which order
+            # it names. PyVRP numbers clients and shipments separately from
+            # zero, so reading `idx` without checking would map shipment 0 onto
+            # client 0 and report a well-formed plan naming the wrong stops.
+            if activity.is_shipment():
+                order_id = compiled.order_by_shipment[activity.idx]
+                order = problem.order(order_id)
+                collecting = activity.is_pickup()
+                stop = order.pickup if collecting else order.delivery
+                kind = "PICKUP" if collecting else "DELIVERY"
+            else:
+                order_id = compiled.order_by_client[activity.idx]
+                order = problem.order(order_id)
+                stop = order.delivery or order.pickup
+                collecting = order.delivery is None
+                kind = "DELIVERY" if order.delivery is not None else "PICKUP"
+
             served.add(order_id)
             for name in dimensions:
                 quantity = order.quantities.get(name, 0)
-                on_board[name] += -quantity if order.delivery else quantity
-            stop = order.delivery or order.pickup
+                on_board[name] += quantity if collecting else -quantity
             steps.append(Step(
-                type="DELIVERY" if order.delivery is not None else "PICKUP",
+                type=kind,
                 location_id=stop.location_id, order_id=order_id,
                 # `start_time` is when service begins; arrival is that minus any
                 # wait. PyVRP reports the wait separately, so this reconstructs

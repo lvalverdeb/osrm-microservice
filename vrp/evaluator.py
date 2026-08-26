@@ -57,8 +57,14 @@ def _stop_of(order: Order) -> tuple[str, int, tuple]:
     """Where an order is served, how long it takes, and its windows.
 
     Only the single-stop (JOB) case is modelled here. A SHIPMENT occupies two
-    positions in a sequence and is E-13's subject; refusing it loudly is better
-    than quietly evaluating half of it.
+    positions in one sequence, which this builder's one-stop-per-order shape
+    cannot express; refusing it loudly is better than quietly evaluating half
+    of it. The solver and the verifier both handle shipments (FR-01, INV-2) --
+    it is this convenience builder that does not, and the plans it builds are
+    fixtures rather than solver output.
+
+    The earlier note here pointed at "E-13", which is the lexicographic
+    objective and has nothing to do with shipments. FR-01 belongs to `T-12`.
     """
     if order.kind == "SHIPMENT":
         raise NotImplementedError(
