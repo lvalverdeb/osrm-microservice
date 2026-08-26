@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vrp.hos.rules import Activity, Break, DriverState, HoursOfServiceRules, Placement
-from vrp.model import Problem, Step
+from vrp.model import Problem, Step, service_time
 
 
 @dataclass(frozen=True)
@@ -157,7 +157,8 @@ def schedule_route(problem: Problem, vehicle_id: str, order_ids: list[str],
         if start_service > arrival and rules is not None:
             # Waiting for a window burns the duty clock without driving.
             state = rules.advance(state, Activity.WAIT, start_service - arrival)
-        service = stop.service_fixed
+        service = service_time(order, vehicle,
+                               problem.location(stop.location_id))
         departure = start_service + service
         if rules is not None:
             state = rules.advance(state, Activity.WORK, service)

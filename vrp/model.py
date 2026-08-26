@@ -99,11 +99,23 @@ class StopSpec:
     location_id: str
     time_windows: tuple[TimeWindow, ...] = ()
     service_fixed: int = 0
+    # FR-05: service is fixed + per-unit + per-vehicle-type. The per-unit term
+    # is what makes a twenty-parcel drop cost more than a one-parcel drop;
+    # without it §6.2's "parking and walking dominate" is modelled as a
+    # constant, which is exactly the guessed service time it warns against.
+    service_per_unit: int = 0
+    # Which quantity the per-unit term counts. A stop handling 400 kg of two
+    # parcels takes two parcels' worth of handling, not four hundred
+    # kilograms' worth, so the dimension is named rather than inferred.
+    service_per_unit_dimension: str | None = None
 
     def __post_init__(self) -> None:
         _require(bool(self.location_id), "location_id must not be empty")
         _require_int(self.service_fixed, "service_fixed")
         _require(self.service_fixed >= 0, "service_fixed must not be negative")
+        _require_int(self.service_per_unit, "service_per_unit")
+        _require(self.service_per_unit >= 0,
+                 "service_per_unit must not be negative")
         # §4.1 says windows are disjoint and sorted. Enforced rather than
         # assumed: an evaluator that trusts the ordering will pick the wrong
         # window when it is violated, and do so silently.
@@ -174,6 +186,11 @@ class Vehicle:
     # so the adapter refuses a fleet that mixes them rather than routing a
     # bicycle as a lorry. See `_single_profile`.
     profile: str = "driving"
+    # FR-05's per-vehicle-type component, in parts per thousand because CON-4
+    # forbids floating-point accumulation. 1000 leaves handling unchanged; 600
+    # is a tail-lift van at 60% of manual handling. Scales the handling only --
+    # see `service_time`.
+    service_factor_ppt: int = 1000
     # FR-08's "end-anywhere". Deliberately not spelled `end_location_id=None`:
     # that already means "end where you started" and much of the codebase reads
     # it that way, so reusing it would change the meaning of existing fleets
@@ -205,6 +222,11 @@ class Vehicle:
             # finds that arbitrage on the first iteration.
             _require(cost >= 0, f"{name} must not be negative")
         _require(bool(self.profile), "profile must not be empty")
+        _require_int(self.service_factor_ppt, "service_factor_ppt")
+        # Zero would service every stop instantly, which is never meant and is
+        # precisely what a solver would exploit.
+        _require(self.service_factor_ppt > 0,
+                 "service_factor_ppt must be positive")
 
     @property
     def ends_at(self) -> str:
@@ -473,3 +495,28 @@ class Solution:
     # pass, surviving nowhere -- so a production plan could not be reproduced
     # even in principle. Keys: solver, seed, iterations, matrix_version.
     solver: dict[str, Any] | None = None
+
+
+def service_time(order: Order, vehicle: Vehicle, location: Location) -> int:
+    """How long this vehicle takes to serve this order here. FR-05, §6.2.
+
+        (service_fixed + service_per_unit x quantity) x factor + dwell_overhead
+
+    The composition order is a decision, not an accident. The vehicle factor
+    scales the *handling* -- the part a tail lift or a second crew member
+    actually changes -- while the dwell overhead is added afterwards, because
+    §6.2 defines it as "parking/walking overhead independent of the order" and
+    a tail lift does not move the parking space closer.
+
+    Integer throughout (CON-4). The factor is parts per thousand and the
+    division truncates, which is deterministic and therefore replayable; a
+    float here is how two machines disagree about when a driver left.
+    """
+    stop = order.delivery or order.pickup
+    quantity = 0
+    if stop.service_per_unit:
+        dimension = stop.service_per_unit_dimension
+        quantity = (order.quantities.get(dimension, 0) if dimension
+                    else sum(order.quantities.values()))
+    handling = stop.service_fixed + stop.service_per_unit * quantity
+    return handling * vehicle.service_factor_ppt // 1000 + location.dwell_overhead

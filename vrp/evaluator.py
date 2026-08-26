@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import pairwise
 
-from vrp.model import Order, Problem, Step
+from vrp.model import Order, Problem, Step, service_time
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,10 @@ def _stop_of(order: Order) -> tuple[str, int, tuple]:
             "SHIPMENT evaluation needs paired pickup/delivery positions (E-13)")
     stop = order.delivery or order.pickup
     assert stop is not None  # guaranteed by Order validation
+    # FR-05's other three components need the vehicle and the location,
+    # which this helper does not see. `build_timeline` composes them via
+    # `service_time`; this returns the fixed part for callers that only
+    # want to know where and when.
     return stop.location_id, stop.service_fixed, stop.time_windows
 
 
@@ -118,11 +122,19 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
 
     position = start_location.matrix_index
     for order in orders:
-        location_id, service, windows = _stop_of(order)
+        location_id, _fixed, windows = _stop_of(order)
         location = problem.location(location_id)
+        # FR-05: fixed + per-unit + vehicle factor + dwell. Reading
+        # `service_fixed` alone here -- which is what this did before E-24 --
+        # made the other three components decorative: a richer model that
+        # produced identical plans.
+        service = service_time(order, vehicle, location)
         arrival = clock + matrix.duration(position, location.matrix_index)
         begin = _service_start(arrival, windows)
-        depart = begin + service + location.dwell_overhead
+        # `service_time` already includes the dwell overhead (FR-05), so
+        # adding it again here charged it twice -- 255 s where the model
+        # says 195. Caught by test_the_timeline_uses_the_composed_service_time.
+        depart = begin + service
 
         if order.delivery is not None:
             for dimension, amount in order.quantities.items():

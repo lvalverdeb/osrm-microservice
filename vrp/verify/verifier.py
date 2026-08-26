@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from vrp.hos.rules import Activity, rules_for
-from vrp.model import Problem, Solution, Step
+from vrp.model import Problem, Solution, Step, service_time
 
 # Invariants this verifier cannot yet evaluate, and why. Empty: every invariant
 # now has a subject when its instance provides one. INV-7 and INV-8 are added
@@ -314,13 +314,25 @@ def _windows_for(problem: Problem, step: Step) -> tuple:
     return spec.time_windows if spec is not None else ()
 
 
-def _service_of(problem: Problem, step: Step) -> int:
+def _service_of(problem: Problem, step: Step, vehicle) -> int:
+    """How long the problem says this stop takes. FR-05.
+
+    Uses `vrp.model.service_time`, which is a statement of the problem rather
+    than the evaluator's arithmetic -- the same category as the travel matrix
+    and the hours-of-service rule sets, which this verifier also shares. What
+    it must not share is any *computation over a plan*, and it does not.
+
+    Restating FR-05's four-term formula here instead would give the project two
+    definitions of how long a delivery takes, and the verifier would eventually
+    reject correct plans for disagreeing with itself.
+    """
     if step.order_id is None:
         return 0
     order = problem.order(step.order_id)
     spec = order.delivery if step.type == "DELIVERY" else order.pickup
-    overhead = problem.location(step.location_id).dwell_overhead
-    return (spec.service_fixed if spec is not None else 0) + overhead
+    if spec is None:
+        return 0
+    return service_time(order, vehicle, problem.location(step.location_id))
 
 
 def _check_route(problem: Problem, route, report: Report) -> None:
@@ -337,7 +349,8 @@ def _check_route(problem: Problem, route, report: Report) -> None:
             report.fail("INV-3", f"service starts {step.start_service} before "
                                  f"arrival {step.arrival}",
                         vehicle_id=route.vehicle_id, order_id=step.order_id)
-        expected_departure = step.start_service + _service_of(problem, step)
+        expected_departure = step.start_service + _service_of(
+            problem, step, vehicle)
         if step.order_id is not None and step.departure != expected_departure:
             report.fail("INV-3", f"departure {step.departure} does not equal "
                                  f"start_service + service ({expected_departure})",

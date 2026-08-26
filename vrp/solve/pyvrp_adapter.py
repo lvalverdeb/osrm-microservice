@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pyvrp import Model
 from pyvrp.stop import MaxIterations
 
-from vrp.model import Problem, Route, Solution, Step
+from vrp.model import Problem, Route, Solution, Step, service_time
 
 # PyVRP addresses capacity dimensions positionally, so the order must be pinned
 # and used identically when compiling and when mapping back. Sorted rather than
@@ -159,14 +159,14 @@ def compile_problem(problem: Problem) -> _Compiled:
                 if order.pickup.time_windows else shift_start_of(problem),
                 pickup_tw_late=order.pickup.time_windows[0].end
                 if order.pickup.time_windows else shift_end_of(problem),
-                pickup_service_duration=order.pickup.service_fixed
-                + collect.dwell_overhead,
+                pickup_service_duration=service_time(
+                    order, problem.vehicles[0], collect),
                 delivery_tw_early=order.delivery.time_windows[0].start
                 if order.delivery.time_windows else shift_start_of(problem),
                 delivery_tw_late=order.delivery.time_windows[0].end
                 if order.delivery.time_windows else shift_end_of(problem),
-                delivery_service_duration=order.delivery.service_fixed
-                + drop.dwell_overhead,
+                delivery_service_duration=service_time(
+                    order, problem.vehicles[0], drop),
                 amount=[order.quantities.get(name, 0) for name in dimensions],
                 prize=order.prize,
                 required=order.prize == 0,
@@ -212,7 +212,11 @@ def compile_problem(problem: Problem) -> _Compiled:
                 location=handles[location.matrix_index],
                 delivery=delivered,
                 pickup=collected,
-                service_duration=stop.service_fixed + location.dwell_overhead,
+                # FR-05, composed. PyVRP takes one service duration per
+                # client, so a fleet whose vehicles differ in handling speed
+                # cannot be expressed here -- see the note below.
+                service_duration=service_time(order, problem.vehicles[0],
+                                              location),
                 tw_early=early,
                 tw_late=late,
                 release_time=order.release_time,
