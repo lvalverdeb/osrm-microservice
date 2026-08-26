@@ -454,13 +454,26 @@ higher tiers as a constraint). Both approaches MUST be available; staged is pref
 
 ### 5.2 Objective modes
 
-| Mode | Tier 3 treatment | Use |
+A mode does not reorder the hierarchy. It changes **which tiers share a level**.
+Tiers on separate levels are strictly ordered — no quantity of a lower tier buys any of a higher
+one. Tiers sharing a level are traded against each other in a single currency. §5.1's list is the
+default arrangement, and each mode below departs from it in exactly one place.
+
+Notation: `>` separates levels and means strict domination; `+` joins tiers sharing a level.
+
+| Mode | Levels | Use |
 |---|---|---|
-| `MIN_VEHICLES` | Vehicle count strictly dominates distance | Fleet-constrained days, capacity planning |
-| `MIN_COST` | Vehicle deployed iff its fixed cost is repaid by savings | Normal operations |
-| `MIN_DURATION` | Cost per second only; distance ignored | Driver-hour-constrained operations |
-| `MAX_SERVICE` | Tier 2 dominates Tier 3–4 | Peak days, SLA protection |
-| `PRIZE_COLLECTING` | Maximise Σ prizes − cost, orders freely droppable | Capacity-scarce, marketplace models |
+| `MIN_VEHICLES` | `T2 > T3 > T4` — vehicle count strictly dominates distance | Fleet-constrained days, capacity planning |
+| `MIN_COST` | `T2 > T3+T4` — a vehicle is deployed iff its fixed cost is repaid by savings, which is a trade rather than a precedence | Normal operations |
+| `MIN_DURATION` | As `MIN_COST`, scoring `cost_per_second` only; distance ignored | Driver-hour-constrained operations |
+| `MAX_SERVICE` | As `MIN_COST`. Tier 2 already dominates Tiers 3–4 in every mode but `PRIZE_COLLECTING`, so what distinguishes this one is that orders stay **required** rather than droppable — a property of the order, not of the objective | Peak days, SLA protection |
+| `PRIZE_COLLECTING` | `T1 > T2+T3+T4` — maximise Σ prizes − cost. Total prize is a constant of the instance, so this is minimising forgone prize + cost in one currency. Tier 1 stays above: a priority-0 order is a promise, not a bid | Capacity-scarce, marketplace models |
+
+The two rows worth reading twice are `MAX_SERVICE`, which changes nothing about the tiers, and
+`PRIZE_COLLECTING`, which is the only mode where Tier 2 does **not** dominate cost. An
+implementation that treats every mode as strictly lexicographic will pass most tests and still be
+wrong in both places: `MIN_COST` collapses into `MIN_VEHICLES` because one fewer vehicle always
+wins, and `PRIZE_COLLECTING` can never drop anything.
 
 ### 5.3 Cost realism requirements
 
