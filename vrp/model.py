@@ -258,6 +258,50 @@ class TravelMatrix:
         return value
 
 
+# §6.6's lock kinds, and what each one needs to mean anything. A lock missing
+# its subject constrains nothing while looking like an instruction, which is
+# the worst of both: the operator believes they have pinned something.
+LOCK_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "PIN_ORDER_TO_VEHICLE": ("order_id", "vehicle_id"),
+    "FORBID_ORDER_ON_VEHICLE": ("order_id", "vehicle_id"),
+    "FIX_ROUTE_PREFIX": ("vehicle_id", "order_ids"),
+    "FIX_SEQUENCE": ("vehicle_id", "order_ids"),
+    "FORCE_DEPLOY": ("vehicle_id",),
+    "FORBID_DEPLOY": ("vehicle_id",),
+    "PIN_DEPOT": ("order_id", "depot_id"),
+    "FREEZE_UNTIL": ("instant",),
+}
+
+
+@dataclass(frozen=True)
+class Lock:
+    """An operator instruction the plan must honour exactly. §6.6, FR-21.
+
+    Locks are hard constraints, not preferences. §6.6 is explicit that a lock
+    set which makes the instance infeasible must be reported with the minimal
+    conflicting subset rather than quietly relaxed -- because a dropped lock is
+    a dispatcher's decision being overruled without anyone being told.
+    """
+
+    kind: str
+    order_id: str | None = None
+    vehicle_id: str | None = None
+    order_ids: tuple[str, ...] = ()
+    depot_id: str | None = None
+    instant: int | None = None
+
+    def __post_init__(self) -> None:
+        _require(self.kind in LOCK_REQUIREMENTS,
+                 f"unknown lock kind {self.kind!r}; "
+                 f"§6.6 defines {', '.join(sorted(LOCK_REQUIREMENTS))}")
+        for field_name in LOCK_REQUIREMENTS[self.kind]:
+            value = getattr(self, field_name)
+            _require(bool(value) if field_name != "instant" else value is not None,
+                     f"{self.kind} needs {field_name}")
+        if self.instant is not None:
+            _require_int(self.instant, "instant")
+
+
 @dataclass(frozen=True)
 class Problem:
     id: str
@@ -266,6 +310,7 @@ class Problem:
     vehicles: tuple[Vehicle, ...]
     matrix: TravelMatrix
     horizon: TimeWindow | None = None
+    locks: tuple[Lock, ...] = ()
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "problem id must not be empty")
@@ -289,6 +334,17 @@ class Problem:
                 _require(location_id is None or location_id in by_id,
                          f"vehicle {vehicle.id} references unknown location "
                          f"{location_id!r}")
+
+        # A lock naming something absent is a typo, and a typo that is silently
+        # ignored is an operator's instruction disappearing without a word.
+        vehicle_ids = {vehicle.id for vehicle in self.vehicles}
+        for lock in self.locks:
+            for named in (lock.order_id, *lock.order_ids):
+                _require(named is None or named in order_ids,
+                         f"lock {lock.kind} references unknown order {named!r}")
+            _require(lock.vehicle_id is None or lock.vehicle_id in vehicle_ids,
+                     f"lock {lock.kind} references unknown vehicle "
+                     f"{lock.vehicle_id!r}")
 
     def location(self, location_id: str) -> Location:
         for candidate in self.locations:

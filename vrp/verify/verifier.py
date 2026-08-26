@@ -37,10 +37,12 @@ from itertools import pairwise
 from vrp.hos.rules import Activity, rules_for
 from vrp.model import Problem, Solution, Step
 
-# Invariants this verifier cannot yet evaluate, and why.
-NOT_APPLICABLE = {
-    "INV-8": "no lock model (T-29)",
-}
+# Invariants this verifier cannot yet evaluate, and why. Empty: every invariant
+# now has a subject when its instance provides one. INV-7 and INV-8 are added
+# per-problem below when nothing declares hours or locks.
+NOT_APPLICABLE: dict[str, str] = {}
+NO_HOS_DECLARED = "no vehicle declares an hours-of-service rule set"
+NO_LOCKS_DECLARED = "the problem declares no locks"
 NO_HOS_DECLARED = "no vehicle declares an hours-of-service rule set"
 
 
@@ -74,13 +76,115 @@ def verify(problem: Problem, solution: Solution) -> Report:
     report = Report(not_applicable=set(NOT_APPLICABLE))
     if not any(vehicle.hos_rules for vehicle in problem.vehicles):
         report.not_applicable.add("INV-7")
+    if not problem.locks:
+        report.not_applicable.add("INV-8")
 
     _check_coverage(problem, solution, report)               # INV-1, INV-2
     for route in solution.routes:
         _check_route(problem, route, report)                 # INV-3..INV-6
         _check_hours_of_service(problem, route, report)      # INV-7
+    _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
     return report
+
+
+def _check_locks(problem: Problem, solution: Solution, report: Report) -> None:
+    """INV-8: every lock in §6.6 satisfied exactly.
+
+    "Exactly" is the operative word. A lock is an operator overriding the
+    optimiser, usually because they know something the model does not, so a
+    lock that is *nearly* honoured is an instruction that was ignored.
+
+    This judges a finished plan. Making the solver plan within locks, and
+    diagnosing a conflicting set down to a minimal irreducible core (§6.6's
+    IIS requirement), are the rest of `T-29` and are not here -- so a violation
+    reported by this function today is most likely the solver not knowing about
+    locks at all, which is itself worth seeing.
+    """
+    if not problem.locks:
+        return
+
+    route_of: dict[str, str] = {}
+    sequence: dict[str, list[str]] = {}
+    for route in solution.routes:
+        served = [step.order_id for step in route.steps if step.order_id]
+        sequence[route.vehicle_id] = served
+        for order_id in served:
+            route_of[order_id] = route.vehicle_id
+    deployed = {vehicle_id for vehicle_id, served in sequence.items() if served}
+
+    for lock in problem.locks:
+        _check_one_lock(problem, solution, lock, route_of, sequence,
+                        deployed, report)
+
+
+def _check_one_lock(problem: Problem, solution: Solution, lock, route_of: dict,
+                    sequence: dict, deployed: set, report: Report) -> None:
+    """One lock, one verdict. Split out so each kind reads as its own rule."""
+    def fail(detail: str) -> None:
+        report.fail("INV-8", f"{lock.kind}: {detail}",
+                    vehicle_id=lock.vehicle_id, order_id=lock.order_id)
+
+    if lock.kind == "PIN_ORDER_TO_VEHICLE":
+        carrier = route_of.get(lock.order_id)
+        if carrier != lock.vehicle_id:
+            fail(f"{lock.order_id} is on {carrier or 'no route'}, "
+                 f"not {lock.vehicle_id}")
+
+    elif lock.kind == "FORBID_ORDER_ON_VEHICLE":
+        if route_of.get(lock.order_id) == lock.vehicle_id:
+            fail(f"{lock.order_id} is on {lock.vehicle_id}, which is forbidden")
+
+    elif lock.kind == "FIX_ROUTE_PREFIX":
+        served = sequence.get(lock.vehicle_id, [])
+        wanted = list(lock.order_ids)
+        if served[:len(wanted)] != wanted:
+            fail(f"{lock.vehicle_id} begins {served[:len(wanted)]}, "
+                 f"not {wanted}")
+
+    elif lock.kind == "FIX_SEQUENCE":
+        served = sequence.get(lock.vehicle_id, [])
+        positions = [served.index(o) for o in lock.order_ids if o in served]
+        if positions != sorted(positions):
+            fail(f"{list(lock.order_ids)} are out of order on {lock.vehicle_id}")
+
+    elif lock.kind == "FORCE_DEPLOY":
+        if lock.vehicle_id not in deployed:
+            fail(f"{lock.vehicle_id} was required to deploy and did not")
+
+    elif lock.kind == "FORBID_DEPLOY":
+        if lock.vehicle_id in deployed:
+            fail(f"{lock.vehicle_id} was forbidden to deploy and did")
+
+    elif lock.kind == "PIN_DEPOT":
+        carrier = route_of.get(lock.order_id)
+        if carrier is None:
+            fail(f"{lock.order_id} is unassigned, so no depot serves it")
+        else:
+            start = problem.vehicle(carrier).start_location_id
+            if start != lock.depot_id:
+                fail(f"{lock.order_id} is served from {start}, "
+                     f"not {lock.depot_id}")
+
+    elif lock.kind == "FREEZE_UNTIL":
+        # Everything happening before the horizon must already have been
+        # committed, which a plan expresses by locking it in place. Anything
+        # else inside the window is the optimiser rewriting the past.
+        pinned = {
+            order_id
+            for other in problem.locks
+            if other.kind in ("FIX_ROUTE_PREFIX", "FIX_SEQUENCE",
+                              "PIN_ORDER_TO_VEHICLE")
+            for order_id in ((other.order_id,) if other.order_id
+                             else other.order_ids)
+        }
+        early = [step.order_id for route in solution.routes
+                 for step in route.steps
+                 if step.order_id and step.start_service < lock.instant
+                 and step.order_id not in pinned]
+        if early:
+            fail(f"{len(early)} stop(s) are served before the freeze at "
+                 f"{lock.instant} without being pinned: {early[:3]}")
 
 
 def _check_hours_of_service(problem: Problem, route, report: Report) -> None:
