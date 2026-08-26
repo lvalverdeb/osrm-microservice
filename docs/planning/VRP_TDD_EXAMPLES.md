@@ -35,6 +35,39 @@ The loop per row:
 Most rows below need both: a test that asserts the behaviour and a demonstration
 that shows it. Where one file can honestly do both, prefer one.
 
+### Placement: Rust gateway or Python VRP package?
+
+**Every item carries a placement recommendation, made when the item is tackled
+and recorded with it.** Two homes exist and the choice is not obvious from the
+requirement alone:
+
+| Home | What belongs there |
+|---|---|
+| `gateway/` (Rust) | Anything on the per-request hot path, anything that is part of the OSRM contract, and anything that must work with no Python present |
+| `vrp/` (Python) | Optimisation logic, constraint modelling, calibration, and anything whose value comes from the PyVRP / OR-Tools / pandas ecosystem |
+
+Ask in this order:
+
+1. **Does a request wait on it?** Matrix construction, caching, retry, rate
+   limiting, admission control and relaying are gateway work. A 2,000-stop
+   solve is not — it is already shed and queued rather than served inline.
+2. **Does it need the Python ecosystem?** If the honest implementation is "call
+   PyVRP", it is Python. SDD §7.4 forbids a bespoke metaheuristic without an
+   ADR, so "write it in Rust instead" is rarely the cheap answer it looks like.
+3. **How often will it change?** Constraint semantics and objective tuning move
+   constantly and belong where iteration is cheap. Wire formats and transport
+   behaviour move rarely and belong where they are fast.
+4. **Who must be able to run it?** The independent verifier has to be callable
+   from CI, from a notebook, and from the gateway before a plan is published
+   (§11.2). That argues for Python logic with a thin gateway endpoint over it —
+   the split already used for `/verify` in `T-66`.
+
+Record the recommendation and its reason in the item's commit, even when the
+answer seems obvious. The cases that went wrong in this repository were the ones
+nobody argued about: the rate limiter was rewritten in Rust without a Redis path
+and silently undid a verified P0 fix, and `vehicle_count` sits in the gateway
+schema doing nothing because nobody asked which side owned fleet sizing.
+
 ### Test levels
 
 Taken from SDD §11.1, and cited per row:
