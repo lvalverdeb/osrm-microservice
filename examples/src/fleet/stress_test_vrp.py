@@ -93,10 +93,10 @@ def run_stress_test():
     print(f"VRP Solved: {len(data['routes'])} total vehicle routes generated.")
     
     # Save the raw data for analysis
-    with open("examples/src/vrp/stress_test_result.json", "w") as f:
+    with open("examples/src/fleet/stress_test_result.json", "w") as f:
         json.dump(data, f)
     
-    print("Results saved to examples/src/vrp/stress_test_result.json. Now generating map...")
+    print("Results saved to examples/src/fleet/stress_test_result.json. Now generating map...")
     return data, depots, stops
 
 def generate_map(data, depots, stops):
@@ -165,8 +165,8 @@ def generate_map(data, depots, stops):
                 popup=f"Stop {stop_idx} (V{vehicle_id})"
             ).add_to(stop_cluster)
 
-    m.save("examples/src/vrp/stress_test_vrp_map.html")
-    print("Map generated: examples/src/vrp/stress_test_vrp_map.html")
+    m.save("examples/src/fleet/stress_test_vrp_map.html")
+    print("Map generated: examples/src/fleet/stress_test_vrp_map.html")
 
 if __name__ == "__main__":
     result_data, depots, stops = run_stress_test()

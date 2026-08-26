@@ -109,7 +109,7 @@ jail, a remote Docker host, or a gateway on another port.
 | Area | Scripts |
 |---|---|
 | `routing/` | route plotting, nearest, matrix, matrix-graph, match, tile, advanced options, error handling |
-| `vrp/` | vehicle routing, visualisation, clustering-mode comparison, stress test |
+| `fleet/` | vehicle routing, visualisation, clustering-mode comparison, stress test |
 | `clustering/` | allocation workflow, custom stop IDs |
 | `benchmarking/` | TSP comparison, payload generation |
 | `infra/` | health and metrics probe |

@@ -108,7 +108,7 @@ The second condition was documented here well before it worked. Until then a sto
 The project includes a script that runs the same dataset through all three modes:
 
 ```bash
-uv run examples/src/vrp/clustering_mode_comparison.py
+uv run examples/src/fleet/clustering_mode_comparison.py
 ```
 
 This generates side-by-side interactive HTML maps showing how each mode partitions stops across depots.

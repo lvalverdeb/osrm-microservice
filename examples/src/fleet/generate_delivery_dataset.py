@@ -16,7 +16,7 @@ compared against that example's output directly.
 Usage:
     # against a running engine (see docs/dataset_prep.md for how to start one)
     uv run --package osrm-api-gateway-examples \\
-        examples/src/vrp/generate_delivery_dataset.py --engine http://127.0.0.1:5000
+        examples/src/fleet/generate_delivery_dataset.py --engine http://127.0.0.1:5000
 
     # smaller sample, different spread
     ... --count 5000 --gam-share 0.55 --seed 7

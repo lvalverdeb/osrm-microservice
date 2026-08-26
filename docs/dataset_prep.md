@@ -3,7 +3,7 @@
 How the Costa Rica planned-delivery dataset is built, so it can be reproduced,
 resized or re-shaped without guessing at the choices behind it.
 
-Generator: [`../examples/src/vrp/generate_delivery_dataset.py`](../examples/src/vrp/generate_delivery_dataset.py)
+Generator: [`../examples/src/fleet/generate_delivery_dataset.py`](../examples/src/fleet/generate_delivery_dataset.py)
 
 ---
 
@@ -70,7 +70,7 @@ osrm-routed --algorithm mld costa-rica-latest.osrm --port 5000
 
 # 3. Dataset
 uv run --package osrm-api-gateway-examples \
-    examples/src/vrp/generate_delivery_dataset.py \
+    examples/src/fleet/generate_delivery_dataset.py \
     --engine http://127.0.0.1:5000
 ```
 

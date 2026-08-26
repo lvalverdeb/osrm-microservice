@@ -15,7 +15,7 @@ This script runs /vrp/allocate three times:
   3. hysteresis_m=10000  — large buffer, almost never switches
 
 Usage:
-    uv run --package osrm-api-gateway-examples examples/src/vrp/hysteresis_demo.py
+    uv run --package osrm-api-gateway-examples examples/src/fleet/hysteresis_demo.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000

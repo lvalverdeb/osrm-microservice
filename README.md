@@ -190,8 +190,8 @@ uv run --package osrm-api-gateway-examples examples/src/routing/route_advanced_o
 uv run --package osrm-api-gateway-examples examples/src/routing/error_handling_demo.py
 
 # VRP examples
-uv run --package osrm-api-gateway-examples examples/src/vrp/clustering_mode_comparison.py
-uv run --package osrm-api-gateway-examples examples/src/vrp/hysteresis_demo.py
+uv run --package osrm-api-gateway-examples examples/src/fleet/clustering_mode_comparison.py
+uv run --package osrm-api-gateway-examples examples/src/fleet/hysteresis_demo.py
 uv run --package osrm-api-gateway-examples examples/src/clustering/simple_id_example.py
 
 # Infrastructure

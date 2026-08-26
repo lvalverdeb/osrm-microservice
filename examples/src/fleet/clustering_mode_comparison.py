@@ -10,7 +10,7 @@ Each mode produces different depot-to-stop assignments. This script runs
 /vrp/allocate with each mode on a single dataset with explicit stop IDs.
 
 Usage:
-    uv run --package osrm-api-gateway-examples examples/src/vrp/clustering_mode_comparison.py
+    uv run --package osrm-api-gateway-examples examples/src/fleet/clustering_mode_comparison.py
 
 Requires:
     - OSRM API Gateway running at http://localhost:8000

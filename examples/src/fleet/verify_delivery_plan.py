@@ -25,7 +25,7 @@ Requires a running gateway with an engine behind it:
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
-        examples/src/vrp/verify_delivery_plan.py --stops 40 --province "San Jose"
+        examples/src/fleet/verify_delivery_plan.py --stops 40 --province "San Jose"
 """
 
 from __future__ import annotations
@@ -36,18 +36,10 @@ import os
 import sys
 from pathlib import Path
 
-import httpx
-
-# This file sits in `examples/src/vrp/`, and `examples/src` lands on sys.path
-# ahead of the repository root when the script runs -- so a bare `import vrp`
-# finds this *directory* as a namespace package rather than the real `vrp/`
-# package at the root, and `vrp.evaluator` does not exist. Putting the root
-# first resolves it. See the note in docs/planning/VRP_TDD_EXAMPLES.md: the
-# lasting fix is to stop having two things called `vrp`.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
-# The examples package puts OSRM_API_URL into the environment on import.
+# Importing config puts OSRM_API_URL into the environment and the repository
+# root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
+import httpx
 
 from vrp.evaluator import ObjectiveWeights, evaluate, route_metrics
 from vrp.model import (

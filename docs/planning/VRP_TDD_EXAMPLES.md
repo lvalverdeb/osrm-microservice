@@ -30,7 +30,7 @@ The loop per row:
 | Kind | Location | Run by |
 |---|---|---|
 | Acceptance example — the executable spec | `tests/vrp/` | `make test`, CI |
-| Demonstration — human-facing, prints and plots | `examples/src/vrp/` | `make examples` |
+| Demonstration — human-facing, prints and plots | `examples/src/fleet/` | `make examples` |
 
 Most rows below need both: a test that asserts the behaviour and a demonstration
 that shows it. Where one file can honestly do both, prefer one.
@@ -113,24 +113,19 @@ approximation of the L2 property level until the real generator arrives in
 **Implementation lives in `vrp/`**: `model.py`, `evaluator.py`, and
 `verify/verifier.py` in its own package, importing neither.
 
-A demonstration landed with them, `examples/src/vrp/verify_delivery_plan.py`:
+A demonstration landed with them, `examples/src/fleet/verify_delivery_plan.py`:
 it takes a slice of the Costa Rica dataset, fetches a real road matrix through
 the gateway, builds a plan by nearest-neighbour, evaluates it, and has the
 verifier judge it — then reports the same plan with its distance understated by
 a kilometre and shows INV-9 catching that. A verifier only means something
 against a plan it did not produce.
 
-> **Two things are called `vrp`.** The package at the repository root, and the
-> examples folder `examples/src/vrp/`. When a script in that folder runs,
-> `examples/src` precedes the root on `sys.path`, so a bare `import vrp` finds
-> the *folder* — a namespace package with no `evaluator` in it. The demo works
-> around it by putting the root first, with a comment saying why.
->
-> That workaround will have to be repeated by every demo this plan adds under
-> `examples/src/vrp/rich/`, `tw/`, `alloc/` and `dynamic/`, which is the point
-> at which a workaround becomes a design flaw. **Rename the examples folder**
-> (`examples/src/fleet/`, say) before writing E-12 — it is seven files and one
-> `make examples` menu entry today, and grows from here.
+> **Resolved.** The examples folder was `examples/src/vrp/`, which shadowed the
+> root `vrp/` package: a script inside it saw the *folder* as a namespace
+> package, so `import vrp` succeeded and gave the wrong thing. It is
+> `examples/src/fleet/` now, and the repository root is put on `sys.path` once
+> in `examples/src/config.py` — the module every example already imports —
+> rather than by a shim repeated in each script.
 
 **E-03 is the highest-value example in this document.** It is cheap, depends on
 nothing, and every later row is judged by it. Write it first even if the rest of
@@ -153,9 +148,9 @@ the plan is deferred.
 |---|---|---|---|---|---|
 | E-10 | `tests/vrp/test_osrm_adapter.py` | `T-10` | MTX-1…5 | L1 | Matrix built against a live engine; unreachable pairs carry the sentinel, not zero; snapping recorded |
 | E-11 | `tests/vrp/test_matrix_cache.py` | `T-11` | MTX-6,7,10 | L1 | Content-addressed key; chunking reassembles identically to an unchunked call |
-| E-12 | `examples/src/vrp/tw/cvrptw_pyvrp.py` | `T-12` | FR-01…08 | L4 | Solves a Solomon instance; the verifier accepts the result |
+| E-12 | `examples/src/fleet/tw/cvrptw_pyvrp.py` | `T-12` | FR-01…08 | L4 | Solves a Solomon instance; the verifier accepts the result |
 | E-13 | `tests/vrp/test_objective_tiering.py` | `T-13` | §5.1, FR-13 | L1 | A higher tier is never traded for a lower one; instance-derived scaling holds |
-| E-14 | `examples/src/vrp/explain/preflight_diagnosis.py` | `T-14` | FR-01, §6.5 | L1 | Every seeded infeasible order returns its specific reason code, not a generic failure |
+| E-14 | `examples/src/fleet/explain/preflight_diagnosis.py` | `T-14` | FR-01, §6.5 | L1 | Every seeded infeasible order returns its specific reason code, not a generic failure |
 | E-15 | `tests/vrp/test_solve_api.py` | `T-15` | NFR-03, §9.4 | L1 | Idempotency key honoured; anytime incumbent readable mid-solve |
 | E-16 | `tests/vrp/test_benchmark_gate.py` | `T-16` **[GATE]** | CON-9 | L4 | Baseline gaps recorded in `BASELINE.md`; CI fails on regression past threshold |
 | E-17 | `tests/vrp/test_determinism.py` | `T-17` | CON-4 | L3 | Byte-identical solution across 100 repeats and across machines |
@@ -172,16 +167,16 @@ interactions are exercised rather than each constraint in isolation.
 
 | # | Example | Task | Satisfies | Level | Passes when |
 |---|---|---|---|---|---|
-| E-20 | `examples/src/vrp/rich/multi_capacity.py` | `T-20` | FR-02, FR-03 | L2 | Peak-load property holds on simultaneous pickup and delivery; load is non-monotonic along the route |
-| E-21 | `examples/src/vrp/rich/heterogeneous_fleet.py` | `T-21` | FR-07, FR-08 | L2 | Per-vehicle capacity and cost honoured; open routes and distinct start/end verified |
-| E-22 | `examples/src/vrp/rich/skills_and_access.py` | `T-22` | FR-10, FR-11 | L1+L2 | Ineligible vehicle never assigned; incompatible orders never share a route; access restriction respected |
-| E-23 | `examples/src/vrp/tw/multiple_windows.py` | `T-23` | FR-04, FR-06 | L1+L2 | Disjoint windows honoured; soft-window penalties asymmetric as specified; release times respected |
+| E-20 | `examples/src/fleet/rich/multi_capacity.py` | `T-20` | FR-02, FR-03 | L2 | Peak-load property holds on simultaneous pickup and delivery; load is non-monotonic along the route |
+| E-21 | `examples/src/fleet/rich/heterogeneous_fleet.py` | `T-21` | FR-07, FR-08 | L2 | Per-vehicle capacity and cost honoured; open routes and distinct start/end verified |
+| E-22 | `examples/src/fleet/rich/skills_and_access.py` | `T-22` | FR-10, FR-11 | L1+L2 | Ineligible vehicle never assigned; incompatible orders never share a route; access restriction respected |
+| E-23 | `examples/src/fleet/tw/multiple_windows.py` | `T-23` | FR-04, FR-06 | L1+L2 | Disjoint windows honoured; soft-window penalties asymmetric as specified; release times respected |
 | E-24 | `tests/vrp/test_service_time_model.py` | `T-24` | FR-05, §6.2 | L1 | Fixed + per-unit + vehicle-factor components compose; checked against telematics fixtures |
-| E-25 | `examples/src/vrp/rich/hours_of_service.py` | `T-25` **[GATE]** | FR-15, FR-16 | L1+L2 | `EU-561` and `US-HOS` fixtures both legal under the verifier; breaks inserted **inside** evaluation, not after |
+| E-25 | `examples/src/fleet/rich/hours_of_service.py` | `T-25` **[GATE]** | FR-15, FR-16 | L1+L2 | `EU-561` and `US-HOS` fixtures both legal under the verifier; breaks inserted **inside** evaluation, not after |
 | E-26 | `tests/vrp/test_initial_state.py` | `T-26` | §6.4 | L1 | Partial-duty carry-over from tachograph input plans correctly |
-| E-27 | `examples/src/vrp/rich/prizes_and_priority.py` | `T-27` | FR-12, FR-13 | L1 | Prize-collecting drops the expected low-value orders; tiers never inverted |
-| E-28 | `examples/src/vrp/rich/multi_trip.py` | `T-28` | FR-09, **FR-19** | L2 | Reload mid-shift; dock queueing respected; interaction with driver hours verified |
-| E-29 | `examples/src/vrp/rich/locks_and_overrides.py` | `T-29` | FR-21, CON-7 | L1 | Every lock kind honoured; a conflicting set returns a minimal irreducible conflict, not a blanket failure |
+| E-27 | `examples/src/fleet/rich/prizes_and_priority.py` | `T-27` | FR-12, FR-13 | L1 | Prize-collecting drops the expected low-value orders; tiers never inverted |
+| E-28 | `examples/src/fleet/rich/multi_trip.py` | `T-28` | FR-09, **FR-19** | L2 | Reload mid-shift; dock queueing respected; interaction with driver hours verified |
+| E-29 | `examples/src/fleet/rich/locks_and_overrides.py` | `T-29` | FR-21, CON-7 | L1 | Every lock kind honoured; a conflicting set returns a minimal irreducible conflict, not a blanket failure |
 | E-30 | `tests/vrp/test_engine_agreement.py` | `T-30` | CON-3, §7.3 | L2 | The same domain problem solved by PyVRP and OR-Tools; the verifier accepts both and the canonical evaluator scores them on one scale |
 
 ---
@@ -192,12 +187,12 @@ interactions are exercised rather than each constraint in isolation.
 |---|---|---|---|---|---|
 | E-33 | `tests/vrp/test_neighbourhood_throughput.py` | `T-33` | ALG-2 | L1 | ≥ 10× local-search throughput against the naive baseline, measured not asserted |
 | E-34 | `tests/vrp/test_lns_core.py` | `T-34` | ALG-3b | L4 | SISR ruin + greedy-with-blinks recreate matches published results on the frozen corpus |
-| E-35 | `examples/src/vrp/alloc/fleet_minimisation.py` | `T-35` | FR-32, §5.2 | L4 | `MIN_VEHICLES` reaches the BKS vehicle count on the benchmark set |
+| E-35 | `examples/src/fleet/alloc/fleet_minimisation.py` | `T-35` | FR-32, §5.2 | L4 | `MIN_VEHICLES` reaches the BKS vehicle count on the benchmark set |
 | E-36 | `tests/vrp/test_portfolio_runner.py` | `T-36` | §7.3 | L1 | Incumbents scored by the canonical evaluator, never the engine's own accounting; win rates recorded by instance signature |
 | E-37 | `tests/vrp/test_decomposition.py` | `T-37` | §7.6 | L5 | Large instances decompose and recombine with no invariant violation at the boundaries |
 | E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | L5 | ≥ 0.5% mean improvement over the route pool on the frozen corpus |
-| E-39 | `examples/src/vrp/rich/departure_scheduling.py` | `T-39` | ALG-5 | L1 | Duty duration measurably reduced by departure-time choice |
-| E-40 | `examples/src/vrp/rich/time_dependent.py` | `T-40` | FR-14 | L2 | FIFO (no-passing) property holds across every bucket boundary. **Blocked**: OSRM has no departure-time parameter — see the wishlist |
+| E-39 | `examples/src/fleet/rich/departure_scheduling.py` | `T-39` | ALG-5 | L1 | Duty duration measurably reduced by departure-time choice |
+| E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | L2 | FIFO (no-passing) property holds across every bucket boundary. **Blocked**: OSRM has no departure-time parameter — see the wishlist |
 
 ---
 
@@ -205,10 +200,10 @@ interactions are exercised rather than each constraint in isolation.
 
 | # | Example | Task | Satisfies | Level | Passes when |
 |---|---|---|---|---|---|
-| E-44 | `examples/src/vrp/alloc/fleet_mix.py` | `T-44` | FR-30, FR-32, FR-33 | L2 | Deployment is a decision, not an outcome; own-vs-hire step costs applied; marginal value reported per vehicle |
+| E-44 | `examples/src/fleet/alloc/fleet_mix.py` | `T-44` | FR-30, FR-32, FR-33 | L2 | Deployment is a decision, not an outcome; own-vs-hire step costs applied; marginal value reported per vehicle |
 | E-45 | `tests/vrp/test_depot_inventory.py` | `T-45` | FR-31 | L1 | A stockout yields `DEPOT_STOCKOUT`, never a silent over-allocation |
-| E-46 | `examples/src/vrp/alloc/tactical_sizing.py` | `T-46` | FR-34 | L5 | Cost/service Pareto front over ≥ 30 days × ≥ 10 fleet mixes |
-| E-47 | `examples/src/vrp/alloc/territories.py` | `T-47` | FR-17, FR-18, FR-35 | L2 | Territories balanced on duration, distance and stop count; driver-customer stability measured across periods |
+| E-46 | `examples/src/fleet/alloc/tactical_sizing.py` | `T-46` | FR-34 | L5 | Cost/service Pareto front over ≥ 30 days × ≥ 10 fleet mixes |
+| E-47 | `examples/src/fleet/alloc/territories.py` | `T-47` | FR-17, FR-18, FR-35 | L2 | Territories balanced on duration, distance and stop count; driver-customer stability measured across periods |
 
 ---
 
@@ -217,13 +212,13 @@ interactions are exercised rather than each constraint in isolation.
 | # | Example | Task | Satisfies | Level | Passes when |
 |---|---|---|---|---|---|
 | E-50 | `tests/vrp/test_committed_state.py` | `T-50` | DYN-4 | L2 | No executed stop ever moves, proven over the replay corpus |
-| E-51 | `examples/src/vrp/dynamic/dispatch_waves.py` | `T-51` | DYN-1, DYN-2, **FR-22** | L2 | Zero must-go postponements across the replay corpus; dispatched-now vs postponed decided explicitly |
+| E-51 | `examples/src/fleet/dynamic/dispatch_waves.py` | `T-51` | DYN-1, DYN-2, **FR-22** | L2 | Zero must-go postponements across the replay corpus; dispatched-now vs postponed decided explicitly |
 | E-52 | `tests/vrp/test_baseline_policies.py` | `T-52` | §8.2 | L1 | Greedy, lazy and random wired into the replayer as permanent baselines |
 | E-53 | `tests/vrp/test_historical_replayer.py` | `T-53` **[GATE]** | DYN-6 | L6 | Deterministic replay of 90 historical days; policies comparable on one scale |
-| E-54 | `examples/src/vrp/dynamic/sample_scenario_policy.py` | `T-54` | §8.2 | L6 | Beats greedy and lazy on the replay corpus, with the result written down |
-| E-55 | `examples/src/vrp/dynamic/prize_collecting_epoch.py` | `T-55` | §8.2 | L6 | Comparable or better than the sample-scenario policy |
+| E-54 | `examples/src/fleet/dynamic/sample_scenario_policy.py` | `T-54` | §8.2 | L6 | Beats greedy and lazy on the replay corpus, with the result written down |
+| E-55 | `examples/src/fleet/dynamic/prize_collecting_epoch.py` | `T-55` | §8.2 | L6 | Comparable or better than the sample-scenario policy |
 | E-56 | `tests/vrp/test_reoptimisation_latency.py` | `T-56` | DYN-5, §8.3 | L1 | p95 ≤ 30 s with 90% of the plan locked |
-| E-57 | `examples/src/vrp/dynamic/churn_tradeoff.py` | `T-57` | §8.3 | L5 | Churn/cost curve produced so operations can choose a point |
+| E-57 | `examples/src/fleet/dynamic/churn_tradeoff.py` | `T-57` | §8.3 | L5 | Churn/cost curve produced so operations can choose a point |
 
 ---
 
@@ -231,10 +226,10 @@ interactions are exercised rather than each constraint in isolation.
 
 | # | Example | Task | Satisfies | Level | Passes when |
 |---|---|---|---|---|---|
-| E-60 | `examples/src/vrp/explain/why_unassigned.py` | `T-60` | CON-5, FR-36 | L1 | Per-order rationale, marginal cost, and `would_fit_if` for every rejected order |
+| E-60 | `examples/src/fleet/explain/why_unassigned.py` | `T-60` | CON-5, FR-36 | L1 | Per-order rationale, marginal cost, and `would_fit_if` for every rejected order |
 | E-61 | `tests/vrp/test_plan_adherence.py` | `T-61` | CON-6, §12.4 | L6 | Adherence computed per depot, driver and territory from telematics |
-| E-62 | `examples/src/vrp/learn/service_time_calibration.py` | `T-62` | §12.1 | L1 | Monthly re-fit reproduces a known fixture; drift alerts fire |
-| E-63 | `examples/src/vrp/learn/speed_calibration.py` | `T-63` | §12.2 | L1 | Weekly re-fit preserves FIFO; held-out validation reported |
+| E-62 | `examples/src/fleet/learn/service_time_calibration.py` | `T-62` | §12.1 | L1 | Monthly re-fit reproduces a known fixture; drift alerts fire |
+| E-63 | `examples/src/fleet/learn/speed_calibration.py` | `T-63` | §12.2 | L1 | Weekly re-fit preserves FIFO; held-out validation reported |
 | E-64 | `tests/vrp/test_zone_prior.py` | `T-64` | §12.4 | L6 | Adherence improves with no verifier regression; advisory only, never a hard constraint |
 | E-65 | `tests/vrp/test_shadow_and_canary.py` | `T-65` | §11.4 | L6+L7 | One depot canary completed with a written go/no-go |
 | E-66 | `tests/vrp/test_verify_endpoint.py` | `T-66` | §9.4, CON-1 | L1 | An externally supplied plan is verifiable through the public endpoint |
