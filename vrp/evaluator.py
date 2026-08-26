@@ -21,7 +21,24 @@ from vrp.model import Order, Problem, Step
 
 @dataclass(frozen=True)
 class ObjectiveWeights:
-    """Cost per unit. Integers, so totals stay exact. §5.3."""
+    """Cost per unit. Integers, so totals stay exact. §5.3.
+
+    This is a flat weighted sum, which is the shape §5.1 names "the most common
+    modelling error in production routing". It stays flat on purpose: this
+    module's job is to *account* for a plan's cost, and a single comparable
+    number is what an accountant produces. Deciding which of two plans is better
+    belongs to `vrp.objective`, whose tiers cannot silently invert.
+
+    `unassigned_penalty` is the part to watch. A flat constant only outranks
+    driving while it is larger than the detour dropping an order would save, and
+    1,000,000 is metres -- 1,000 km. Measured headroom: the worst single-order
+    round trip anywhere in the benchmark corpus is 66 km, about 15x under it,
+    and Costa Rica end to end by road is roughly 500 km round trip, about 2x
+    under it. So it holds at this project's scale, and 2x is not much margin.
+    Anything wider-ranging should order plans through `vrp.objective.compare`,
+    which derives its scaling from the instance and so cannot run out of
+    headroom in the first place.
+    """
 
     per_metre: int = 1
     per_second: int = 0
