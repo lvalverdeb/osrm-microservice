@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.2 |
+| Version | 1.3 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -274,9 +274,9 @@ introduces a new one.
 |---|---|---|---|
 | **TSP** — travelling salesman | One vehicle, no capacity or window binding. The degenerate case of every row below | — (exercised through CVRP with a single vehicle) | Already served today, see below |
 | **CVRP** — capacitated VRP | `FR-02` capacity, `FR-07` fleet, `FR-08` depot | CVRPLIB / Uchoa | Slice 1, `T-12` |
-| **VRPTW** — CVRP with time windows | CVRP plus `FR-04` windows, `FR-05` service duration, `FR-16` shift windows | Solomon, Gehring & Homberger | Slice 1, `T-12` / `T-23` |
+| **VRPTW** — CVRP with time windows | CVRP plus `FR-04` windows, `FR-05` service duration, `FR-16` shift windows | Solomon, Gehring & Homberger | Slice 1 `T-12`, Slice 2 `T-23` |
 | **MDHVRPTW** — multi-depot heterogeneous VRPTW | VRPTW plus `FR-07` per-vehicle capacity, cost and profile, and `FR-08` multiple depots with per-vehicle start and end | Cordeau MDVRPTW (to be verified when wired in) | Slice 2, `T-21` |
-| **PDPTW** — pickup and delivery with time windows | VRPTW plus `FR-01` shipments with precedence and same-vehicle, `FR-03` simultaneous pickup and delivery | Li & Lim | Slice 2, `T-20` / `T-13` |
+| **PDPTW** — pickup and delivery with time windows | VRPTW plus `FR-01` shipments with precedence and same-vehicle, `FR-03` simultaneous pickup and delivery | Li & Lim | Slice 1 `T-13`, Slice 2 `T-20` |
 
 **TSP is not a separate workstream.** A single uncapacitated vehicle with
 unbounded windows *is* a TSP, and the platform serves it by construction. It is
@@ -1538,7 +1538,7 @@ Methodology:
 | Version | Change | Affected tasks |
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
-
 | 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
+| 1.3 | Corrected the slice labels in §3.4's `Delivered by` column. Two rows cited a task from the wrong slice: VRPTW listed `T-23` under Slice 1 and PDPTW listed `T-13` under Slice 2, where §13 places them in Slice 2 and Slice 1 respectively. Both classes genuinely span two slices, so each task now carries its own slice rather than one label covering both. No task, requirement or composition changed — only the labels naming where each already sits. | `T-13`, `T-23` |
 
 *End of document.*

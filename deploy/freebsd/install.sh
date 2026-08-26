@@ -11,16 +11,11 @@
 # placed into JAIL_DIR here with escalated privileges -- the login user has no
 # write access to /usr/local/www.
 #
-# Any phase that restarts a service appears to hang when run over ssh: daemon(8)
-# starts the new child with the ssh session's stdout still attached, so ssh does
-# not return until that child exits -- which is never, for a service. The work
-# has already finished. Detach the output and poll instead:
-#
-#   ssh host 'doas jexec api sh -c "cd DIR && nohup sh deploy/freebsd/install.sh \
-#       services > /tmp/install.log 2>&1 &"'
-#   until curl -fsS http://HOST:8000/ready >/dev/null; do sleep 5; done
-#
-# The Makefile's jail-* targets already run this way.
+# Phases that restart a service go through restart_service(), never a bare
+# `service ... restart`: daemon(8) would otherwise start the new child with this
+# script's stdout still attached, and over ssh that is the session's pipe, so
+# ssh would hang until the daemon exits -- which is never, for a service -- and
+# fail with its own 255 long after the work had finished. See restart_service.
 #
 # Configuration arrives via the environment; see the defaults below.
 
@@ -77,6 +72,25 @@ else
 fi
 
 run() { if [ -n "$SUDO" ]; then $SUDO "$@"; else "$@"; fi; }
+
+# Restart a service without handing the daemon our stdout and stderr.
+#
+# rc.d starts the new process through daemon(8), which lets it inherit whatever
+# fds this script holds. Over ssh those are the session's pipes, so sshd never
+# sees EOF and ssh does not return until the daemon exits -- i.e. never, and the
+# caller eventually gets ssh's 255 long after the work finished. Capturing to a
+# file gives the daemon that file to hold instead; the output is replayed here
+# so the operator still sees what service(8) said.
+restart_service() {
+    _out=$(mktemp -t osrm-restart) || die "mktemp failed"
+    run service "$1" restart >"$_out" 2>&1 || {
+        cat "$_out" >&2
+        rm -f "$_out"
+        die "service $1 restart failed"
+    }
+    cat "$_out"
+    rm -f "$_out"
+}
 
 # --- phases ---------------------------------------------------------------
 
@@ -244,7 +258,7 @@ phase_services() {
 
     for svc in redis osrm_routed; do
         log "restarting ${svc}"
-        run service "$svc" restart
+        restart_service "$svc"
     done
 
     phase_gateway_services
@@ -286,7 +300,7 @@ phase_gateway_services() {
     run sysrc -x osrm_api_gateway_forwarded_allow_ips >/dev/null 2>&1 || true
 
     log "restarting osrm_api_gateway"
-    run service osrm_api_gateway restart
+    restart_service osrm_api_gateway
 }
 
 phase_health() {
@@ -371,7 +385,7 @@ ENVEOF"
     run sysrc osrm_gateway_spike_workers="${API_WORKERS}" >/dev/null
 
     log "restarting osrm_gateway_spike"
-    run service osrm_gateway_spike restart
+    restart_service osrm_gateway_spike
 
     _i=0
     until fetch -qo /dev/null "http://127.0.0.1:${SPIKE_PORT}/ready" 2>/dev/null; do
