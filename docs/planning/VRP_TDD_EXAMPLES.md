@@ -80,6 +80,25 @@ approximation of the L2 property level until the real generator arrives in
 **Implementation lives in `vrp/`**: `model.py`, `evaluator.py`, and
 `verify/verifier.py` in its own package, importing neither.
 
+A demonstration landed with them, `examples/src/vrp/verify_delivery_plan.py`:
+it takes a slice of the Costa Rica dataset, fetches a real road matrix through
+the gateway, builds a plan by nearest-neighbour, evaluates it, and has the
+verifier judge it — then reports the same plan with its distance understated by
+a kilometre and shows INV-9 catching that. A verifier only means something
+against a plan it did not produce.
+
+> **Two things are called `vrp`.** The package at the repository root, and the
+> examples folder `examples/src/vrp/`. When a script in that folder runs,
+> `examples/src` precedes the root on `sys.path`, so a bare `import vrp` finds
+> the *folder* — a namespace package with no `evaluator` in it. The demo works
+> around it by putting the root first, with a comment saying why.
+>
+> That workaround will have to be repeated by every demo this plan adds under
+> `examples/src/vrp/rich/`, `tw/`, `alloc/` and `dynamic/`, which is the point
+> at which a workaround becomes a design flaw. **Rename the examples folder**
+> (`examples/src/fleet/`, say) before writing E-12 — it is seven files and one
+> `make examples` menu entry today, and grows from here.
+
 **E-03 is the highest-value example in this document.** It is cheap, depends on
 nothing, and every later row is judged by it. Write it first even if the rest of
 the plan is deferred.
