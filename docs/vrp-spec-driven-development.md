@@ -569,12 +569,25 @@ after 8 cumulative hours of driving; 60/70-hour limits over 7/8 days.
 **Model.** A pluggable `HoursOfServiceRules` interface exposing:
 
 ```
-init_state(driver, day) -> DriverState                 # carries over prior consumption
-can_drive(state, seconds) -> bool
-advance(state, activity, seconds) -> DriverState        # DRIVE | WORK | BREAK | REST | WAIT
-required_break(state) -> Break?                         # what must happen next, and why
-remaining_drive(state) -> Duration
+init_state(carry_over: DriverState?) -> DriverState   # Vehicle.initial_state, below
+can_drive(state, seconds) -> bool                     # may they drive this long *now*?
+advance(state, activity, seconds) -> DriverState      # DRIVE | WORK | BREAK | REST | WAIT
+required_break(state) -> Break?                       # what must happen next, and why
+remaining_drive(state) -> Duration                    # left in the duty, breaks allowed for
+drive_until_break(state) -> Duration                  # left before a break falls due
 ```
+
+The last two are distinct questions and MUST NOT be collapsed into one accessor. "How much more
+can this driver do today" is bounded by the daily driving and duty limits; "how much before they
+must stop for 45 minutes" is bounded by the break interval. A single `remaining_drive` that
+returns the minimum of both answers the second question while appearing to answer the first, so a
+rested driver reports 4.5 h rather than 9 h — which reads downstream as a fleet a third smaller
+than it is. `can_drive` is the break-interval question, because that is what a scheduler asks
+before committing to a leg.
+
+`init_state` takes the carry-over directly rather than looking it up by driver and date: the
+authoritative value is `Vehicle.initial_state` (below), so a lookup here would be a second source
+for the same fact.
 
 Break insertion MUST be solved as a **scheduling subproblem inside route evaluation**, not as a
 post-processing pass. Post-hoc break insertion produces routes that were feasible before breaks
