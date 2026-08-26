@@ -193,6 +193,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | L5 | ≥ 0.5% mean improvement over the route pool on the frozen corpus |
 | E-39 | `examples/src/fleet/rich/departure_scheduling.py` | `T-39` | ALG-5 | L1 | Duty duration measurably reduced by departure-time choice |
 | E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | L2 | FIFO (no-passing) property holds across every bucket boundary. **Blocked**: OSRM has no departure-time parameter — see the wishlist |
+| E-41 | `examples/src/fleet/rich/ev_recharging.py` | `T-41` | FR-20 | L2 | Range never violated on a generated EV corpus; charging time appears in the duty timeline rather than being added afterwards. **`COULD` priority, and blocked** on charger locations and charging curves, which this stack has no source for |
 
 ---
 
@@ -265,14 +266,10 @@ Every functional requirement in SDD §3 maps to at least one example:
 Checking §3 against §13 turned up a traceability gap in the specification
 itself:
 
-- **FR-19** (dock synchronisation) and **FR-22** (partial dispatch) are
-  *implied* by task text — `T-28` mentions dock queueing, `T-51` a must-go
-  classifier — but neither task claims the requirement ID. The examples above
-  attach them (E-28, E-51) so the trace closes.
-- **FR-20** (EV range and en-route recharging) appears in **no task at all**,
-  and is not in the out-of-scope list either. It is `COULD` priority, so this
-  may be deliberate — but it is currently a requirement with no owner, no task
-  and no example. Either give it `T-41` and an `E-41`, or move it to §2.5.
+**Closed in SDD 1.2.** `FR-19` and `FR-22` are now claimed by `T-28` and `T-51`,
+whose titles already described the work. `FR-20` was given `T-41`, marked
+`COULD` and flagged as the only task with no data source in the current stack.
+The examples above (E-28, E-51) trace to them, and `E-41` covers `T-41`.
 
 ---
 

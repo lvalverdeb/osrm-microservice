@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.1 |
+| Version | 1.2 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -511,7 +511,7 @@ travel time between stops is a minority of the driver's day; parking and walking
 of the Amazon challenge data reports travel time comprising roughly a third of drivers' time, with
 the balance spent parking and walking to make deliveries. A model with accurate matrices and
 guessed service times will be worse than one with approximate matrices and calibrated service
-times. Service-time calibration from telematics is therefore a mandatory workstream (§13, T-42).
+times. Service-time calibration from telematics is therefore a mandatory workstream (§13, `T-62`).
 
 ### 6.3 Time-dependent travel
 
@@ -800,14 +800,14 @@ Minimum required move set, evaluated on a **granular neighbourhood** (each node 
 #### ALG-3 — Metaheuristic layer
 Two required strategies, both available to the portfolio:
 
-**(a) Hybrid genetic search (HGS).** Population of solutions; fitness-biased parent selection
+**`ALG-3a` — Hybrid genetic search (HGS).** Population of solutions; fitness-biased parent selection
 balancing quality and diversity; problem-specific crossover (selective route exchange, SREX);
 intensive local-search "education" of offspring; survivor selection that removes low-quality *or*
 highly-similar individuals to preserve diversity; partial restart on stagnation. Feasible and
 infeasible sub-populations with adaptive penalty weights are required — allowing controlled
 infeasibility is what lets the search cross feasibility barriers.
 
-**(b) Ruin-and-recreate / LNS (SISR).** Iteratively destroy and repair:
+**`ALG-3b` — Ruin-and-recreate / LNS (SISR).** Iteratively destroy and repair:
 - *Ruin*: **adjacent string removal** — remove short contiguous strings of visits that are near one
   another in space, across several routes. This preserves route structure better than random node
   removal and deliberately induces *spatial slack*.
@@ -1352,7 +1352,7 @@ Each task lists dependencies, the requirements it satisfies, and a definition of
 | `T-25` | **[GATE]** Hours-of-service rules engine: interface + `EU-561` + `US-HOS`, break insertion **inside** route evaluation | T-03 | FR-15, FR-16, §6.4, AC-5.1, AC-5.2 | Compliance fixture suite from regulation text; zero post-hoc break insertion in the codebase |
 | `T-26` | `initial_state` carry-over from tachograph/ELD input | T-25 | §6.4, AC-5.2 | Partial-duty fixtures plan correctly |
 | `T-27` | Optional orders / prizes / priority tiers | T-13 | FR-12, FR-13 | Prize-collecting mode reproduces expected drop behaviour |
-| `T-28` | Multi-trip / reloading with dock queueing | T-21 | FR-09, §6.8 | Multi-trip corpus; driver-hours interaction verified |
+| `T-28` | Multi-trip / reloading with dock queueing | T-21 | FR-09, FR-19, §6.8, §6.9 | Multi-trip corpus; driver-hours interaction verified |
 | `T-29` | Locks: all kinds + minimal-conflict diagnosis | T-12 | FR-21, §6.6, CON-7 | Conflicting lock sets return minimal IIS |
 | `T-30` | OR-Tools adapter (expressiveness escape hatch) | T-02 | CON-3, §7.3 | Same domain problem solved by two engines; verifier agrees |
 
@@ -1368,6 +1368,7 @@ Each task lists dependencies, the requirements it satisfies, and a definition of
 | `T-38` | Set-partitioning polish over the generated route pool | T-36 | ALG-6 | ≥ 0.5% mean improvement on the frozen corpus |
 | `T-39` | Route-level departure-time scheduling + TSPTW polish | T-25 | ALG-5 | Duty-duration reduction measured and reported |
 | `T-40` | Time-dependent travel: FIFO speed profiles, bucketed evaluation, lower-bound filtering | T-11, T-33 | FR-14, §6.3 | FIFO property test; false-negative rate of the filter reported |
+| `T-41` | EV range and en-route recharging with charging-time functions | T-33 | FR-20 | Range never violated on a generated EV corpus; charging time appears in the duty timeline, not bolted on after. **`COULD` priority** — the only optional task in this backlog, and the only one with no data source in the current stack (charger locations and charging curves) |
 
 ### Slice 4 — Allocation
 
@@ -1383,7 +1384,7 @@ Each task lists dependencies, the requirements it satisfies, and a definition of
 | ID | Task | Deps | Satisfies | Definition of done |
 |---|---|---|---|---|
 | `T-50` | Committed-state manager + `FREEZE_UNTIL` + executed-work locking | T-29 | DYN-4, AC-2.2 | No executed stop ever moves, proven by replay tests |
-| `T-51` | Epoch controller + must-go classifier | T-50 | DYN-1, DYN-2, AC-3.1 | Zero must-go postponements across the replay corpus |
+| `T-51` | Epoch controller + must-go classifier | T-50 | FR-22, DYN-1, DYN-2, AC-3.1 | Zero must-go postponements across the replay corpus |
 | `T-52` | Baseline dispatch policies (greedy / lazy / random) | T-51 | §8.2 step 1 | Permanent baselines wired into the replayer |
 | `T-53` | **[GATE]** Historical replayer / simulator | T-52 | DYN-6, AC-3.2 | Deterministic replay of 90 historical days; policy comparison report |
 | `T-54` | ICD sample-scenario dispatch policy | T-53 | §8.2 step 3 | Beats greedy and lazy on the replay corpus; result documented |
@@ -1511,5 +1512,7 @@ Methodology:
 | Version | Change | Affected tasks |
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
+
+| 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
 
 *End of document.*
