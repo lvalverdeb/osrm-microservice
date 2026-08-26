@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.0 |
+| Version | 1.1 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -261,6 +261,48 @@ Explicitly excluded, to be revisited only via a spec amendment:
 | `NFR-10` | **Versioned contracts.** The public API is versioned; breaking changes require a new major version and a deprecation window |
 
 ---
+
+### 3.4 Problem variants covered
+
+The requirements above are stated as capabilities, which is the right way to
+build them but the wrong way to check coverage: the literature, the benchmark
+sets and most stakeholders speak in named problem classes. This maps one to the
+other. Each row is the composition of requirements already specified — no row
+introduces a new one.
+
+| Variant | Composed of | Benchmark set (§11.3) | Delivered by |
+|---|---|---|---|
+| **TSP** — travelling salesman | One vehicle, no capacity or window binding. The degenerate case of every row below | — (exercised through CVRP with a single vehicle) | Already served today, see below |
+| **CVRP** — capacitated VRP | `FR-02` capacity, `FR-07` fleet, `FR-08` depot | CVRPLIB / Uchoa | Slice 1, `T-12` |
+| **VRPTW** — CVRP with time windows | CVRP plus `FR-04` windows, `FR-05` service duration, `FR-16` shift windows | Solomon, Gehring & Homberger | Slice 1, `T-12` / `T-23` |
+| **MDHVRPTW** — multi-depot heterogeneous VRPTW | VRPTW plus `FR-07` per-vehicle capacity, cost and profile, and `FR-08` multiple depots with per-vehicle start and end | Cordeau MDVRPTW (to be verified when wired in) | Slice 2, `T-21` |
+| **PDPTW** — pickup and delivery with time windows | VRPTW plus `FR-01` shipments with precedence and same-vehicle, `FR-03` simultaneous pickup and delivery | Li & Lim | Slice 2, `T-20` / `T-13` |
+
+**TSP is not a separate workstream.** A single uncapacitated vehicle with
+unbounded windows *is* a TSP, and the platform serves it by construction. It is
+called out here for two reasons. First, so that a request for "just sequence
+these stops" is recognised as this system's degenerate case rather than a
+different product. Second, because it is the one variant already in production:
+the existing gateway's `/vrp` delegates per-vehicle sequencing to OSRM's `/trip`
+service, which is a TSP solver, and `T-39` keeps a TSP-with-time-windows polish
+step for exactly this reason (§7.5).
+
+**MDHVRPTW is the target shape for this business.** Six depots, mixed vehicles,
+and customer windows is not an exotic combination — it is the ordinary case
+described in §2.1, and it is why `T-21` sits early in Slice 2 rather than being
+deferred as an enrichment. Anything that treats the fleet as homogeneous or the
+depot as singular is a stepping stone, not a deliverable.
+
+**Beyond these five.** The requirements also compose into variants this section
+does not name — prize-collecting and team-orienteering (`FR-12`), multi-trip
+(`FR-09`), consistent VRP (`FR-18`), fleet size and mix (`FR-30`), and the
+time-dependent and dynamic forms (`FR-14`, `FR-22`). They are specified in §6
+and §8. The five above are named because they are the classes with public
+benchmark sets, and therefore the ones whose quality can be argued about with
+evidence rather than assertion.
+
+---
+
 
 ## 4. Domain model (canonical, solver-independent)
 
@@ -1194,6 +1236,7 @@ Public sets to be wired into CI:
 | Gehring & Homberger (200–1,000) | VRPTW | Scale + quality gate |
 | CVRPLIB / Uchoa (100–1,000) | CVRP | Pure routing quality |
 | Li & Lim | PDPTW | Pickup-delivery correctness and quality |
+| Cordeau MDVRPTW | MDHVRPTW | Multi-depot assignment and heterogeneous fleet. The set closest to this business's own shape; confirm the instance family and its BKS source when wiring it in |
 | EURO Meets NeurIPS 2022 instances | VRPTW static + dynamic | Realistic ORTEC-derived data; the dynamic set is the only public benchmark for the wave model |
 | Frozen production corpus | Rich VRP | The only set that reflects your actual constraints |
 
@@ -1390,6 +1433,8 @@ Each task lists dependencies, the requirements it satisfies, and a definition of
 | **BKS** | Best-Known Solution for a benchmark instance |
 | **ConVRP** | Consistent VRP — bounds driver and arrival-time variation across a horizon |
 | **CVRP / VRPTW / PDPTW** | Capacitated VRP / with Time Windows / Pickup-and-Delivery with Time Windows |
+| **MDHVRPTW** | Multi-Depot Heterogeneous VRPTW — several depots, mixed vehicle types, customer time windows. The shape this business actually has (§3.4) |
+| **TSP / TSPTW** | Travelling Salesman Problem, optionally with time windows — sequencing one vehicle's stops. The degenerate case of every VRP variant, and what OSRM's `/trip` solves |
 | **Duty** | A driver's continuous work period, bounded by working-time law |
 | **FIFO property** | No-passing: departing later on an arc can never mean arriving earlier |
 | **FSM-VRP** | Fleet Size and Mix VRP — vehicle composition is a decision variable |
@@ -1460,5 +1505,11 @@ Methodology:
    evidence, per CON-9 and CON-10.
 4. Every amendment increments the document version and records the affected task IDs so the
    backlog stays traceable.
+
+### Amendment log
+
+| Version | Change | Affected tasks |
+|---|---|---|
+| 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
 
 *End of document.*
