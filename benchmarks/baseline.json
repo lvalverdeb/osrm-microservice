@@ -1,0 +1,44 @@
+{
+  "recorded_at": "2026-08-26",
+  "solver": "pyvrp",
+  "iterations": 300,
+  "seed": 0,
+  "hardware": "Darwin arm64",
+  "instances": [
+    {
+      "name": "c20-clustered-slack",
+      "cost": 182174,
+      "distance": 182174,
+      "vehicles": 2,
+      "verified": true
+    },
+    {
+      "name": "c20-scattered-slack",
+      "cost": 196245,
+      "distance": 196245,
+      "vehicles": 2,
+      "verified": true
+    },
+    {
+      "name": "c30-clustered-tight",
+      "cost": 293474,
+      "distance": 293474,
+      "vehicles": 5,
+      "verified": true
+    },
+    {
+      "name": "c30-scattered-tight",
+      "cost": 389058,
+      "distance": 389058,
+      "vehicles": 5,
+      "verified": true
+    },
+    {
+      "name": "c50-clustered-pressure",
+      "cost": 416967,
+      "distance": 416967,
+      "vehicles": 7,
+      "verified": true
+    }
+  ]
+}

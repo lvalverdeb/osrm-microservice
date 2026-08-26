@@ -152,7 +152,7 @@ the plan is deferred.
 | E-13 | `tests/vrp/test_objective_tiering.py` | `T-13` | §5.1, FR-13 | L1 | A higher tier is never traded for a lower one; instance-derived scaling holds |
 | E-14 | `examples/src/fleet/explain/preflight_diagnosis.py` | `T-14` | FR-01, §6.5 | L1 | Every seeded infeasible order returns its specific reason code, not a generic failure |
 | E-15 | `tests/vrp/test_solve_api.py` | `T-15` | NFR-03, §9.4 | L1 | Idempotency key honoured; anytime incumbent readable mid-solve |
-| E-16 | `tests/vrp/test_benchmark_gate.py` | `T-16` **[GATE]** | CON-9 | L4 | Baseline gaps recorded in `BASELINE.md`; CI fails on regression past threshold |
+| E-16 | `tests/vrp/test_benchmark_gate.py` | `T-16` **[GATE]** | CON-9 | L4 | **Done.** Frozen corpus in `vrp/bench/`, baselines in `benchmarks/BASELINE.md`, gate fails past §11.3's thresholds. Measures regression against our own numbers; gap-to-published-BKS awaits `T-06`. Placement: **Python** |
 | E-17 | `tests/vrp/test_determinism.py` | `T-17` | CON-4 | L3 | Byte-identical solution across 100 repeats and across machines |
 
 `E-12` is the reference example — the first end-to-end solve. Everything in
