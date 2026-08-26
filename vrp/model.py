@@ -163,6 +163,22 @@ class Vehicle:
     # vehicle is not subject to driving-hours law, which is a claim about the
     # operation rather than a default -- INV-7 reports "not applicable" only
     # when no vehicle in the problem declares a rule set.
+    # FR-07: cost belongs to the vehicle, not the fleet. These lived on
+    # ObjectiveSpec as one set for everybody, which made a 3.5-tonne van and an
+    # artic cost the same per kilometre -- the "H" in MDHVRPTW, decorative.
+    fixed_cost: int = 0
+    cost_per_metre: int = 0
+    cost_per_second: int = 0
+    overtime_cost_per_second: int = 0
+    # FR-07's routing profile. A profile is a *matrix*, and a Problem pins one,
+    # so the adapter refuses a fleet that mixes them rather than routing a
+    # bicycle as a lorry. See `_single_profile`.
+    profile: str = "driving"
+    # FR-08's "end-anywhere". Deliberately not spelled `end_location_id=None`:
+    # that already means "end where you started" and much of the codebase reads
+    # it that way, so reusing it would change the meaning of existing fleets
+    # silently rather than adding a new capability.
+    open_route: bool = False
     hos_rules: str | None = None
     # Hours already consumed before this duty. §6.4 makes this mandatory input
     # where tachograph or ELD data exists: planning a fresh nine-hour day for a
@@ -181,10 +197,22 @@ class Vehicle:
             if limit is not None:
                 _require_int(limit, name)
                 _require(limit >= 0, f"{name} must not be negative")
+        for name in ("fixed_cost", "cost_per_metre", "cost_per_second",
+                     "overtime_cost_per_second"):
+            cost = getattr(self, name)
+            _require_int(cost, name)
+            # A negative cost is a vehicle that is paid to drive, and a solver
+            # finds that arbitrage on the first iteration.
+            _require(cost >= 0, f"{name} must not be negative")
+        _require(bool(self.profile), "profile must not be empty")
 
     @property
     def ends_at(self) -> str:
-        """Where the route finishes. An open route ends where it last stopped."""
+        """Where a *closed* route finishes; the start when none is given.
+
+        Meaningless for an open route, which finishes at its last stop and has
+        no fixed end. Check `open_route` before relying on this.
+        """
         return self.end_location_id or self.start_location_id
 
 

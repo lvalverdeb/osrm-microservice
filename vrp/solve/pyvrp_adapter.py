@@ -34,6 +34,16 @@ from vrp.model import Problem, Route, Solution, Step
 _UNSUPPORTED_MULTI_DIMENSION = (
     "multi-dimensional capacity is T-20; this adapter takes one dimension")
 
+# FR-07 lists a per-vehicle routing profile, and a profile is a matrix. A
+# Problem pins exactly one, so a mixed-profile fleet would route a bicycle and
+# an artic over identical travel while appearing to differ. PyVRP supports
+# per-profile edge sets (`Model.add_profile`), so the gap is in the domain
+# model rather than the solver -- it needs a Problem that can carry several
+# matrices. Refused loudly until then.
+_UNSUPPORTED_MIXED_PROFILES = (
+    "a fleet mixing routing profiles needs one matrix per profile, which "
+    "Problem does not yet carry; every vehicle must share one profile")
+
 
 @dataclass(frozen=True)
 class _Compiled:
@@ -42,6 +52,15 @@ class _Compiled:
     # PyVRP client index (0-based, in insertion order) -> our order id.
     order_by_client: dict[int, str]
     vehicle_ids: list[str]
+
+
+def _single_profile(problem: Problem) -> str:
+    """The fleet's shared routing profile, or a refusal. FR-07."""
+    profiles = {vehicle.profile for vehicle in problem.vehicles}
+    if len(profiles) > 1:
+        raise NotImplementedError(
+            f"{_UNSUPPORTED_MIXED_PROFILES} (found {sorted(profiles)})")
+    return next(iter(profiles), "driving")
 
 
 def _single_dimension(problem: Problem) -> str | None:
@@ -55,6 +74,7 @@ def _single_dimension(problem: Problem) -> str | None:
 def compile_problem(problem: Problem) -> _Compiled:
     """Build the PyVRP model. Travel comes from the matrix, never the geometry."""
     dimension = _single_dimension(problem)
+    _single_profile(problem)
     model = Model()
 
     # One PyVRP location per domain location, in matrix-index order so the edge
@@ -66,7 +86,8 @@ def compile_problem(problem: Problem) -> _Compiled:
                for location in ordered]
 
     depot_ids = {vehicle.start_location_id for vehicle in problem.vehicles}
-    depot_ids |= {vehicle.ends_at for vehicle in problem.vehicles}
+    depot_ids |= {vehicle.ends_at for vehicle in problem.vehicles
+                  if not vehicle.open_route}
     depots = {
         location.id: model.add_depot(location=handles[location.matrix_index],
                                      tw_early=min(v.shift.start for v in problem.vehicles),
@@ -74,6 +95,19 @@ def compile_problem(problem: Problem) -> _Compiled:
                                      name=location.id)
         for location in ordered if location.id in depot_ids
     }
+
+    # FR-08's "end-anywhere". PyVRP requires an end depot and accepts
+    # `end_depot=None` by silently closing the route -- measured, a 2 km
+    # one-way problem reports 4 km either way. A sink reachable from every
+    # location at zero cost is the construction that actually works.
+    open_sink = None
+    if any(vehicle.open_route for vehicle in problem.vehicles):
+        sink_handle = model.add_location(x=0, y=0, name="__open_route_sink__")
+        open_sink = model.add_depot(
+            location=sink_handle,
+            tw_early=min(v.shift.start for v in problem.vehicles),
+            tw_late=max(v.shift.end for v in problem.vehicles),
+            name="__open_route_sink__")
 
     order_by_client: dict[int, str] = {}
     for index, order in enumerate(problem.orders):
@@ -112,14 +146,27 @@ def compile_problem(problem: Problem) -> _Compiled:
             limits["shift_duration"] = vehicle.max_duration
         if vehicle.max_distance is not None:
             limits["max_distance"] = vehicle.max_distance
+        # FR-07: costs come from the vehicle. PyVRP names them differently and
+        # takes them natively, so this is wiring rather than modelling.
+        costs = {}
+        if vehicle.fixed_cost:
+            costs["fixed_cost"] = vehicle.fixed_cost
+        if vehicle.cost_per_metre:
+            costs["unit_distance_cost"] = vehicle.cost_per_metre
+        if vehicle.cost_per_second:
+            costs["unit_duration_cost"] = vehicle.cost_per_second
+        if vehicle.overtime_cost_per_second:
+            costs["unit_overtime_cost"] = vehicle.overtime_cost_per_second
+
         model.add_vehicle_type(
             num_available=1,
             capacity=[vehicle.capacities.get(dimension, 0)] if dimension else [],
             start_depot=depots[vehicle.start_location_id],
-            end_depot=depots[vehicle.ends_at],
+            end_depot=open_sink if vehicle.open_route else depots[vehicle.ends_at],
             tw_early=vehicle.shift.start,
             tw_late=vehicle.shift.end,
             name=vehicle.id,
+            **costs,
             **limits,
         )
         vehicle_ids.append(vehicle.id)
@@ -129,11 +176,21 @@ def compile_problem(problem: Problem) -> _Compiled:
         for destination in ordered:
             if origin.matrix_index == destination.matrix_index:
                 continue
+            if not matrix.is_reachable(origin.matrix_index,
+                                       destination.matrix_index):
+                # MTX-5: an unreachable pair is a hard-infeasible arc, so the
+                # edge is simply absent. Adding it at any finite cost is what
+                # lets a solver route through a road that does not exist.
+                continue
             model.add_edge(
                 handles[origin.matrix_index], handles[destination.matrix_index],
                 distance=matrix.distance(origin.matrix_index, destination.matrix_index),
                 duration=matrix.duration(origin.matrix_index, destination.matrix_index),
             )
+    if open_sink is not None:
+        for origin in ordered:
+            model.add_edge(handles[origin.matrix_index], sink_handle,
+                           distance=0, duration=0)
 
     return _Compiled(model=model, dimension=dimension,
                      order_by_client=order_by_client, vehicle_ids=vehicle_ids)
@@ -168,10 +225,21 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
         steps: list[Step] = []
         for activity in route:
             if activity.is_depot():
+                kind = "START" if not steps else "END"
+                if kind == "END" and problem.vehicle(vehicle_id).open_route:
+                    # The sink is a modelling device, not a place. An open
+                    # route ends where it last stopped, which is the step
+                    # already recorded -- so the END carries that location and
+                    # the zero-cost arc to the sink never appears in the plan.
+                    steps.append(Step(type="END", location_id=steps[-1].location_id,
+                                      arrival=steps[-1].departure,
+                                      start_service=steps[-1].departure,
+                                      departure=steps[-1].departure,
+                                      load_after=dict(steps[-1].load_after)))
+                    continue
                 location = index_to_location[
                     problem.location(
                         _depot_location_id(problem, route, activity)).matrix_index]
-                kind = "START" if not steps else "END"
                 steps.append(Step(type=kind, location_id=location.id,
                                   arrival=activity.start_time,
                                   start_service=activity.start_time,
