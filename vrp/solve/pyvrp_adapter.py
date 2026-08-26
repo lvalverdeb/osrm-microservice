@@ -197,6 +197,17 @@ def compile_problem(problem: Problem) -> _Compiled:
 
         for window in windows:
             early, late = _bounds(window, shift_start, shift_end)
+            if order.release_time > late:
+                # PyVRP raises "release_time must be <= tw_late" from deep
+                # inside Client(), naming no order. Our model accepts the
+                # combination -- it is infeasible, not invalid -- so it is
+                # `preflight()`'s RELEASE_AFTER_WINDOW to report, and the
+                # adapter's job is to say which order rather than die opaquely.
+                raise ValueError(
+                    f"order {order.id} is released at {order.release_time}, "
+                    f"after its window closes at {late}; run "
+                    f"vrp.diagnose.preflight() first -- this is "
+                    f"RELEASE_AFTER_WINDOW, not a malformed instance")
             client = model.add_client(
                 location=handles[location.matrix_index],
                 delivery=delivered,
