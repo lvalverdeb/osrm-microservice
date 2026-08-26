@@ -5,7 +5,9 @@ Reads the authored markdown, rewrites each scenario block into a uniform,
 self-contained, anchored form, and emits scenarios.jsonl + a validation report.
 Run: python3 build_catalogue.py <src.md> <out.md> <out.jsonl>
 """
-import json, re, sys
+import json
+import re
+import sys
 from collections import Counter, OrderedDict
 
 VARIANTS = {"TSP","CVRP","VRPTW","MDHVRPTW","PDPTW","DARP","IRP","CARP","LRP"}
@@ -37,8 +39,8 @@ def normalise_tags(uc_id, bracket):
 TIERS = {"P0","P1","P2"}
 STATUS = {"MODELLED","PARTIALLY_MODELLED","NOT_MODELLED"}
 
-HDR = re.compile(r'^\*\*`(UC-\d{3})` (.+?) — (P[012])\*\* `\[(.+?)\]`\s*$', re.M)
-SECTION = re.compile(r'^(#{2,3}) (.+)$', re.M)
+HDR = re.compile(r'^\*\*`(UC-\d{3})` (.+?) — (P[012])\*\* `\[(.+?)\]`\s*$', re.MULTILINE)
+SECTION = re.compile(r'^(#{2,3}) (.+)$', re.MULTILINE)
 
 
 def parse(src):
@@ -69,7 +71,7 @@ def parse(src):
         desc = body.split("\n- ", 1)[0].strip()
         fields = OrderedDict()
         for fm in re.finditer(r'^- (Binds|Exercises|Breaks|Status): (.+?)(?=\n- |\n\n|\Z)',
-                              body, re.M | re.S):
+                              body, re.MULTILINE | re.DOTALL):
             fields[fm.group(1)] = " ".join(fm.group(2).split())
         variant, tags = normalise_tags(m.group(1), m.group(4))
         reqs = sorted(set(re.findall(r'FR-(?:P?\d+)', fields.get("Exercises", ""))))
@@ -129,7 +131,7 @@ def validate(records, src):
             if len(r[f]) < 20:
                 errs.append(f"{r['id']}: field {f!r} too short to stand alone")
         # self-containment: an entry must not depend on a neighbour to be understood
-        if re.search(r'\bas above\b|\bsame\b\.|\bditto\b', r["breaks"], re.I):
+        if re.search(r'\bas above\b|\bsame\b\.|\bditto\b', r["breaks"], re.IGNORECASE):
             errs.append(f"{r['id']}: breaks field is not self-contained")
     # referenced-but-undefined ids
     defined = set(ids) | set(re.findall(r'\| `(UC-\d{3})` \|', src))
@@ -143,7 +145,8 @@ def validate(records, src):
 
 def main():
     src_path, out_md, out_jsonl = sys.argv[1], sys.argv[2], sys.argv[3]
-    src = open(src_path).read()
+    with open(src_path) as handle:
+        src = handle.read()
     records, spans = parse(src)
 
     # rewrite entry blocks in place, back to front so offsets stay valid
@@ -157,7 +160,7 @@ def main():
             "variant_index": gen_variant_index(records)}
     for name, block in gens.items():
         pat = _re.compile(r'<!-- BEGIN:GENERATED ' + name + r' -->.*?<!-- END:GENERATED -->',
-                          _re.S)
+                          _re.DOTALL)
         if not pat.search(out):
             raise SystemExit(f"missing sentinel for generated block {name!r}")
         out = pat.sub(f"<!-- BEGIN:GENERATED {name} -->\n{block}<!-- END:GENERATED -->", out)
@@ -170,7 +173,7 @@ def main():
                       "<!-- END:GENERATED -->\n\n---\n\n## 15. References")
     out = gen_front_matter(records) + out
 
-    errs, warns = validate(records, out)
+    errs, _warns = validate(records, out)
 
     counts = Counter(r["variant"] for r in records)
     tiers = Counter(r["tier"] for r in records)
@@ -180,9 +183,9 @@ def main():
     print("errors:", errs or "none")
 
     with open(out_jsonl, "w") as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    open(out_md, "w").write(out)
+        f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+    with open(out_md, "w") as handle:
+        handle.write(out)
     return 1 if errs else 0
 
 
@@ -206,7 +209,7 @@ def gen_coverage(records):
         status = "adequate" if len(rs) >= 10 else (
             "deliberately partial" if v in ("IRP", "CARP", "LRP") else "thin")
         rows.append(f"| **{v}** | {prim[v]} | {t['P0']} / {t['P1']} / {t['P2']} | {status} |")
-    rows.append(f"| *(adversarial, §11)* | 15 | — | n/a |")
+    rows.append("| *(adversarial, §11)* | 15 | — | n/a |")
     rows.append("")
     rows.append(f"Total scenarios: **{len(records)} operational + 15 adversarial = "
                 f"{len(records) + 15}**. Counts in this table are generated from the entries "
