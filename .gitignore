@@ -73,3 +73,14 @@ rust-spike/target/
 # case for anything worth keeping belongs in tests/, not here. There is no
 # config under this path; schemathesis reads schemathesis.toml from the root.
 .schemathesis/
+
+# Interactive maps written by the example scripts -- folium output, regenerated
+# on every run and often megabytes of embedded GeoJSON. Two had been committed
+# (comparison_map.html, simple_vrp_map.html) and churned whenever anyone ran the
+# examples.
+examples/**/*.html
+# match_example.py is the only script that writes to the working directory
+# rather than beside itself, so it lands at the repository root. Named
+# explicitly rather than matching /*.html, which would silently swallow any
+# root page someone adds later.
+/match_example_map.html
