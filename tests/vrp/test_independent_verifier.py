@@ -199,8 +199,13 @@ def test_the_verifier_does_not_import_the_evaluator():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module)
     forbidden = {name for name in imported
-                 if "evaluator" in name or "solver" in name}
+                 if "evaluator" in name or "solver" in name
+                 or name.endswith("hos.schedule")}
     assert not forbidden, f"verifier must not import {forbidden}"
+    # `vrp.hos.rules` is permitted and `vrp.hos.schedule` is not, which is the
+    # same distinction as the domain types: the regulation is reference data
+    # both sides must share, the scheduler is the thing being judged. INV-7
+    # asking the scheduler whether the scheduler was right would verify nothing.
     # Importing the domain types is allowed and expected: they are data, not
     # logic, and both sides must agree on what a Step is.
     assert any(name.startswith("vrp.model") or name == "vrp.model" for name in imported)

@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from vrp.hos.rules import DriverState
+
 
 class ValidationError(ValueError):
     """A domain object was constructed in a state the specification forbids."""
@@ -145,6 +147,15 @@ class Vehicle:
     max_duration: int | None = None
     max_distance: int | None = None
     skills: frozenset[str] = frozenset()
+    # Hours-of-service rule set name (§6.4), e.g. "EU-561". None means the
+    # vehicle is not subject to driving-hours law, which is a claim about the
+    # operation rather than a default -- INV-7 reports "not applicable" only
+    # when no vehicle in the problem declares a rule set.
+    hos_rules: str | None = None
+    # Hours already consumed before this duty. §6.4 makes this mandatory input
+    # where tachograph or ELD data exists: planning a fresh nine-hour day for a
+    # driver who already drove six is a compliance incident.
+    initial_state: DriverState | None = None
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "vehicle id must not be empty")
@@ -311,10 +322,17 @@ class Step:
     departure: int
     order_id: str | None = None
     load_after: dict[str, int] = field(default_factory=dict)
+    # Set on BREAK steps only. §9.3 reports both, and AC-5.1 requires every
+    # break to name the rule that compelled it -- a break a compliance officer
+    # cannot trace to an article is not evidence of anything.
+    rule_ref: str | None = None
+    placement: str | None = None
 
     def __post_init__(self) -> None:
         _require(self.type in ("START", "PICKUP", "DELIVERY", "BREAK", "RELOAD", "END"),
                  f"unknown step type {self.type!r}")
+        _require(self.rule_ref is None or self.type == "BREAK",
+                 "rule_ref belongs on a BREAK step")
         for name in ("arrival", "start_service", "departure"):
             _require_int(getattr(self, name), name)
 

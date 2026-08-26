@@ -15,10 +15,18 @@ The domain types are shared, and only those. They are data definitions rather
 than logic, and both sides must agree on what a `Step` is or they cannot discuss
 the same plan.
 
-Invariants with no subject yet are reported **not applicable**, never passed:
-INV-7 needs the hours-of-service rules engine (T-25) and INV-8 needs locks
-(T-29). Returning "ok" for an invariant that was never evaluated is a lie that
-survives until someone ships an illegal duty timeline.
+Invariants with no subject are reported **not applicable**, never passed.
+INV-8 still needs locks (T-29). INV-7 is evaluated whenever a vehicle declares
+an hours-of-service rule set, and reported not applicable only when none does.
+Returning "ok" for an invariant that was never evaluated is a lie that survives
+until someone ships an illegal duty timeline.
+
+INV-7 imports the *rule sets* but never the scheduler. The rules are shared
+reference data in the same sense as the domain types -- both sides must agree on
+what EC-561/2006 Art.7 says or they cannot discuss the same duty -- whereas the
+scheduler is the thing under judgement. The driver state here is rebuilt from
+the timeline's own arrival and departure stamps, so a scheduler that miscounts
+its driving hours is caught rather than confirmed.
 """
 
 from __future__ import annotations
@@ -26,13 +34,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import pairwise
 
+from vrp.hos.rules import Activity, rules_for
 from vrp.model import Problem, Solution, Step
 
 # Invariants this verifier cannot yet evaluate, and why.
 NOT_APPLICABLE = {
-    "INV-7": "no hours-of-service rules engine (T-25)",
     "INV-8": "no lock model (T-29)",
 }
+NO_HOS_DECLARED = "no vehicle declares an hours-of-service rule set"
 
 
 @dataclass(frozen=True)
@@ -63,12 +72,76 @@ class Report:
 def verify(problem: Problem, solution: Solution) -> Report:
     """Check every invariant that has a subject. §4.3."""
     report = Report(not_applicable=set(NOT_APPLICABLE))
+    if not any(vehicle.hos_rules for vehicle in problem.vehicles):
+        report.not_applicable.add("INV-7")
 
     _check_coverage(problem, solution, report)               # INV-1, INV-2
     for route in solution.routes:
         _check_route(problem, route, report)                 # INV-3..INV-6
+        _check_hours_of_service(problem, route, report)      # INV-7
     _check_objective(problem, solution, report)              # INV-9
     return report
+
+
+def _check_hours_of_service(problem: Problem, route, report: Report) -> None:
+    """INV-7: the driving-hours timeline satisfies the active rule set.
+
+    Rebuilt from the timeline rather than read back from the scheduler. Time
+    between one step's departure and the next step's arrival is driving; a
+    BREAK step is a break; waiting at a stop is WAIT and servicing it is WORK.
+    That is the same reading a tachograph would take of the plan, which is the
+    point -- it is the reading that has legal consequences.
+    """
+    vehicle = problem.vehicle(route.vehicle_id)
+    if not vehicle.hos_rules:
+        return
+    try:
+        rules = rules_for(vehicle.hos_rules)
+    except ValueError as unknown:
+        report.fail("INV-7", str(unknown), vehicle_id=route.vehicle_id)
+        return
+
+    state = rules.init_state(vehicle.initial_state)
+    for previous, current in pairwise(route.steps):
+        driving = current.arrival - previous.departure
+        if driving < 0:
+            report.fail("INV-7", f"step at {current.location_id} arrives before "
+                                 f"the previous departure", vehicle_id=route.vehicle_id)
+            return
+        if driving:
+            # Checked before it is consumed: the question is whether this leg
+            # was legal to drive, not whether the totals happen to add up after.
+            if not rules.can_drive(state, driving):
+                report.fail(
+                    "INV-7",
+                    f"drove {driving}s to {current.location_id} with only "
+                    f"{rules.drive_until_break(state)}s legally available "
+                    f"under {rules.name}", vehicle_id=route.vehicle_id)
+                return
+            state = rules.advance(state, Activity.DRIVE, driving)
+
+        span = current.departure - current.arrival
+        if current.type == "BREAK":
+            if span < rules.break_duration:
+                report.fail("INV-7", f"break of {span}s is shorter than the "
+                                     f"{rules.break_duration}s {rules.name} requires",
+                            vehicle_id=route.vehicle_id)
+                return
+            state = rules.advance(state, Activity.BREAK, span)
+            continue
+        if current.waiting:
+            state = rules.advance(state, Activity.WAIT, current.waiting)
+        state = rules.advance(state, Activity.WORK,
+                              current.departure - current.start_service)
+
+    if state.drive_used > rules.max_drive:
+        report.fail("INV-7", f"duty drove {state.drive_used}s past the "
+                             f"{rules.max_drive}s {rules.name} daily limit",
+                    vehicle_id=route.vehicle_id)
+    if state.duty_used > rules.max_duty:
+        report.fail("INV-7", f"duty spanned {state.duty_used}s past the "
+                             f"{rules.max_duty}s {rules.name} window",
+                    vehicle_id=route.vehicle_id)
 
 
 def _served_orders(solution: Solution) -> list[tuple[str, str]]:
@@ -184,25 +257,47 @@ def _check_route(problem: Problem, route, report: Report) -> None:
                                      f"capacity {limit}",
                             vehicle_id=route.vehicle_id, order_id=step.order_id)
 
-    # INV-4: every arrival follows from the previous departure and the pinned
-    # matrix. Recomputed here from the matrix, never taken from the solution.
+    # INV-4: every arrival follows from the previous departure, the pinned
+    # matrix, and any breaks taken on the way. Recomputed here from the matrix,
+    # never taken from the solution.
+    #
+    # A break splits one leg into two, so BREAK steps are collapsed rather than
+    # treated as destinations: the invariant is over consecutive *stops*, with
+    # en-route break time added. Reading them as ordinary steps made every
+    # break-bearing route fail INV-4 twice -- once for the shortened leg into
+    # the break and once for the zero-length leg out of it.
     matrix = problem.matrix
-    for previous, current in pairwise(steps):
+    en_route_breaks = 0
+    previous = None
+    for current in steps:
+        if current.type == "BREAK":
+            en_route_breaks += current.departure - current.arrival
+            continue
+        if previous is None:
+            previous = current
+            continue
         origin = problem.location(previous.location_id).matrix_index
         destination = problem.location(current.location_id).matrix_index
-        expected = previous.departure + matrix.duration(origin, destination)
+        expected = (previous.departure + matrix.duration(origin, destination)
+                    + en_route_breaks)
+        en_route_breaks = 0
         if current.arrival != expected:
             report.fail("INV-4", f"arrival {current.arrival} at "
                                  f"{current.location_id} should be {expected} "
                                  f"per matrix {matrix.version}",
                         vehicle_id=route.vehicle_id, order_id=current.order_id)
+        previous = current
 
-    # INV-6: duration, distance, and the shift window.
+    # INV-6: duration, distance, and the shift window. Breaks are excluded from
+    # the distance walk for the same reason as INV-4 -- a break is a pause on an
+    # arc, not a place the vehicle drove to, and counting it as one would add a
+    # spurious leg to and from the break's nominal location.
+    driving_steps = [s for s in steps if s.type != "BREAK"]
     duration = steps[-1].arrival - steps[0].departure
     distance = sum(
         matrix.distance(problem.location(a.location_id).matrix_index,
                         problem.location(b.location_id).matrix_index)
-        for a, b in pairwise(steps)
+        for a, b in pairwise(driving_steps)
     )
     if vehicle.max_duration is not None and duration > vehicle.max_duration:
         report.fail("INV-6", f"duration {duration} exceeds max_duration "
