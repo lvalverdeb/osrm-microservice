@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: property-soak examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -386,3 +386,8 @@ jail-publish: jail-stage
 
 jail-unpublish: jail-stage
 	$(JAIL_SSH) '$(JAILCTL) unpublish'
+
+property-soak:  ## L2 gate: 10^5 generated instances against INV-1..INV-9 (SDD 11.1)
+	@echo "SDD 11.1 L2 gate: 100,000 generated cases. Minutes, not seconds."
+	VRP_PROPERTY_CASES=100000 VRP_PROPERTY_SOLVE_CASES=200 \
+		uv run python -m pytest tests/vrp/test_instance_generator.py -q

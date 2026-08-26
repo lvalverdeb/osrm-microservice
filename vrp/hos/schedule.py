@@ -53,7 +53,8 @@ class ScheduledRoute:
 
 def _drive(problem: Problem, clock: int, state: DriverState,
            rules: HoursOfServiceRules | None, travel: int, destination: str,
-           steps: list[Step], violation: str | None) -> tuple[int, DriverState, str | None]:
+           steps: list[Step], violation: str | None,
+           on_board: dict[str, int]) -> tuple[int, DriverState, str | None]:
     """Advance across one leg, inserting breaks as they fall due.
 
     Returns the clock, the driver state, and the first violation seen. Once a
@@ -82,7 +83,8 @@ def _drive(problem: Problem, clock: int, state: DriverState,
                               arrival=clock, start_service=clock,
                               departure=clock + required.duration,
                               rule_ref=required.rule_ref,
-                              placement=required.placement.value))
+                              placement=required.placement.value,
+                              load_after=dict(on_board)))
             clock += required.duration
             state = rules.advance(state, Activity.BREAK, required.duration)
             continue
@@ -120,8 +122,24 @@ def schedule_route(problem: Problem, vehicle_id: str, order_ids: list[str],
     state = rules.init_state(carry_over) if rules else (carry_over or DriverState())
     clock = start_time if start_time is not None else vehicle.shift.start
     violation: str | None = None
+
+    # Delivery-only routes leave the depot fully laden and shed load along the
+    # way. The same rule as the canonical evaluator's, restated rather than
+    # imported: this module must schedule a route without depending on the
+    # evaluator, and the rule is four lines. Without it every step reported no
+    # load at all, and INV-5 -- which checks the loads a step reports -- passed
+    # any HOS-scheduled plan without examining its capacity.
+    orders = [problem.order(order_id) for order_id in order_ids]
+    dimensions = {d for order in orders for d in order.quantities}
+    on_board = {
+        dimension: sum(order.quantities.get(dimension, 0)
+                       for order in orders if order.delivery is not None)
+        for dimension in dimensions
+    }
+
     steps: list[Step] = [Step(type="START", location_id=vehicle.start_location_id,
-                              arrival=clock, start_service=clock, departure=clock)]
+                              arrival=clock, start_service=clock, departure=clock,
+                              load_after=dict(on_board))]
 
     position = index_of[vehicle.start_location_id]
     for order_id in order_ids:
@@ -131,7 +149,7 @@ def schedule_route(problem: Problem, vehicle_id: str, order_ids: list[str],
 
         clock, state, violation = _drive(
             problem, clock, state, rules, matrix.duration(position, destination),
-            stop.location_id, steps, violation)
+            stop.location_id, steps, violation, on_board)
 
         arrival = clock
         window = stop.time_windows[0] if stop.time_windows else None
@@ -144,19 +162,22 @@ def schedule_route(problem: Problem, vehicle_id: str, order_ids: list[str],
         if rules is not None:
             state = rules.advance(state, Activity.WORK, service)
 
+        for dimension, quantity in order.quantities.items():
+            on_board[dimension] += -quantity if order.delivery else quantity
         steps.append(Step(type="DELIVERY" if order.delivery else "PICKUP",
                           location_id=stop.location_id, order_id=order_id,
                           arrival=arrival, start_service=start_service,
-                          departure=departure))
+                          departure=departure, load_after=dict(on_board)))
         clock = departure
         position = destination
 
     end = index_of[vehicle.ends_at]
     clock, state, violation = _drive(problem, clock, state, rules,
                                      matrix.duration(position, end),
-                                     vehicle.ends_at, steps, violation)
+                                     vehicle.ends_at, steps, violation, on_board)
     steps.append(Step(type="END", location_id=vehicle.ends_at, arrival=clock,
-                      start_service=clock, departure=clock))
+                      start_service=clock, departure=clock,
+                      load_after=dict(on_board)))
 
     if violation is None and clock > vehicle.shift.end:
         violation = (f"route ends at {clock} which is past the shift end "

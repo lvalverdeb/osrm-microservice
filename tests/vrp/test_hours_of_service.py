@@ -373,3 +373,22 @@ def test_the_scheduler_honours_carry_over_declared_on_the_vehicle():
     assert schedule_route(rested, "V1", order_ids, EU_561).legal
     assert not schedule_route(tired, "V1", order_ids, EU_561).legal, (
         "scheduler ignored the carry-over declared on the vehicle")
+
+
+def test_the_scheduler_reports_load_so_capacity_can_be_checked():
+    """A timeline without `load_after` cannot be checked against capacity.
+
+    INV-5 iterates the loads a step reports, so a step reporting none passes
+    silently. The scheduler produced exactly that, which meant any plan routed
+    through it was exempt from capacity checking without saying so.
+    """
+    from vrp.hos.schedule import schedule_route
+
+    problem = _long_haul(stops=3, leg_hours=1.0)
+    timeline = schedule_route(problem, "V1", ["O1", "O2", "O3"], EU_561)
+
+    start = timeline.steps[0]
+    assert start.load_after.get("units") == 3, "leaves the depot carrying all three"
+    delivered = [s for s in timeline.steps if s.type == "DELIVERY"]
+    assert [s.load_after["units"] for s in delivered] == [2, 1, 0]
+    assert timeline.steps[-1].load_after.get("units") == 0

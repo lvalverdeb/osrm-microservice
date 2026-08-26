@@ -137,7 +137,7 @@ the plan is deferred.
 
 | # | Example | Task | Satisfies | Level | Passes when |
 |---|---|---|---|---|---|
-| E-04 | `tests/vrp/test_instance_generator.py` | `T-05` | §11.1 | L2 | 10⁵ generated instances produce zero invariant violations |
+| E-04 | `tests/vrp/test_instance_generator.py` | `T-05` | §11.1 | L2 | **Done.** Generator in `vrp/generate.py`; five shapes (slack, tight capacity, tight windows, multi-depot, driving hours), each instance a pure function of its seed so a failure found at case 84,213 can be regenerated alone. **10⁵ cases run, zero violations, 55 s** — `make property-soak`. The suite runs 200 by default; `VRP_PROPERTY_CASES` scales it. A separate test asserts the tight shapes leave more orders unplaced than the slack one, so a branch that stopped biting cannot report a green gate having exercised nothing. Placement: **Python**, per criterion 2 |
 | E-05 | `tests/vrp/test_benchmark_readers.py` | `T-06` | §11.3 | L1 | Solomon, CVRPLIB, VRPLIB, Li&Lim and GH sets all parse; BKS registry loads and matches published values |
 
 ---
