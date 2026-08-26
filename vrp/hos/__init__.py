@@ -10,6 +10,7 @@ from vrp.hos.rules import (
     Placement,
     rules_for,
 )
+from vrp.hos.tachograph import DutyRecord, read_duty, resume_from
 
 __all__ = [
     "EU_561",
@@ -17,7 +18,10 @@ __all__ = [
     "Activity",
     "Break",
     "DriverState",
+    "DutyRecord",
     "HoursOfServiceRules",
     "Placement",
+    "read_duty",
+    "resume_from",
     "rules_for",
 ]
