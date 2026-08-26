@@ -23,16 +23,35 @@
   hop, which is what the tests assert. That holds only if the gateway sends
   coordinates in the order and orientation OSRM expects.
 
+  Separately, and connected to nothing:
+
+      n5 ========= n6     an island, about 5.5 km north-east of the rest
+    (0.05, 0.05)  (0.05, 0.06)
+
+  No way joins the island to East Road, so no route exists between the two
+  components and OSRM reports those pairs as null in /table. That is what makes
+  MTX-5 testable: an unreachable pair must survive into the model as an explicit
+  sentinel, never as a large finite number a solver can optimise into a plan.
+
+  Island Road is one-way eastbound, which makes n5 -> n6 routable and n6 -> n5
+  not. That gives MTX-2 a subject: a matrix that quietly symmetrises would show
+  the two as equal. The island carries it rather than the mainland so the
+  distance assertions above stay undisturbed.
+
   All ways are highway=primary with no access restrictions, so the stock car
   profile routes them without special handling.
 -->
 <osm version="0.6" generator="handwritten for tests">
-  <bounds minlat="-0.005" minlon="-0.005" maxlat="0.015" maxlon="0.025"/>
+  <bounds minlat="-0.005" minlon="-0.005" maxlat="0.055" maxlon="0.065"/>
 
   <node id="1" lat="0.0"  lon="0.0"  version="1"/>
   <node id="2" lat="0.0"  lon="0.01" version="1"/>
   <node id="3" lat="0.0"  lon="0.02" version="1"/>
   <node id="4" lat="0.01" lon="0.02" version="1"/>
+
+  <!-- The island. Deliberately joined to nothing. -->
+  <node id="5" lat="0.05" lon="0.05" version="1"/>
+  <node id="6" lat="0.05" lon="0.06" version="1"/>
 
   <way id="100" version="1">
     <nd ref="1"/>
@@ -47,5 +66,13 @@
     <nd ref="4"/>
     <tag k="highway" v="primary"/>
     <tag k="name" v="North Road"/>
+  </way>
+
+  <way id="102" version="1">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <tag k="highway" v="primary"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="name" v="Island Road"/>
   </way>
 </osm>

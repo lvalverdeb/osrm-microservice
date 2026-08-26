@@ -43,6 +43,7 @@ import httpx
 
 from vrp.evaluator import ObjectiveWeights, evaluate, route_metrics
 from vrp.model import (
+    UNREACHABLE,
     Location,
     Order,
     Problem,
@@ -135,7 +136,10 @@ def to_problem(depot: dict, deliveries: list[dict],
     # OSRM returns nulls for unreachable pairs and floats throughout; the model
     # takes whole seconds and metres.
     def grid(raw: list[list]) -> tuple[tuple[int, ...], ...]:
-        return tuple(tuple(round(cell) if cell is not None else 10 ** 9
+        # MTX-5: a null cell is unreachable, and must stay distinguishable.
+        # This said `10 ** 9` before E-10 -- a large finite arc a solver will
+        # happily optimise into a plan, returning a leg nobody can drive.
+        return tuple(tuple(round(cell) if cell is not None else UNREACHABLE
                            for cell in row) for row in raw)
 
     total_grams = sum(o.quantities["grams"] for o in orders)

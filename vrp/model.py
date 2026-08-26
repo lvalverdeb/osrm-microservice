@@ -18,6 +18,18 @@ from typing import Any
 
 from vrp.hos.rules import DriverState
 
+# MTX-5: unreachable pairs are represented explicitly and handled as hard-
+# infeasible arcs. Negative because it must be impossible to mistake for a
+# cost: a large finite sentinel is "expensive but possible", so a solver with
+# nothing better optimises it into a plan and returns a leg nobody can drive.
+# Reading one through `duration()`/`distance()` raises rather than returning
+# it, so the sentinel cannot reach arithmetic by accident either.
+UNREACHABLE = -1
+
+
+class UnreachableArc(LookupError):
+    """Raised when travel is read for a pair no route connects."""
+
 
 class ValidationError(ValueError):
     """A domain object was constructed in a state the specification forbids."""
@@ -193,12 +205,29 @@ class TravelMatrix:
                 _require(len(row) == size, f"{name} must be square ({size}x{size})")
                 for cell in row:
                     _require_int(cell, f"{name} cell")
+                    _require(cell >= 0 or cell == UNREACHABLE,
+                             f"{name} cell {cell} is negative and is not "
+                             f"UNREACHABLE ({UNREACHABLE})")
+
+    def is_reachable(self, origin: int, destination: int) -> bool:
+        """Whether any route connects the pair. Ask before reading travel."""
+        return self.durations[origin][destination] != UNREACHABLE
 
     def duration(self, origin: int, destination: int) -> int:
-        return self.durations[origin][destination]
+        return self._cell(self.durations, origin, destination, "duration")
 
     def distance(self, origin: int, destination: int) -> int:
-        return self.distances[origin][destination]
+        return self._cell(self.distances, origin, destination, "distance")
+
+    @staticmethod
+    def _cell(grid: tuple[tuple[int, ...], ...], origin: int,
+              destination: int, what: str) -> int:
+        value = grid[origin][destination]
+        if value == UNREACHABLE:
+            raise UnreachableArc(
+                f"no route from {origin} to {destination}; "
+                f"{what} is undefined, not large")
+        return value
 
 
 @dataclass(frozen=True)
