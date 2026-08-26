@@ -10,7 +10,7 @@ Traditional clustering (like K-Means or Sweep) fails in real-world logistics bec
 
 ### Phase 1: OSRM-Driven Allocation
 
-Before optimizing routes, we must assign stops to vehicles based on actual road travel times:
+Before optimising routes, we must assign stops to vehicles based on actual road travel times:
 
 1. **Depot-to-Stop Matrix**: Request a matrix from all **active depots** (warehouses) to all **unassigned delivery stops**.
 2. **Greedy Road Assignment**:

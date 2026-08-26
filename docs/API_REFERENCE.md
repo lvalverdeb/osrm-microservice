@@ -31,7 +31,7 @@ Optional OSRM general options applicable to Route, Table, Match, and Trip servic
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `bearings` | `List[str]` | Per-coordinate bearing constraints as 'angle,deviation' strings (e.g. '90,30'). |
-| `radiuses` | `List[float]` | Per-coordinate snapping radius in meters. Use `null` for unlimited. |
+| `radiuses` | `List[float]` | Per-coordinate snapping radius in metres. Use `null` for unlimited. |
 | `hints` | `List[str]` | Per-coordinate hint strings from a previous OSRM response. |
 | `approaches` | `List[str]` | Per-coordinate approach side: `unrestricted` or `curb`. |
 | `exclude` | `List[str]` | Road classes to exclude globally (e.g. `['motorway', 'toll']`). |
@@ -85,7 +85,7 @@ A single GPS trace point.
 | `longitude` | `float` | Longitude of the point. |
 | `latitude` | `float` | Latitude of the point. |
 | `timestamp` | `int` | Unix timestamp. |
-| `accuracy_meters` | `float` | Snapping radius/accuracy in meters (Default: `5.0`). |
+| `accuracy_meters` | `float` | Snapping radius/accuracy in metres (Default: `5.0`). |
 
 ### `Stop` (Inherits from `Coordinate`)
 
@@ -101,7 +101,7 @@ A geographic delivery stop or depot location with identification.
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `coordinates` | `List[Coordinate]` | Coordinates to optimize. |
+| `coordinates` | `List[Coordinate]` | Coordinates to optimise. |
 | `roundtrip` | `bool` | Return to first point at the end (Default: `true`). |
 | `source` | `str` | Start point restriction: `first` or `any`. |
 | `destination` | `str` | End point restriction: `last` or `any`. |
@@ -136,7 +136,7 @@ A geographic delivery stop or depot location with identification.
 | `capacity` | `int` | Maximum stops/packages per vehicle (Default: 35). |
 | `max_radius_km` | `float` | Optional maximum road distance from depot (km). |
 | `clustering_mode` | `str` | Clustering type: `travel_time` (default), `distance`, or `radial`. |
-| `hysteresis_m` | `float` | Depot snapping boundary tolerance in meters (Default: `2000.0`). |
+| `hysteresis_m` | `float` | Depot snapping boundary tolerance in metres (Default: `2000.0`). |
 | `roundtrip` | `bool` | Return to depot at route end (Default: `true`). |
 
 ### `VehicleRoute`
@@ -145,11 +145,11 @@ A geographic delivery stop or depot location with identification.
 | :--- | :--- | :--- |
 | `vehicle_id` | `str or int` | Suffix-labelled identifier of the vehicle. |
 | `depot_index` | `int` | Index of the assigned warehouse. |
-| `stops_indices` | `List[int]` | Optimized sequence of stop indices. |
-| `stop_ids` | `List[str or int]` | Optional list of stop IDs in optimized order. |
-| `stop_coordinates` | `List[Coordinate]` | Coordinates in optimized order. |
+| `stops_indices` | `List[int]` | Optimised sequence of stop indices. |
+| `stop_ids` | `List[str or int]` | Optional list of stop IDs in optimised order. |
+| `stop_coordinates` | `List[Coordinate]` | Coordinates in optimised order. |
 | `route_geometry` | `Dict` | GeoJSON LineString geometry of the route. |
-| `distance_meters` | `float` | Total distance in meters. |
+| `distance_meters` | `float` | Total distance in metres. |
 | `duration_seconds` | `float` | Total duration in seconds. |
 
 ### `VrpResponse`
@@ -157,7 +157,7 @@ A geographic delivery stop or depot location with identification.
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `code` | `str` | Response status code. |
-| `routes` | `List[VehicleRoute]` | Optimized routes per vehicle. |
+| `routes` | `List[VehicleRoute]` | Optimised routes per vehicle. |
 | `total_distance` | `float` | Total distance across all vehicles. |
 | `total_duration` | `float` | Total travel time across all vehicles. |
 
@@ -299,7 +299,7 @@ coordinates. Split larger jobs, or narrow them with `sources`/`destinations`.
 
 #### `POST /matrix-graph`
 
-Builds a serializable directed graph representation of the matrix.
+Builds a serialisable directed graph representation of the matrix.
 
 **Request Body (`MatrixRequest`):** Same as `POST /matrix`.
 

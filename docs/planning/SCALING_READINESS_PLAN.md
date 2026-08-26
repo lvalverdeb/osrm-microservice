@@ -226,7 +226,7 @@ returns 422/503 rather than dying; the single-request path is unchanged.
 **Implemented** as `VRP_MAX_STOPS` (2000, enforced by `VrpRequest.stops` so the
 OpenAPI maximum and the enforced maximum cannot drift) and an
 `asyncio.Semaphore(VRP_MAX_CONCURRENCY)` in `app/main.py` guarding both
-optimization endpoints, with `VRP_QUEUE_TIMEOUT` seconds of queueing before a
+optimisation endpoints, with `VRP_QUEUE_TIMEOUT` seconds of queueing before a
 503 carrying `Retry-After`. The semaphore is per process, so the node-wide bound
 is `WORKERS x VRP_MAX_CONCURRENCY` -- the default of 1 pairs with the two
 workers from P0-3 for roughly 550 MB of worst-case solve memory. Covered by

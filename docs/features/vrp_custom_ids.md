@@ -50,4 +50,4 @@ python examples/clustering/generate_payload.py
 python examples/clustering/run_clustering_workflow.py
 ```
 
-The resulting `.html` maps successfully use the IDs to lookup coordinates for visualization, demonstrating the robustness of this new approach.
+The resulting `.html` maps successfully use the IDs to lookup coordinates for visualisation, demonstrating the robustness of this new approach.

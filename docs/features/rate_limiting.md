@@ -73,7 +73,7 @@ HTTP Status: `429 Too Many Requests`.
 |-------------------|-------|-----------|
 | Routing (`/route`, `/match`, `/nearest`, `/tile`) | 600/min | Lightweight OSRM pass-through, high throughput expected. |
 | Matrix (`/matrix`, `/matrix-graph`) | 300/min | Matrix computation is heavier; OSRM `/table` has internal size limits. |
-| Trip (`/trip`) | 300/min | TSP optimization is compute-intensive for large point sets. |
+| Trip (`/trip`) | 300/min | TSP optimisation is compute-intensive for large point sets. |
 | VRP (`/vrp`, `/vrp/allocate`) | 100/min | Multi-phase solver: matrix batching + per-cluster TSP. Most expensive endpoint. |
 | System (`/health`, `/metrics`) | Unlimited | Monitoring probes must never be blocked. |
 

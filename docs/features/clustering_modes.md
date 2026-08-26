@@ -1,6 +1,6 @@
 # VRP Clustering Modes
 
-The VRP solver's Location-Allocation phase uses a **clustering mode** to determine which depot (warehouse) each delivery stop is assigned to. Three modes are available, each optimized for different logistical realities.
+The VRP solver's Location-Allocation phase uses a **clustering mode** to determine which depot (warehouse) each delivery stop is assigned to. Three modes are available, each optimised for different logistical realities.
 
 ---
 
@@ -9,7 +9,7 @@ The VRP solver's Location-Allocation phase uses a **clustering mode** to determi
 | Mode | Primary Metric | Speed | Accuracy | Best For |
 |------|---------------|-------|----------|----------|
 | `travel_time` | OSRM road duration | Fast | High | General-purpose logistics where delivery time matters most. |
-| `distance` | OSRM road distance | Fast | High | Fuel-cost optimization or distance-constrained fleets. |
+| `distance` | OSRM road distance | Fast | High | Fuel-cost optimisation or distance-constrained fleets. |
 | `radial` | Euclidean (straight-line) | Fastest | Low | Quick initial partitioning, uniform terrain, no road barriers. |
 
 ---
@@ -20,13 +20,13 @@ The VRP solver's Location-Allocation phase uses a **clustering mode** to determi
 
 Selects the depot with the **shortest road travel duration** from the OSRM matrix. This accounts for one-way streets, speed limits, turn restrictions, and geographic barriers.
 
-The hysteresis buffer is converted from meters to seconds using an assumed average speed of 40 km/h (`hysteresis_m / 11.111`), so a 2000m buffer becomes ~180 seconds.
+The hysteresis buffer is converted from metres to seconds using an assumed average speed of 40 km/h (`hysteresis_m / 11.111`), so a 2000m buffer becomes ~180 seconds.
 
 **Recommended for:** Most delivery and logistics use cases.
 
 ### `distance`
 
-Selects the depot with the **shortest road distance** from the OSRM matrix. Hysteresis is applied directly in meters.
+Selects the depot with the **shortest road distance** from the OSRM matrix. Hysteresis is applied directly in metres.
 
 **Recommended for:** Fuel-cost-sensitive operations, or when delivery time is not the primary constraint.
 

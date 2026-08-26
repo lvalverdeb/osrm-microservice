@@ -168,8 +168,8 @@ When disabled, the tracing middleware is still installed but spans are dropped s
 | `MATRIX_BATCH_SIZE` | `500` | Ceiling on stops per matrix batch sent to OSRM `/table`. The cell budget below binds first once there is more than a handful of depots. |
 | `MATRIX_MAX_CELLS` | `10000` | Maximum `sources x destinations` cells in one `/matrix` or `/matrix-graph` request; beyond it the request is rejected with 422. |
 | `VRP_CHUNK_CONCURRENCY` | `4` | TSP chunks solved concurrently within one VRP request. Node-wide concurrent `/trip` calls are `WORKERS x VRP_MAX_CONCURRENCY x VRP_CHUNK_CONCURRENCY`. |
-| `VRP_HYSTERESIS_M` | `2000.0` | Hysteresis buffer in meters preventing assignment flapping near depot boundaries. |
-| `VRP_SANITY_LIMIT_M` | `50000.0` | Maximum Euclidean distance (meters) between a stop's anchor depot and its cost-matrix optimum before the sanity override kicks in. |
+| `VRP_HYSTERESIS_M` | `2000.0` | Hysteresis buffer in metres preventing assignment flapping near depot boundaries. |
+| `VRP_SANITY_LIMIT_M` | `50000.0` | Maximum Euclidean distance (metres) between a stop's anchor depot and its cost-matrix optimum before the sanity override kicks in. |
 | `VRP_MAX_STOPS` | `2000` | Maximum stops accepted in one `/vrp` or `/vrp/allocate` request. Beyond it the request is rejected with 422. |
 | `VRP_MAX_CONCURRENCY` | `1` | Solves allowed to run at once **per worker process**. A node admits `WORKERS x VRP_MAX_CONCURRENCY`. |
 | `VRP_QUEUE_TIMEOUT` | `10.0` | Seconds a request waits for a free solve slot before it is shed with 503 and a `Retry-After` header. |
@@ -190,7 +190,7 @@ roughly twice the engine's core count the calls simply queue at `osrm-routed`
 instead of here, so raise it against measured engine latency rather than by
 analogy with the worker count.
 
-Peak memory for an optimization request is stops x concurrent solves: a single
+Peak memory for an optimisation request is stops x concurrent solves: a single
 2000-stop solve peaked at 277 MB and four concurrent ones reached 615 MB on a
 2 GB host, which is why both factors are bounded. Raise either value only
 against a measured RSS ceiling for the target host, and remember

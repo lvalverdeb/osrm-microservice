@@ -112,7 +112,7 @@ nearest_payload = {
 }
 nearest_res = requests.post(f"{BASE_URL}/nearest", json=nearest_payload)
 
-# 3. Traveling Salesperson Problem (TSP)
+# 3. Travelling Salesperson Problem (TSP)
 tsp_payload = {
     "coordinates": [
         {"longitude": -84.0907, "latitude": 9.9281},
@@ -147,7 +147,7 @@ vrp_res = requests.post(f"{BASE_URL}/vrp", json=vrp_payload)
 
 ## Visualization Tools
 
-The project includes Python tools to visualize and compare routes:
+The project includes Python tools to visualise and compare routes:
 
 ### Example Scripts
 
@@ -161,10 +161,10 @@ The project includes Python tools to visualize and compare routes:
 | | `nearest_example.py` | Road snapping with multiple nearest segments |
 | | `match_example.py` | GPS trace map matching with raw vs matched geometry |
 | | `tile_example.py` | Mapbox Vector Tile download from `/tile` |
-| **Benchmarking** | `compare_tsp.py` | Actual vs TSP-optimized delivery sequence comparison |
+| **Benchmarking** | `compare_tsp.py` | Actual vs TSP-optimised delivery sequence comparison |
 | | `clustering_mode_comparison.py` | travel_time vs distance vs radial clustering on same dataset |
 | | `hysteresis_demo.py` | Hysteresis buffer preventing assignment flapping |
-| **VRP** | `visualize_vrp.py` | Multi-warehouse VRP with color-coded vehicle routes |
+| **VRP** | `visualize_vrp.py` | Multi-warehouse VRP with colour-coded vehicle routes |
 | | `stress_test_vrp.py` | 6 warehouses + 2500 stops stress test |
 | | `simple_id_example.py` | 10 vehicles, 300 stops with custom IDs |
 | | `run_clustering_workflow.py` | 6500-stop clustering with road distance vs travel time |
@@ -197,7 +197,7 @@ uv run --package osrm-api-gateway-examples examples/src/clustering/simple_id_exa
 # Infrastructure
 uv run --package osrm-api-gateway-examples examples/src/infra/health_and_metrics.py
 
-# Compare actual vs optimized sequences
+# Compare actual vs optimised sequences
 uv run --package osrm-api-gateway-examples examples/src/benchmarking/compare_tsp.py
 ```
 
@@ -301,4 +301,4 @@ For a detailed developer guide, see:
 - **OSRM Engine**: C++ routing powerhouse running the MLD algorithm.
 - **Gateway**: An async Rust service (axum) providing specialised endpoints for map matching, graph generation, and Vehicle Routing Problems (VRP).
 - **VRP Solver**: Location-Allocation engine for multi-vehicle clustering with support for custom IDs and capacity-based route splitting.
-- **NetworkX Integration**: Transparently converts matrix outputs into serializable graphs.
+- **NetworkX Integration**: Transparently converts matrix outputs into serialisable graphs.

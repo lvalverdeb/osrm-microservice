@@ -9,4 +9,4 @@ This feature provides automated system configurations and instructions to make A
 
 ## Usage
 
-AI agents will automatically read `CLAUDE.md` and `AGENTS.md` upon initialization. This prevents style inconsistencies, broken virtual environments, and unformatted outputs.
+AI agents will automatically read `CLAUDE.md` and `AGENTS.md` upon initialisation. This prevents style inconsistencies, broken virtual environments, and unformatted outputs.
