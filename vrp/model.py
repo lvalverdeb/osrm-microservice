@@ -85,6 +85,10 @@ class Location:
     # make every ordinary address unservable. Weight is modelled because it is
     # the limit that collapses bridges; height, emission class and permitted
     # hours are named in §4.1 and are not modelled yet.
+    # FR-19 / §6.9: loading bays are finite. None means unconstrained -- most
+    # depots are not the bottleneck, and reading an unset value as zero would
+    # make every plan fiction.
+    dock_capacity: int | None = None
     access_classes: frozenset[str] = frozenset()
     max_vehicle_kg: int | None = None
 
@@ -96,6 +100,10 @@ class Location:
         _require(self.matrix_index >= 0, "matrix_index must not be negative")
         _require_int(self.dwell_overhead, "dwell_overhead")
         _require(self.dwell_overhead >= 0, "dwell_overhead must not be negative")
+        if self.dock_capacity is not None:
+            _require_int(self.dock_capacity, "dock_capacity")
+            _require(self.dock_capacity >= 0,
+                     "dock_capacity must not be negative")
         if self.max_vehicle_kg is not None:
             _require_int(self.max_vehicle_kg, "max_vehicle_kg")
             _require(self.max_vehicle_kg >= 0,
@@ -211,6 +219,12 @@ class Vehicle:
     # see `service_time`.
     service_factor_ppt: int = 1000
     # FR-11's other side: what this vehicle is, for site access purposes.
+    # FR-09 / §6.8: a van that empties before its shift ends returns, reloads
+    # and goes again. Reload is only possible where stock is, so the locations
+    # are named rather than assumed to be the start depot.
+    reload_locations: frozenset[str] = frozenset()
+    max_reloads: int = 0
+    reload_duration: int = 0
     access_class: str | None = None
     gross_weight_kg: int | None = None
     # FR-08's "end-anywhere". Deliberately not spelled `end_location_id=None`:
@@ -244,6 +258,14 @@ class Vehicle:
             # finds that arbitrage on the first iteration.
             _require(cost >= 0, f"{name} must not be negative")
         _require(bool(self.profile), "profile must not be empty")
+        _require_int(self.max_reloads, "max_reloads")
+        _require(self.max_reloads >= 0, "max_reloads must not be negative")
+        _require_int(self.reload_duration, "reload_duration")
+        _require(self.reload_duration >= 0,
+                 "reload_duration must not be negative")
+        _require(not self.max_reloads or self.reload_locations,
+                 "max_reloads without reload_locations permits reloading "
+                 "nowhere; name the depots or satellites that hold stock")
         _require_int(self.service_factor_ppt, "service_factor_ppt")
         # Zero would service every stop instantly, which is never meant and is
         # precisely what a solver would exploit.

@@ -85,6 +85,8 @@ def verify(problem: Problem, solution: Solution) -> Report:
         _check_hours_of_service(problem, route, report)      # INV-7
     for route in solution.routes:
         _check_compatibility(problem, route, report)         # INV-10
+        _check_reloads(problem, route, report)               # INV-11
+    _check_docks(problem, solution, report)                  # INV-12
     _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
     return report
@@ -151,6 +153,62 @@ def _check_compatibility(problem: Problem, route, report: Report) -> None:
                         f"{vehicle.gross_weight_kg} kg exceeds {location.id}'s "
                         f"{location.max_vehicle_kg} kg limit",
                         vehicle_id=route.vehicle_id, order_id=step.order_id)
+
+
+def _check_reloads(problem: Problem, route, report: Report) -> None:
+    """INV-11: reloads happen where stock is, and no more often than allowed.
+
+    §6.8 models a reload as an intermediate depot visit that resets the load. A
+    van cannot reload on a customer's doorstep, so the permitted locations are
+    named on the vehicle -- and a plan that reloads elsewhere is describing a
+    vehicle refilling itself from nothing.
+    """
+    vehicle = problem.vehicle(route.vehicle_id)
+    reloads = [step for step in route.steps if step.type == "RELOAD"]
+    if not reloads:
+        return
+
+    if len(reloads) > vehicle.max_reloads:
+        report.fail("INV-11",
+                    f"{len(reloads)} reloads, {vehicle.max_reloads} permitted",
+                    vehicle_id=route.vehicle_id)
+    for step in reloads:
+        if step.location_id not in vehicle.reload_locations:
+            report.fail("INV-11",
+                        f"reloaded at {step.location_id}, which holds no stock "
+                        f"for {vehicle.id}", vehicle_id=route.vehicle_id)
+
+
+def _check_docks(problem: Problem, solution: Solution, report: Report) -> None:
+    """INV-12: no more vehicles at a bay than the depot has. FR-19, §6.9.
+
+    "If 40 vehicles are planned to depart at 06:00 and there are 8 bays, the
+    plan is fiction." Occupancy is counted over the intervals vehicles are
+    actually at the depot -- loading at the start, or reloading mid-shift --
+    rather than over fixed time buckets. Buckets would need a bucket width
+    nobody has specified, and would miss an overlap that straddles a boundary.
+    """
+    occupancy: dict[str, list[tuple[int, int]]] = {}
+    for route in solution.routes:
+        for step in route.steps:
+            if step.type not in ("START", "RELOAD"):
+                continue
+            if step.departure > step.start_service:
+                occupancy.setdefault(step.location_id, []).append(
+                    (step.start_service, step.departure))
+
+    for location_id, spans in occupancy.items():
+        capacity = problem.location(location_id).dock_capacity
+        if capacity is None:
+            continue
+        # Sweep the endpoints: occupancy only changes where a span begins.
+        for start, _ in spans:
+            here = sum(1 for begin, end in spans if begin <= start < end)
+            if here > capacity:
+                report.fail("INV-12",
+                            f"{here} vehicles at {location_id} at {start}; "
+                            f"{capacity} bay(s)")
+                break
 
 
 def _check_locks(problem: Problem, solution: Solution, report: Report) -> None:

@@ -161,6 +161,10 @@ def compile_problem(problem: Problem) -> _Compiled:
     depot_ids = {vehicle.start_location_id for vehicle in problem.vehicles}
     depot_ids |= {vehicle.ends_at for vehicle in problem.vehicles
                   if not vehicle.open_route}
+    # A reload location must exist as a depot in the model, or PyVRP has
+    # nowhere to send the vehicle back to.
+    depot_ids |= {name for vehicle in problem.vehicles
+                  for name in vehicle.reload_locations}
     depots = {
         location.id: model.add_depot(location=handles[location.matrix_index],
                                      tw_early=min(v.shift.start for v in problem.vehicles),
@@ -297,6 +301,15 @@ def compile_problem(problem: Problem) -> _Compiled:
         if vehicle.overtime_cost_per_second:
             costs["unit_overtime_cost"] = vehicle.overtime_cost_per_second
 
+        # FR-09: PyVRP models multi-trip natively as reload depots, so this is
+        # wiring. §6.8 forbids approximating it by chaining single-trip plans,
+        # which is what a hand-rolled version would end up doing.
+        if vehicle.max_reloads and vehicle.reload_locations:
+            limits["reload_depots"] = [
+                depots[name] for name in sorted(vehicle.reload_locations)
+                if name in depots]
+            limits["max_reloads"] = vehicle.max_reloads
+
         model.add_vehicle_type(
             num_available=1,
             capacity=[vehicle.capacities.get(name, 0) for name in dimensions],
@@ -356,6 +369,7 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
 
     for route in best.routes():
         vehicle_id = compiled.vehicle_ids[route.vehicle_type()]
+        vehicle = problem.vehicle(vehicle_id)
         # Load is reconstructed rather than read back: PyVRP reports a route
         # total, and INV-5 is about the load carried at each step.
         # The vehicle leaves the depot carrying everything it will drop, and
@@ -363,27 +377,44 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
         # back: PyVRP reports a route total, and INV-5 is about the load at
         # each step -- which for a route that both drops and collects is a
         # different number (§6.1's peak, not the total).
-        # Only job deliveries are loaded at the depot. A shipment's goods sit
-        # somewhere else until the vehicle collects them -- and they are
-        # excluded here by `is_client()` alone, because a shipment activity is
+        # Only job deliveries are loaded at the depot, and -- with multi-trip
+        # (§6.8) -- only the ones for the *current* trip. Summing the whole
+        # route had a 100 kg van leaving the depot carrying 180 kg of a
+        # three-trip day, which INV-5 rightly rejected.
+        #
+        # Shipments are excluded by `is_client()` alone: a shipment activity is
         # never a client. An explicit `kind == "JOB"` test alongside it was
-        # unfalsifiable: perturbation could not make it fail, which is the
-        # signature of a guard that reads as protection and provides none.
-        on_board = {
-            name: sum(
-                problem.order(compiled.order_by_client[activity.idx])
-                .quantities.get(name, 0)
-                for activity in route
-                if activity.is_client()
-                and problem.order(
-                    compiled.order_by_client[activity.idx]).delivery is not None)
-            for name in dimensions
-        }
+        # unfalsifiable, which is the signature of a guard that reads as
+        # protection and provides none.
+        activities = list(route)
+        # From 1, not 0: position 0 is the START depot itself, and a scan
+        # beginning there stops on its own boundary and loads nothing.
+        on_board = _trip_load(problem, compiled, activities, 1, dimensions)
 
         steps: list[Step] = []
-        for activity in route:
+        for position, activity in enumerate(activities):
             if activity.is_depot():
-                kind = "START" if not steps else "END"
+                # A depot visit in the middle of a route is a reload, not an
+                # end (§6.8). Mapping every one after the first as END gave a
+                # multi-trip route three ENDs, which no invariant expected and
+                # which hid the reload from INV-11 entirely.
+                last = position == len(activities) - 1
+                kind = "START" if not steps else ("END" if last else "RELOAD")
+                if kind == "RELOAD":
+                    # Restocked for the next trip only, which is what makes
+                    # multi-trip legal at all: the van never holds more than one
+                    # trip's worth.
+                    on_board.update(_trip_load(problem, compiled, activities,
+                                               position + 1, dimensions))
+                    steps.append(Step(
+                        type="RELOAD", location_id=vehicle.reload_locations and
+                        next(iter(sorted(vehicle.reload_locations))) or
+                        vehicle.start_location_id,
+                        arrival=activity.start_time,
+                        start_service=activity.start_time,
+                        departure=activity.end_time,
+                        load_after=dict(on_board)))
+                    continue
                 if kind == "END" and problem.vehicle(vehicle_id).open_route:
                     # The sink is a modelling device, not a place. An open
                     # route ends where it last stopped, which is the step
@@ -450,6 +481,28 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
                     objective_breakdown={},
                     status="FEASIBLE" if feasible else "INFEASIBLE",
                     solver=dict(solver or {}) or None)
+
+
+def _trip_load(problem: Problem, compiled: _Compiled, activities: list,
+               start: int, dimensions: tuple[str, ...]) -> dict[str, int]:
+    """What the vehicle carries out of the depot for one trip. §6.8.
+
+    A trip runs from `start` to the next depot visit. Everything the vehicle
+    will drop before then is on board when it leaves; everything after is
+    collected on a later reload.
+    """
+    total = dict.fromkeys(dimensions, 0)
+    for activity in activities[start:]:
+        if activity.is_depot():
+            break
+        if not activity.is_client():
+            continue
+        order = problem.order(compiled.order_by_client[activity.idx])
+        if order.delivery is None:
+            continue
+        for name in dimensions:
+            total[name] += order.quantities.get(name, 0)
+    return total
 
 
 def _depot_location_id(problem: Problem, route, activity) -> str:
