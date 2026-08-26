@@ -148,7 +148,7 @@ the plan is deferred.
 |---|---|---|---|---|---|
 | E-10 | `tests/vrp/test_osrm_adapter.py` | `T-10` | MTX-1…5 | L1 | Matrix built against a live engine; unreachable pairs carry the sentinel, not zero; snapping recorded |
 | E-11 | `tests/vrp/test_matrix_cache.py` | `T-11` | MTX-6,7,10 | L1 | Content-addressed key; chunking reassembles identically to an unchunked call |
-| E-12 | `examples/src/fleet/tw/cvrptw_pyvrp.py` | `T-12` | FR-01…08 | L4 | Solves a Solomon instance; the verifier accepts the result |
+| E-12 | `tests/vrp/test_pyvrp_adapter.py` | `T-12` | FR-01…08 | L1 | **Done.** PyVRP adapter in `vrp/solve/`; the verifier accepts the plan the solver produced. Instance is Solomon-shaped but built in the domain model — reading real Solomon files is `E-05`. Placement: **Python**, per criterion 2 |
 | E-13 | `tests/vrp/test_objective_tiering.py` | `T-13` | §5.1, FR-13 | L1 | A higher tier is never traded for a lower one; instance-derived scaling holds |
 | E-14 | `examples/src/fleet/explain/preflight_diagnosis.py` | `T-14` | FR-01, §6.5 | L1 | Every seeded infeasible order returns its specific reason code, not a generic failure |
 | E-15 | `tests/vrp/test_solve_api.py` | `T-15` | NFR-03, §9.4 | L1 | Idempotency key honoured; anytime incumbent readable mid-solve |
