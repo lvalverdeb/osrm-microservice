@@ -58,6 +58,12 @@ dev = [
     # nothing. It is a compiled wheel, so it costs install time -- worth it to
     # keep the benchmark gate (CON-9) able to run at all.
     "pyvrp>=0.14",
+    # The second engine, SDD 7.3's "expressiveness escape hatch" (T-30). Also
+    # in `dev` and for the same reason as pyvrp: an agreement test between two
+    # engines that skips because one is missing proves nothing, and CON-3's
+    # claim -- that no solver concept leaks into the domain layer -- is only
+    # demonstrated by a second engine actually consuming the same Problem.
+    "ortools>=9.10",
 ]
 
 [project.urls]
