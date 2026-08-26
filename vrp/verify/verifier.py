@@ -83,9 +83,74 @@ def verify(problem: Problem, solution: Solution) -> Report:
     for route in solution.routes:
         _check_route(problem, route, report)                 # INV-3..INV-6
         _check_hours_of_service(problem, route, report)      # INV-7
+    for route in solution.routes:
+        _check_compatibility(problem, route, report)         # INV-10
     _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
     return report
+
+
+def _check_compatibility(problem: Problem, route, report: Report) -> None:
+    """INV-10: skills, order-to-order classes, and site access. FR-10, FR-11.
+
+    Numbered past §4.3's INV-9 deliberately. §4.3 lists nine invariants and
+    none of them covers compatibility, so a plan putting a tail-lift load on a
+    van without one satisfied every invariant the specification names. The
+    machinery existed -- `required_skills` since E-01, checked by `preflight`
+    since E-14 -- and nothing checked a finished plan against it, which is
+    worse than having no skill model at all because it invites people to rely
+    on one.
+
+    Order-to-order incompatibility is tracked as a running set of classes on
+    the route rather than by comparing every pair. §6.5 requires that: pairwise
+    checking is O(n^2) per move, and this is the same shape the solver would
+    need.
+    """
+    vehicle = problem.vehicle(route.vehicle_id)
+    carried: set[str] = set()
+    forbidden: set[str] = set()
+
+    for step in route.steps:
+        if step.order_id is None:
+            continue
+        order = problem.order(step.order_id)
+
+        missing = order.required_skills - vehicle.skills
+        if missing:
+            report.fail("INV-10", f"{vehicle.id} lacks {sorted(missing)}",
+                        vehicle_id=route.vehicle_id, order_id=step.order_id)
+
+        # Both directions from one pass: what this order forbids, and what
+        # already on board forbids it. Checking only the first would let the
+        # same pair through whenever they were loaded the other way round.
+        if order.order_class and order.order_class in forbidden:
+            report.fail("INV-10",
+                        f"{order.order_class} shares a route with a class that "
+                        f"forbids it", vehicle_id=route.vehicle_id,
+                        order_id=step.order_id)
+        clash = order.incompatible_with & carried
+        if clash:
+            report.fail("INV-10",
+                        f"incompatible with {sorted(clash)} already on board",
+                        vehicle_id=route.vehicle_id, order_id=step.order_id)
+        if order.order_class:
+            carried.add(order.order_class)
+        forbidden |= order.incompatible_with
+
+        location = problem.location(step.location_id)
+        if (location.access_classes
+                and vehicle.access_class not in location.access_classes):
+            report.fail("INV-10",
+                        f"{vehicle.id} is {vehicle.access_class!r}; "
+                        f"{location.id} admits {sorted(location.access_classes)}",
+                        vehicle_id=route.vehicle_id, order_id=step.order_id)
+        if (location.max_vehicle_kg is not None
+                and vehicle.gross_weight_kg is not None
+                and vehicle.gross_weight_kg > location.max_vehicle_kg):
+            report.fail("INV-10",
+                        f"{vehicle.gross_weight_kg} kg exceeds {location.id}'s "
+                        f"{location.max_vehicle_kg} kg limit",
+                        vehicle_id=route.vehicle_id, order_id=step.order_id)
 
 
 def _check_locks(problem: Problem, solution: Solution, report: Report) -> None:

@@ -196,15 +196,18 @@ def test_every_reported_code_is_in_the_closed_vocabulary():
 
 
 def test_the_unimplementable_codes_are_named_rather_than_silently_absent():
-    """Four of §6.5's ten codes cannot be decided here, and saying so in the
-    module beats a caller waiting for a code that never arrives.
+    """The codes that cannot be decided here, named rather than omitted.
 
-    Two need a solve (a pre-flight pass cannot know the fleet ran out), and two
-    need model concepts that do not exist yet.
+    Two need a solve -- a pre-flight pass cannot know the fleet ran out -- and
+    one needs depot inventory. INCOMPATIBLE_ONLY was among them until E-22
+    modelled order-to-order classes, which is why this set shrinks rather than
+    being a fixed list.
     """
+    # INCOMPATIBLE_ONLY left this set with E-22, which modelled order-to-order
+    # incompatibility. The two that remain need a solve; the third needs depot
+    # inventory.
     assert set(UNIMPLEMENTED) == {
-        "INCOMPATIBLE_ONLY", "FLEET_EXHAUSTED", "DROPPED_BY_PRIZE",
-        "DEPOT_STOCKOUT"}
+        "FLEET_EXHAUSTED", "DROPPED_BY_PRIZE", "DEPOT_STOCKOUT"}
     assert all(why for why in UNIMPLEMENTED.values()), "each needs a reason"
     assert set(UNIMPLEMENTED) <= set(REASONS), "and each must be a real code"
 

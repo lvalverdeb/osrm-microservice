@@ -47,7 +47,6 @@ REASONS: dict[str, str] = {
 # Named rather than omitted: "we cannot decide this" and "this never happens"
 # look identical from outside, and only one of them is a reason to wait.
 UNIMPLEMENTED: dict[str, str] = {
-    "INCOMPATIBLE_ONLY": "order-to-order incompatibility is not modelled (§6.5)",
     "FLEET_EXHAUSTED": "needs a solve; a pre-flight pass cannot know what the "
                        "fleet had left",
     "DROPPED_BY_PRIZE": "needs a solve; the marginal cost is only known once a "
@@ -80,8 +79,12 @@ def _eligible(problem: Problem, order: Order) -> list[Vehicle]:
     # the pin said "only V2" and nothing said V2 was staying in the yard.
     forbidden = {lock.vehicle_id for lock in problem.locks
                  if lock.kind == "FORBID_DEPLOY"}
+    stop = order.delivery or order.pickup
+    site = problem.location(stop.location_id)
     fleet = [v for v in problem.vehicles
-             if order.required_skills <= v.skills and v.id not in forbidden]
+             if order.required_skills <= v.skills
+             and v.id not in forbidden
+             and _may_enter(v, site)]
     for lock in problem.locks:
         if lock.order_id != order.id:
             continue
@@ -92,6 +95,15 @@ def _eligible(problem: Problem, order: Order) -> list[Vehicle]:
         elif lock.kind == "PIN_DEPOT":
             fleet = [v for v in fleet if v.start_location_id == lock.depot_id]
     return fleet
+
+
+def _may_enter(vehicle: Vehicle, site) -> bool:
+    """FR-11. Empty `access_classes` means unrestricted, not "admits nothing"."""
+    if site.access_classes and vehicle.access_class not in site.access_classes:
+        return False
+    return not (site.max_vehicle_kg is not None
+                and vehicle.gross_weight_kg is not None
+                and vehicle.gross_weight_kg > site.max_vehicle_kg)
 
 
 def _pinned(problem: Problem, order: Order) -> bool:
@@ -158,6 +170,27 @@ def _duty_fits(problem: Problem, order: Order, vehicle: Vehicle) -> bool:
     return driving <= rules.remaining_drive(rules.init_state(vehicle.initial_state))
 
 
+def _forced_together_with_an_enemy(problem: Problem, order: Order,
+                                   usable: list[Vehicle]) -> bool:
+    """Would serving everything put this order beside a class it forbids?
+
+    True only when the fleet is demonstrably too small: fewer vehicles than
+    mutually-incompatible groups. That is decidable without a solve. Anything
+    subtler -- capacity or windows forcing a particular pairing -- is
+    FLEET_EXHAUSTED's territory and needs the search.
+    """
+    classes = {other.order_class for other in problem.orders
+               if other.order_class}
+    if not classes or len(usable) > 1:
+        return False
+    enemies = {other.order_class for other in problem.orders
+               if other.id != order.id and other.order_class
+               and (other.order_class in order.incompatible_with
+                    or (order.order_class
+                        and order.order_class in other.incompatible_with))}
+    return bool(enemies)
+
+
 def preflight(problem: Problem) -> dict[str, Finding]:
     """Diagnose every order that no vehicle can serve on its own.
 
@@ -221,5 +254,18 @@ def preflight(problem: Problem) -> dict[str, Finding]:
             report("DUTY_LIMIT",
                    "the round trip alone exceeds every eligible driver's "
                    "remaining legal driving time")
+            continue
+
+        # FR-10, and the code E-14 had to declare unimplemented: an order that
+        # can only travel on vehicles the rest of the work also needs, where
+        # every one of those pairings is forbidden. Pre-flight can see this
+        # only in the narrow case where the fleet is too small to separate
+        # them; the general form needs a solve, and saying so beats a
+        # confident wrong answer.
+        if _forced_together_with_an_enemy(problem, order, usable):
+            report("INCOMPATIBLE_ONLY",
+                   f"class {order.order_class!r} cannot share a vehicle with "
+                   f"the rest of the work, and there are not enough vehicles "
+                   f"to separate them")
 
     return findings

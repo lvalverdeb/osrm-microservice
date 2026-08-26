@@ -81,6 +81,12 @@ class Location:
     lon: float
     matrix_index: int
     dwell_overhead: int = 0
+    # FR-11 site access. Empty means unrestricted -- the inverse reading would
+    # make every ordinary address unservable. Weight is modelled because it is
+    # the limit that collapses bridges; height, emission class and permitted
+    # hours are named in §4.1 and are not modelled yet.
+    access_classes: frozenset[str] = frozenset()
+    max_vehicle_kg: int | None = None
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "location id must not be empty")
@@ -90,6 +96,10 @@ class Location:
         _require(self.matrix_index >= 0, "matrix_index must not be negative")
         _require_int(self.dwell_overhead, "dwell_overhead")
         _require(self.dwell_overhead >= 0, "dwell_overhead must not be negative")
+        if self.max_vehicle_kg is not None:
+            _require_int(self.max_vehicle_kg, "max_vehicle_kg")
+            _require(self.max_vehicle_kg >= 0,
+                     "max_vehicle_kg must not be negative")
 
 
 @dataclass(frozen=True)
@@ -139,6 +149,12 @@ class Order:
     prize: int = 0
     release_time: int = 0
     required_skills: frozenset[str] = frozenset()
+    # FR-10 order-to-order incompatibility, as classes rather than order ids:
+    # "foodstuff must not share a compartment with hazardous goods" is a
+    # statement about kinds, and §6.5 requires incremental class-count tracking
+    # per route precisely because pairwise checking is quadratic per move.
+    order_class: str | None = None
+    incompatible_with: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "order id must not be empty")
@@ -152,6 +168,9 @@ class Order:
         else:
             _require((self.pickup is None) != (self.delivery is None),
                      "a JOB needs exactly one of pickup or delivery")
+        _require(not self.incompatible_with or self.order_class,
+                 "an order declaring incompatible_with must have an "
+                 "order_class, or nothing can be incompatible with it in turn")
         _require_int(self.priority_tier, "priority_tier")
         _require_int(self.prize, "prize")
         _require_int(self.release_time, "release_time")
@@ -191,6 +210,9 @@ class Vehicle:
     # is a tail-lift van at 60% of manual handling. Scales the handling only --
     # see `service_time`.
     service_factor_ppt: int = 1000
+    # FR-11's other side: what this vehicle is, for site access purposes.
+    access_class: str | None = None
+    gross_weight_kg: int | None = None
     # FR-08's "end-anywhere". Deliberately not spelled `end_location_id=None`:
     # that already means "end where you started" and much of the codebase reads
     # it that way, so reusing it would change the meaning of existing fleets
