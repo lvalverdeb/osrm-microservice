@@ -65,6 +65,48 @@ def shift_end_of(problem: Problem) -> int:
     return max(v.shift.end for v in problem.vehicles)
 
 
+def _is_required(order) -> bool:
+    """Whether the solver may decline this order at all. FR-12, §4.1.
+
+    Tier 0 is must-serve whatever it is worth. Everything else is declinable
+    once it carries a prize -- an order with no prize has no price at which
+    declining is acceptable, so the solver must place it or report infeasible.
+    """
+    return order.priority_tier == 0 or order.prize == 0
+
+
+def tier_bonuses(problem: Problem) -> dict[int, int]:
+    """Prize bonuses making priority tiers lexicographic. FR-13.
+
+    PyVRP declines an order by forgoing its prize, and a prize is one number.
+    FR-13 wants "lexicographic protection: a higher tier is never sacrificed to
+    improve a lower tier", which one number can express only if a tier's
+    bonus strictly exceeds everything obtainable from every tier beneath it.
+
+    Derived from the instance, never a constant, for the reason §5.1 gives
+    about weighted sums: a multiplier that dominates on today's prizes will not
+    on a day when somebody attaches a larger one, and nothing fails -- the
+    solver simply starts declining work it should have protected.
+
+    Bonuses compound across tiers, so a deep tier stack with large prizes can
+    grow them considerably. Python integers are unbounded but PyVRP's are
+    int64; the same overflow ceiling §5.1 flags for staged optimisation applies
+    here, and is not yet guarded.
+    """
+    by_tier: dict[int, list[int]] = {}
+    for order in problem.orders:
+        by_tier.setdefault(order.priority_tier, []).append(order.prize)
+
+    bonuses: dict[int, int] = {}
+    beneath = 0
+    # Least important tier first: each tier must outrank the total of all the
+    # ones below it, so the totals accumulate upwards.
+    for tier in sorted(by_tier, reverse=True):
+        bonuses[tier] = beneath
+        beneath += sum(prize + beneath for prize in by_tier[tier]) + 1
+    return bonuses
+
+
 def _bounds(window, shift_start: int, shift_end: int) -> tuple[int, int]:
     """PyVRP bounds for one window. FR-04's hard/soft distinction lives here.
 
@@ -105,6 +147,7 @@ def compile_problem(problem: Problem) -> _Compiled:
     """Build the PyVRP model. Travel comes from the matrix, never the geometry."""
     dimensions = _dimensions(problem)
     _single_profile(problem)
+    bonuses = tier_bonuses(problem)
     model = Model()
 
     # One PyVRP location per domain location, in matrix-index order so the edge
@@ -168,8 +211,8 @@ def compile_problem(problem: Problem) -> _Compiled:
                 delivery_service_duration=service_time(
                     order, problem.vehicles[0], drop),
                 amount=[order.quantities.get(name, 0) for name in dimensions],
-                prize=order.prize,
-                required=order.prize == 0,
+                prize=order.prize + bonuses[order.priority_tier],
+                required=_is_required(order),
                 name=order.id,
             )
             order_by_shipment[len(order_by_shipment)] = order.id
@@ -220,11 +263,13 @@ def compile_problem(problem: Problem) -> _Compiled:
                 tw_early=early,
                 tw_late=late,
                 release_time=order.release_time,
-                prize=order.prize,
-                # Optional orders are T-27. Until then everything is required,
-                # and a solver that cannot place an order must say so rather
-                # than drop it. Group members are the exception PyVRP demands.
-                required=False if group is not None else order.prize == 0,
+                prize=order.prize + bonuses[order.priority_tier],
+                # FR-12 and FR-13 together. A prize makes an order declinable,
+                # but §4.1 defines tier 0 as must-serve, so a prize on a tier-0
+                # order must not quietly make it optional -- which is what
+                # `prize == 0` alone did.
+                required=(False if group is not None
+                          else _is_required(order)),
                 group=group,
                 name=order.id,
             )
