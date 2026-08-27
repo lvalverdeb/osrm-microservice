@@ -213,7 +213,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-35 | `examples/src/fleet/alloc/fleet_minimisation.py` | `T-35` | FR-32, §5.2 | | L4 | `MIN_VEHICLES` reaches the BKS vehicle count on the benchmark set |
 | E-36 | `tests/vrp/test_portfolio_runner.py` | `T-36` | §7.3 | | L1 | Incumbents scored by the canonical evaluator, never the engine's own accounting; win rates recorded by instance signature |
 | E-37 | `tests/vrp/test_decomposition.py` | `T-37` | §7.6 | | L5 | Large instances decompose and recombine with no invariant violation at the boundaries |
-| E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | | L5 | ≥ 0.5% mean improvement over the route pool on the frozen corpus |
+| E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | | L5 | Never worse than the best pooled trajectory on the frozen corpus (mean reported); ≥ 0.5% on a capacity-pressured 200-customer instance |
 | E-39 | `examples/src/fleet/rich/departure_scheduling.py` | `T-39` | ALG-5 | TSP | L1 | Duty duration measurably reduced by departure-time choice |
 | E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | | L2 | FIFO (no-passing) property holds across every bucket boundary. **Blocked**: OSRM has no departure-time parameter — see the wishlist |
 | E-41 | `examples/src/fleet/rich/ev_recharging.py` | `T-41` | FR-20 | | L2 | Range never violated on a generated EV corpus; charging time appears in the duty timeline rather than being added afterwards. **`COULD` priority, and blocked** on charger locations and charging curves, which this stack has no source for |

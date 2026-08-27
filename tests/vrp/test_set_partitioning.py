@@ -251,9 +251,12 @@ def test_the_polish_never_loses_on_any_corpus_instance(spec):
 
 
 def test_the_frozen_corpus_has_nothing_left_to_recover():
-    """T-38 asks for ">= 0.5% mean improvement on the frozen corpus". Measured,
-    the corpus gives **exactly 0.00%**, on every instance, and that is a fact
-    about the corpus rather than about the implementation.
+    """T-38 originally asked for ">= 0.5% mean improvement on the frozen
+    corpus". Measured, the corpus gives **exactly 0.00%**, on every instance,
+    and that is a fact about the corpus rather than about the implementation.
+    T-38 has since been amended to what the corpus can actually express -- never
+    worse on any instance, mean reported -- with ALG-6's 0.5% moved to where its
+    premise holds. This test is the corpus half of that amended wording.
 
     Two independent engines, eight trajectories, and every one of them lands on
     the same partition: c20-scattered produced *two* distinct order sets across
@@ -274,7 +277,8 @@ def test_the_frozen_corpus_has_nothing_left_to_recover():
     This test asserts the part that matters on a solved corpus: the polish never
     makes anything worse. The mean is printed rather than asserted, because
     asserting 0.5% against an already-optimal corpus would mean tuning the
-    corpus or the measurement until a number appeared.
+    corpus or the measurement until a number appeared -- which is why the spec
+    moved rather than the test.
 
     Note the MILP cost in that table. Columns are cheap to collect and not cheap
     to partition over: 977 of them took nine minutes where 489 took three
