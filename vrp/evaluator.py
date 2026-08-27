@@ -206,6 +206,43 @@ def soft_penalties(problem: Problem, step: Step) -> tuple[int, int]:
     return early, late
 
 
+def _fleet_prices_itself(problem: Problem) -> bool:
+    """Whether any vehicle states a cost of its own. FR-07, T-44.
+
+    The fallback is fleet-wide, matching `ObjectiveSpec.rates`, and for the same
+    two reasons: a fleet that prices nothing keeps the flat weights it has
+    always been accounted with -- the frozen corpus among them, and a benchmark
+    whose numbers move because the accounting changed is not a benchmark -- and
+    a per-vehicle fallback would make an unstated zero indistinguishable from a
+    default price, which is precisely the own-versus-hire distinction FR-33
+    needs to be able to draw.
+    """
+    return any(v.fixed_cost or v.cost_per_metre or v.cost_per_second
+               or v.cost_per_order for v in problem.vehicles)
+
+
+def _vehicle_cost(problem: Problem, vehicle_id: str,
+                  weights: ObjectiveWeights, priced: bool) -> int:
+    """What deploying this vehicle costs, before it drives anywhere."""
+    if not priced:
+        return weights.per_vehicle
+    return problem.vehicle(vehicle_id).fixed_cost
+
+
+def _operating(problem: Problem, vehicle_id: str, order_ids: list[str],
+               metrics: dict[str, int], weights: ObjectiveWeights,
+               priced: bool) -> int:
+    """One route's distance, time and per-job cost, at its own vehicle's rates."""
+    seconds = (metrics["driving_seconds"] + metrics["waiting_seconds"]
+               + metrics["service_seconds"])
+    if not priced:
+        return metrics["distance"] * weights.per_metre + seconds * weights.per_second
+    vehicle = problem.vehicle(vehicle_id)
+    return (metrics["distance"] * vehicle.cost_per_metre
+            + seconds * vehicle.cost_per_second
+            + len(order_ids) * vehicle.cost_per_order)
+
+
 def evaluate(problem: Problem, assignment: dict[str, list[str]],
              weights: ObjectiveWeights | None = None,
              start_times: dict[str, int] | None = None) -> Evaluation:
@@ -223,27 +260,30 @@ def evaluate(problem: Problem, assignment: dict[str, list[str]],
     timelines: dict[str, tuple[Step, ...]] = {}
     deployed = 0
 
+    priced = _fleet_prices_itself(problem)
+    operating = 0
     for vehicle_id, order_ids in assignment.items():
         if not order_ids:
             continue
-        deployed += 1
+        deployed += _vehicle_cost(problem, vehicle_id, weights, priced)
         start = (start_times or {}).get(vehicle_id)
         timeline = build_timeline(problem, vehicle_id, order_ids, start_time=start)
         timelines[vehicle_id] = timeline
-        for key, value in route_metrics(problem, timeline).items():
+        metrics = route_metrics(problem, timeline)
+        for key, value in metrics.items():
             totals[key] += value
+        operating += _operating(problem, vehicle_id, order_ids, metrics,
+                                weights, priced)
 
     served = {order_id for ids in assignment.values() for order_id in ids}
     unassigned = [order for order in problem.orders if order.id not in served]
     penalty = sum(order.prize or weights.unassigned_penalty for order in unassigned)
 
     breakdown = dict(totals)
-    breakdown["vehicles"] = deployed * weights.per_vehicle
+    breakdown["vehicles"] = deployed
     breakdown["unassigned_penalty"] = penalty
 
-    total = (totals["distance"] * weights.per_metre
-             + (totals["driving_seconds"] + totals["waiting_seconds"]
-                + totals["service_seconds"]) * weights.per_second
+    total = (operating
              + breakdown["vehicles"]
              + totals["earliness_penalty"] + totals["lateness_penalty"]
              + penalty)

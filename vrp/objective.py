@@ -38,6 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
 from itertools import pairwise
+from typing import NamedTuple
 
 from vrp.model import Problem, Solution
 
@@ -78,6 +79,15 @@ class TierValues:
 class Score:
     values: TierValues
     total: int
+
+
+class Rates(NamedTuple):
+    """One vehicle's cost structure, resolved. See `ObjectiveSpec.rates`."""
+
+    fixed: int
+    per_metre: int
+    per_second: int
+    per_order: int
 
 
 @dataclass(frozen=True)
@@ -139,8 +149,8 @@ class ObjectiveSpec:
         """
         return value
 
-    def rates(self, problem: Problem, vehicle_id: str) -> tuple[int, int, int]:
-        """This vehicle's (fixed, per-metre, per-second) cost. FR-07, FR-30.
+    def rates(self, problem: Problem, vehicle_id: str) -> Rates:
+        """This vehicle's own cost structure. FR-07, FR-30, FR-33.
 
         The fallback is **fleet-wide**, not per vehicle: if no vehicle in the
         problem prices anything, the whole fleet uses the spec's rates. That is
@@ -155,10 +165,10 @@ class ObjectiveSpec:
         """
         vehicle = problem.vehicle(vehicle_id)
         if _fleet_prices_itself(problem):
-            return (vehicle.fixed_cost, vehicle.cost_per_metre,
-                    vehicle.cost_per_second)
-        return (self.vehicle_fixed_cost, self.cost_per_metre,
-                self.cost_per_second)
+            return Rates(vehicle.fixed_cost, vehicle.cost_per_metre,
+                         vehicle.cost_per_second, vehicle.cost_per_order)
+        return Rates(self.vehicle_fixed_cost, self.cost_per_metre,
+                     self.cost_per_second, 0)
 
     def tier_bounds(self, problem: Problem) -> dict[Tier, int]:
         """The largest value each tier can take on *this* instance.
@@ -196,7 +206,10 @@ class ObjectiveSpec:
                                                    default=0)
                                 + max_duration * max((v.cost_per_second
                                                       for v in vehicles),
-                                                     default=0), 1),
+                                                     default=0)
+                                + len(orders) * max((v.cost_per_order
+                                                     for v in vehicles),
+                                                    default=0), 1),
             Tier.SOFT: max(max_duration, 1),
             Tier.QUALITY: max(max_distance, 1),
         }
@@ -250,23 +263,26 @@ def total(values: TierValues, scales: dict[Tier, int]) -> int:
 def _fleet_prices_itself(problem: Problem) -> bool:
     """Whether any vehicle states a cost of its own. See `ObjectiveSpec.rates`."""
     return any(v.fixed_cost or v.cost_per_metre or v.cost_per_second
-               for v in problem.vehicles)
+               or v.cost_per_order for v in problem.vehicles)
 
 
 def _operating(problem: Problem, spec: ObjectiveSpec, route) -> int:
     """One route's distance and time cost, at its own vehicle's rates."""
     matrix = problem.matrix
-    _, per_metre, per_second = spec.rates(problem, route.vehicle_id)
+    rates = spec.rates(problem, route.vehicle_id)
+    carried = sum(1 for step in route.steps if step.order_id)
     distance = duration = 0
     for previous, current in pairwise(route.steps):
         origin = problem.location(previous.location_id).matrix_index
         destination = problem.location(current.location_id).matrix_index
         distance += matrix.distance(origin, destination)
         duration += matrix.duration(origin, destination)
+    per_job = carried * rates.per_order
     if spec.mode is Mode.MIN_DURATION:
-        # §5.2: cost per second only, distance ignored.
-        return duration * max(per_second, 1)
-    return distance * per_metre + duration * per_second
+        # §5.2: cost per second only, distance ignored. The per-job fee is not
+        # a distance cost and survives -- it is what the contractor invoices.
+        return duration * max(rates.per_second, 1) + per_job
+    return (distance * rates.per_metre + duration * rates.per_second + per_job)
 
 
 def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:

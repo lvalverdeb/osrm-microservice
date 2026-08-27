@@ -261,3 +261,298 @@ def test_min_vehicles_ignores_the_break_even_entirely():
 
     strict = ObjectiveSpec(mode=Mode.MIN_VEHICLES)
     assert score(problem, one, strict).total < score(problem, two, strict).total
+
+
+# --------------------------------------------------------------------------
+# FR-33: hired capacity has its own cost structure
+# --------------------------------------------------------------------------
+
+def test_a_per_job_cost_is_charged_once_per_order_carried():
+    """FR-33 names three hire structures: "per-job, per-day, per-km". Per-day is
+    `fixed_cost` and per-km is `cost_per_metre`; per-job had nowhere to live.
+
+    A contractor paid per drop is not the same as one paid per kilometre, and
+    amortising the first into the second is exactly what OBJ-4 forbids.
+    """
+    problem = instance(a_van("CONTRACT", cost_per_order=5_000))
+
+    one = score(problem, plan(problem, {"CONTRACT": ["O1"]}), SPEC)
+    two = score(problem, plan(problem, {"CONTRACT": ["O1", "O2"]}), SPEC)
+
+    assert two.values[Tier.OPERATING] - one.values[Tier.OPERATING] == 5_000
+
+
+def test_spillover_to_hire_happens_only_when_the_own_fleet_runs_out():
+    """FR-33: "allow spillover to hire when own fleet is exhausted".
+
+    No special mechanism -- endogenous deployment already does it. An own
+    vehicle is sunk cost and a hired one costs a day, so the search takes the
+    hire only when the work will not fit without it.
+    """
+    own_only = instance(a_van("OWN", capacities={"kg": 10}),
+                        a_van("HIRE", fixed_cost=80_000, cost_per_metre=1),
+                        stops=2)
+
+    fits = score(own_only, plan(own_only, {"OWN": ["O1", "O2"]}), SPEC)
+    spilled = score(own_only,
+                    plan(own_only, {"OWN": ["O1"], "HIRE": ["O2"]}), SPEC)
+
+    assert fits.total < spilled.total, "hired a day that was not needed"
+
+
+# --------------------------------------------------------------------------
+# FR-36: the allocation block
+# --------------------------------------------------------------------------
+
+def test_the_report_covers_every_vehicle_deployed_or_not():
+    """FR-36 asks for "every deployed vehicle", and the ones left in the yard
+    are the more interesting half of a fleet-mix conversation: a vehicle that
+    was never worth deploying is the answer to "can I sell it"."""
+    from vrp.allocate import allocate
+
+    problem = instance(a_van("USED", fixed_cost=1_000, cost_per_metre=1),
+                       a_van("IDLE", fixed_cost=1_000, cost_per_metre=1))
+    report = allocate(problem, plan(problem, {"USED": ["O1", "O2"]}), SPEC)
+
+    assert {entry.vehicle_id for entry in report} == {"USED", "IDLE"}
+    assert report["USED"].deployed
+    assert not report["IDLE"].deployed
+
+
+def test_an_idle_vehicle_costs_nothing():
+    from vrp.allocate import allocate
+
+    problem = instance(a_van("USED", fixed_cost=1_000, cost_per_metre=1),
+                       a_van("IDLE", fixed_cost=1_000, cost_per_metre=1))
+    report = allocate(problem, plan(problem, {"USED": ["O1", "O2"]}), SPEC)
+
+    assert report["IDLE"].fixed_cost == 0
+    assert report["IDLE"].operating_cost == 0
+    assert report["USED"].fixed_cost == 1_000
+
+
+def test_utilisation_is_reported_on_every_capacity_dimension():
+    """FR-36: "utilisation on each capacity dimension". Every dimension, not
+    the binding one -- a van full by volume and empty by weight is a different
+    purchase decision from one full by both."""
+    from vrp.allocate import allocate
+
+    problem = instance(a_van("V1", capacities={"kg": 4, "m3": 100}))
+    report = allocate(problem, plan(problem, {"V1": ["O1", "O2"]}), SPEC)
+
+    assert report["V1"].utilisation == {"kg": 500, "m3": 0}, \
+        report["V1"].utilisation
+
+
+def test_duty_used_is_reported_against_duty_available():
+    """FR-36's second measure. A fleet at 40% on capacity and 95% on hours is
+    short of drivers, not of vans, and one number cannot say that."""
+    from vrp.allocate import allocate
+
+    problem = instance(a_van("V1"))
+    entry = allocate(problem, plan(problem, {"V1": ["O1"]}), SPEC)["V1"]
+
+    assert entry.duty_available == DAY.end - DAY.start
+    assert 0 < entry.duty_used < entry.duty_available
+
+
+def test_marginal_value_is_the_objective_delta_from_removing_the_vehicle():
+    """§7.8: "the objective delta from re-solving with that vehicle removed".
+
+    The re-solver is passed in rather than imported. `allocate` would otherwise
+    depend on a solver, and §11.2's independence argument applies to anything
+    that judges a plan -- but more practically, a caller with a warm start and
+    an iteration budget knows more about how to spend it than this module does.
+    """
+    from vrp.allocate import marginal_values
+
+    problem = instance(a_van("V1", fixed_cost=1_000, cost_per_metre=1),
+                       a_van("V2", fixed_cost=1_000, cost_per_metre=1))
+    incumbent = plan(problem, {"V1": ["O1"], "V2": ["O2"]})
+
+    def resolve(reduced: Problem):
+        survivor = reduced.vehicles[0].id
+        return plan(reduced, {survivor: ["O1", "O2"]})
+
+    values = marginal_values(problem, incumbent, SPEC, resolve)
+
+    assert set(values) == {"V1", "V2"}
+    # Removing either leaves one van doing both stops: cheaper here, because
+    # the split was paying two fixed costs to drive further. A negative
+    # marginal value is a vehicle that is costing more than it saves.
+    assert all(value < 0 for value in values.values()), values
+    # FR-36 asks for "the marginal cost of removing it", so this is money, and
+    # it is checkable by hand. Split: V1 drives D-C1-D (20 km) and V2 drives
+    # D-C2-D (40 km), two fixed costs -- 62,000. Merged: one van drives
+    # D-C1-C2-D (40 km) on one fixed cost -- 41,000. The vehicle is costing
+    # 21,000 more than it saves.
+    assert values["V1"] == 41_000 - 62_000, values["V1"]
+
+
+def test_marginal_value_is_money_rather_than_the_scaled_objective():
+    """FR-36's words are "the marginal cost of removing it".
+
+    `Score.total` is scaled so the lexicographic ordering cannot invert, and on
+    a four-vehicle instance its magnitude is around 10^17. That number orders
+    plans correctly and prices nothing -- a dispatcher reading "marginal value
+    -2.4e16" has learnt less than they knew before. Callers wanting the
+    ordering can score the two plans themselves.
+    """
+    from vrp.allocate import marginal_values
+
+    problem = instance(a_van("BUSY", fixed_cost=7_000, cost_per_metre=1),
+                       a_van("SPARE", fixed_cost=7_000, cost_per_metre=1))
+    incumbent = plan(problem, {"BUSY": ["O1", "O2"]})
+
+    values = marginal_values(
+        problem, incumbent, SPEC,
+        lambda reduced: (plan(reduced, {"BUSY": ["O1", "O2"]})
+                         if any(v.id == "BUSY" for v in reduced.vehicles)
+                         else None))
+
+    # Removing the spare changes nothing at all, so the cost delta is zero --
+    # and zero is only recognisable when the units are money.
+    assert values["SPARE"] == 0, values["SPARE"]
+
+
+def test_a_re_solve_that_abandons_required_work_reports_no_marginal_value():
+    """A plan that drops a priority-0 order is not a cheaper plan. §4.1 makes
+    tier 0 must-serve, so a re-solve that leaves one behind has not answered
+    the question -- it has changed it, and pricing the difference would offer
+    the fleet a saving it is not allowed to take."""
+    from vrp.allocate import marginal_values
+
+    problem = instance(a_van("V1", fixed_cost=5_000, cost_per_metre=1),
+                       a_van("V2", fixed_cost=5_000, cost_per_metre=1))
+    incumbent = plan(problem, {"V1": ["O1"], "V2": ["O2"]})
+
+    # The re-solve quietly abandons O2 rather than admitting defeat.
+    abandons = marginal_values(problem, incumbent, SPEC,
+                               lambda reduced: plan(reduced, {"V1": ["O1"]}))
+
+    assert abandons == {"V1": None, "V2": None}, abandons
+
+
+def test_a_vehicle_that_cannot_be_removed_reports_no_marginal_value():
+    """When the re-solve cannot serve the work without it, the delta is not a
+    number. Reporting a large one would say "expensive"; the truth is
+    "load-bearing", and a fleet-sizing sweep must not confuse the two."""
+    from vrp.allocate import marginal_values
+
+    problem = instance(a_van("V1", capacities={"kg": 1}),
+                       a_van("V2", capacities={"kg": 1}))
+    incumbent = plan(problem, {"V1": ["O1"], "V2": ["O2"]})
+
+    values = marginal_values(problem, incumbent, SPEC, lambda reduced: None)
+
+    assert values == {"V1": None, "V2": None}
+
+
+# --------------------------------------------------------------------------
+# The accountant, which is the path the portfolio actually decides on
+# --------------------------------------------------------------------------
+
+def test_the_accountant_charges_each_vehicle_its_own_rates_too():
+    """`vrp.objective` is the decider and `vrp.evaluator` the accountant, and
+    its own docstring says so. But `vrp.portfolio` picks its winner on
+    `evaluate(...).total`, so an account that prices a 3.5-tonne van and an
+    artic identically decides as well as accounts -- and decides wrongly.
+
+    Fixing `objective` alone left T-44 working everywhere except the path a
+    solve actually takes.
+    """
+    from vrp.evaluator import evaluate
+
+    # Identical fixed costs, so only the per-kilometre rate can separate them.
+    problem = instance(a_van("VAN", fixed_cost=1_000, cost_per_metre=1),
+                       a_van("ARTIC", fixed_cost=1_000, cost_per_metre=4))
+
+    van = evaluate(problem, {"VAN": ["O1", "O2"]})
+    artic = evaluate(problem, {"ARTIC": ["O1", "O2"]})
+
+    assert van.breakdown["vehicles"] == artic.breakdown["vehicles"] == 1_000
+    assert artic.total - 1_000 == 4 * (van.total - 1_000), (
+        van.total, artic.total)
+
+
+def test_the_accountant_charges_each_vehicle_its_own_day_rate():
+    from vrp.evaluator import evaluate
+
+    problem = instance(a_van("OWN", cost_per_metre=1),
+                       a_van("HIRED", fixed_cost=9_000, cost_per_metre=1))
+
+    assert evaluate(problem, {"OWN": ["O1", "O2"]}).breakdown["vehicles"] == 0
+    assert evaluate(problem,
+                    {"HIRED": ["O1", "O2"]}).breakdown["vehicles"] == 9_000
+
+
+def test_the_accountant_keeps_its_flat_weights_for_a_fleet_that_prices_nothing():
+    """Same fleet-wide fallback, and the same reason: the frozen corpus prices
+    no vehicle, and a benchmark whose numbers move because the accounting
+    changed is not a benchmark."""
+    from vrp.evaluator import ObjectiveWeights, evaluate
+
+    problem = instance(a_van("V1"), stops=1)
+    weights = ObjectiveWeights(per_metre=2, per_vehicle=7_000)
+
+    accounted = evaluate(problem, {"V1": ["O1"]}, weights)
+    assert accounted.breakdown["vehicles"] == 7_000
+    assert accounted.total == 2 * LEG * 2 + 7_000
+
+
+def test_marginal_value_is_measured_on_one_scale():
+    """Both plans must be scored against the same instance, or the delta is
+    nonsense.
+
+    `tier_scales` derives its multipliers from the instance -- that is what
+    makes the lexicographic ordering hold without hard-coded constants -- so a
+    problem with one fewer vehicle has *different* scales. Scoring the re-solve
+    against the reduced instance and subtracting the incumbent's score
+    therefore subtracts two numbers in different currencies. Measured on a
+    four-van fixture it produced marginal values around -7e16 on an objective
+    whose whole range was about 10^6.
+
+    Here removing an idle vehicle changes nothing a dispatcher would notice, so
+    the honest delta is exactly zero. Under the bug it is astronomical.
+    """
+    from vrp.allocate import marginal_values
+
+    problem = instance(a_van("BUSY", fixed_cost=1_000, cost_per_metre=1),
+                       a_van("IDLE", fixed_cost=1_000, cost_per_metre=1))
+    incumbent = plan(problem, {"BUSY": ["O1", "O2"]})
+
+    values = marginal_values(problem, incumbent, SPEC,
+                             lambda reduced: plan(reduced, {"BUSY": ["O1", "O2"]})
+                             if any(v.id == "BUSY" for v in reduced.vehicles)
+                             else None)
+
+    assert values["IDLE"] == 0, values["IDLE"]
+    assert values["BUSY"] is None
+
+
+def test_a_re_solve_that_comes_back_illegal_is_not_priced():
+    """The failure mode a `resolve` callback cannot be trusted to catch.
+
+    When every order is required, an engine short of capacity does not return
+    an incomplete plan -- it returns a complete, *overloaded* one. Checking
+    `unassigned` therefore sees nothing wrong, and the marginal value of a
+    genuinely load-bearing vehicle comes back as a tidy saving. Measured on the
+    E-44 fixture, a fleet that could not carry the work at all reported every
+    vehicle as costing more than it saved.
+
+    INV-9 and §11.2 already say how to settle this: ask the verifier, which
+    shares nothing with the engine that produced the plan.
+    """
+    from vrp.allocate import marginal_values
+
+    problem = instance(a_van("V1", capacities={"kg": 1}, fixed_cost=1_000),
+                       a_van("V2", capacities={"kg": 1}, fixed_cost=1_000))
+    incumbent = plan(problem, {"V1": ["O1"], "V2": ["O2"]})
+
+    # An engine that "solves" the reduced instance by overloading the survivor.
+    values = marginal_values(problem, incumbent, SPEC,
+                             lambda reduced: plan(reduced,
+                                                  {reduced.vehicles[0].id:
+                                                   ["O1", "O2"]}))
+
+    assert values == {"V1": None, "V2": None}, values

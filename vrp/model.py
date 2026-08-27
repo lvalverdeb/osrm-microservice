@@ -209,6 +209,11 @@ class Vehicle:
     cost_per_metre: int = 0
     cost_per_second: int = 0
     overtime_cost_per_second: int = 0
+    # FR-33 names three hire structures -- "per-job, per-day, per-km". Per-day
+    # is `fixed_cost` and per-km is `cost_per_metre`; this is the third. A
+    # contractor paid per drop is not one paid per kilometre, and folding the
+    # first into the second is the amortisation OBJ-4 forbids.
+    cost_per_order: int = 0
     # FR-07's routing profile. A profile is a *matrix*, and a Problem pins one,
     # so the adapter refuses a fleet that mixes them rather than routing a
     # bicycle as a lorry. See `_single_profile`.
@@ -251,7 +256,7 @@ class Vehicle:
                 _require_int(limit, name)
                 _require(limit >= 0, f"{name} must not be negative")
         for name in ("fixed_cost", "cost_per_metre", "cost_per_second",
-                     "overtime_cost_per_second"):
+                     "overtime_cost_per_second", "cost_per_order"):
             cost = getattr(self, name)
             _require_int(cost, name)
             # A negative cost is a vehicle that is paid to drive, and a solver
