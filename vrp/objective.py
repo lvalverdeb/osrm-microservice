@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
+from itertools import pairwise
 
 from vrp.model import Problem, Solution
 
@@ -129,8 +130,35 @@ class ObjectiveSpec:
         return head + middle + tail
 
     def monetary(self, tier: Tier, value: int) -> int:
-        """A tier's value in comparable money, for tiers sharing a level."""
-        return value * self.vehicle_fixed_cost if tier is Tier.FLEET else value
+        """A tier's value in comparable money, for tiers sharing a level.
+
+        Identity now that `Tier.FLEET` carries money rather than a count under
+        every mode that shares its level. It stays because `levels()` decides
+        which tiers are compared in one currency, and a future tier that is not
+        already money needs somewhere to say so.
+        """
+        return value
+
+    def rates(self, problem: Problem, vehicle_id: str) -> tuple[int, int, int]:
+        """This vehicle's (fixed, per-metre, per-second) cost. FR-07, FR-30.
+
+        The fallback is **fleet-wide**, not per vehicle: if no vehicle in the
+        problem prices anything, the whole fleet uses the spec's rates. That is
+        what keeps every instance predating E-21 -- the frozen corpus among
+        them -- scoring exactly as it did.
+
+        Per vehicle it would break FR-33. Own capacity is sunk cost and hired
+        capacity is not, so a fleet needs to be able to say a vehicle costs
+        nothing to deploy; an unstated zero quietly becoming the spec's default
+        would turn the own-vs-hire break-even into a comparison of two hire
+        prices.
+        """
+        vehicle = problem.vehicle(vehicle_id)
+        if _fleet_prices_itself(problem):
+            return (vehicle.fixed_cost, vehicle.cost_per_metre,
+                    vehicle.cost_per_second)
+        return (self.vehicle_fixed_cost, self.cost_per_metre,
+                self.cost_per_second)
 
     def tier_bounds(self, problem: Problem) -> dict[Tier, int]:
         """The largest value each tier can take on *this* instance.
@@ -156,11 +184,19 @@ class ObjectiveSpec:
             Tier.HARD: max(len(orders) * 4, 1),
             Tier.UNSERVED_P0: max(priority_zero, 1),
             Tier.UNSERVED: max(max_prize, len(orders), 1),
-            # A count, converted to money by `monetary` wherever it shares a
-            # level with operating cost.
-            Tier.FLEET: max(len(vehicles), 1),
+            # Money under every mode but MIN_VEHICLES, where it is a count and
+            # the count is the smaller number -- so the money bound covers both.
+            Tier.FLEET: max(sum(v.fixed_cost for v in vehicles),
+                            len(vehicles) * self.vehicle_fixed_cost,
+                            len(vehicles), 1),
             Tier.OPERATING: max(max_distance * self.cost_per_metre
-                                + max_duration * self.cost_per_second, 1),
+                                + max_duration * self.cost_per_second,
+                                max_distance * max((v.cost_per_metre
+                                                    for v in vehicles),
+                                                   default=0)
+                                + max_duration * max((v.cost_per_second
+                                                      for v in vehicles),
+                                                     default=0), 1),
             Tier.SOFT: max(max_duration, 1),
             Tier.QUALITY: max(max_distance, 1),
         }
@@ -211,6 +247,28 @@ def total(values: TierValues, scales: dict[Tier, int]) -> int:
     return sum(values[tier] * scale for tier, scale in scales.items())
 
 
+def _fleet_prices_itself(problem: Problem) -> bool:
+    """Whether any vehicle states a cost of its own. See `ObjectiveSpec.rates`."""
+    return any(v.fixed_cost or v.cost_per_metre or v.cost_per_second
+               for v in problem.vehicles)
+
+
+def _operating(problem: Problem, spec: ObjectiveSpec, route) -> int:
+    """One route's distance and time cost, at its own vehicle's rates."""
+    matrix = problem.matrix
+    _, per_metre, per_second = spec.rates(problem, route.vehicle_id)
+    distance = duration = 0
+    for previous, current in pairwise(route.steps):
+        origin = problem.location(previous.location_id).matrix_index
+        destination = problem.location(current.location_id).matrix_index
+        distance += matrix.distance(origin, destination)
+        duration += matrix.duration(origin, destination)
+    if spec.mode is Mode.MIN_DURATION:
+        # §5.2: cost per second only, distance ignored.
+        return duration * max(per_second, 1)
+    return distance * per_metre + duration * per_second
+
+
 def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
     """Score a solution across the tiers this module can observe.
 
@@ -233,22 +291,21 @@ def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
     unserved_p0 = sum(1 for o in unassigned if o.priority_tier == 0)
     unserved_rest = sum(max(o.prize, 1) for o in unassigned if o.priority_tier != 0)
 
-    deployed = sum(1 for route in solution.routes
-                   if any(step.order_id for step in route.steps))
+    # §7.8: "Empty routes are free and removable at zero cost." A vehicle
+    # listed in the plan carrying nothing was never deployed.
+    working = [route for route in solution.routes
+               if any(step.order_id for step in route.steps)]
 
-    matrix = problem.matrix
-    distance = duration = 0
-    for route in solution.routes:
-        for previous, current in zip(route.steps, route.steps[1:], strict=False):
-            origin = problem.location(previous.location_id).matrix_index
-            destination = problem.location(current.location_id).matrix_index
-            distance += matrix.distance(origin, destination)
-            duration += matrix.duration(origin, destination)
+    # §5.1 Tier 3 is "Sum of fixed_cost(v) over deployed vehicles", and a count
+    # is only that sum when every vehicle costs the same -- the homogeneity
+    # FR-07 exists to reject. MIN_VEHICLES is the exception by FR-32's own
+    # words: there the number of vehicles is minimised before travel cost, so
+    # the tier holds the count it names.
+    fleet = (len(working) if spec.mode is Mode.MIN_VEHICLES
+             else sum(spec.rates(problem, route.vehicle_id)[0]
+                      for route in working))
 
-    operating = distance * spec.cost_per_metre + duration * spec.cost_per_second
-    if spec.mode is Mode.MIN_DURATION:
-        # §5.2: cost per second only, distance ignored.
-        operating = duration * max(spec.cost_per_second, 1)
+    operating = sum(_operating(problem, spec, route) for route in working)
 
     soft = sum(sum(soft_penalties(problem, step))
                for route in solution.routes for step in route.steps)
@@ -257,7 +314,7 @@ def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
         Tier.HARD: 0,                 # the verifier owns this; see §11.2
         Tier.UNSERVED_P0: unserved_p0,
         Tier.UNSERVED: unserved_rest,
-        Tier.FLEET: deployed,
+        Tier.FLEET: fleet,
         Tier.OPERATING: operating,
         Tier.SOFT: soft,
         Tier.QUALITY: 0,

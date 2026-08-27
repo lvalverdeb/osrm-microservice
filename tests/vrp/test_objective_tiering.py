@@ -163,8 +163,16 @@ def test_scoring_a_solution_populates_the_tiers_it_can_observe():
                         routes=(Route(vehicle_id="V1", steps=timeline),),
                         unassigned=tuple({"order_id": o.id, "reason_code": "X",
                                           "explanation": ""} for o in p.orders[4:]))
-    result = score(p, solution, ObjectiveSpec(mode=Mode.MIN_COST))
-    assert result.values[Tier.FLEET] == 1
+    spec = ObjectiveSpec(mode=Mode.MIN_COST)
+    result = score(p, solution, spec)
+    # §5.1 Tier 3 is "Sum of fixed_cost(v) over deployed vehicles", so this is
+    # money. This fleet prices nothing, so it falls back to the spec's rate --
+    # which is what the tier held before T-44 made it per vehicle, multiplied
+    # through by `monetary` instead of at source.
+    assert result.values[Tier.FLEET] == spec.vehicle_fixed_cost
+    # FR-32's other half: under MIN_VEHICLES the tier holds the count it names.
+    assert score(p, solution,
+                 ObjectiveSpec(mode=Mode.MIN_VEHICLES)).values[Tier.FLEET] == 1
     assert result.values[Tier.OPERATING] > 0
     # §5.1: tier 2's penalty is "prize forgone", so this is money, not a count.
     # Both unserved orders here carry a prize, hence a positive value.
