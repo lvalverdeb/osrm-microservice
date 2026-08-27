@@ -203,16 +203,20 @@ def show_preflight() -> None:
             (an_order("O1", "C1"),), (a_van(access_class="RIGID"),),
             (DEPOT, Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1,
                              access_classes=frozenset({"BIKE"})))),
+        "every van is too heavy": instance(
+            (an_order("O1", "C1"),), (a_van(gross_weight_kg=7_500),),
+            (DEPOT, Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1,
+                             max_vehicle_kg=3_500))),
     }
     for label, problem in cases.items():
         for order_id, finding in preflight(problem).items():
             print(f"   {label:<28} {order_id}  {finding.code}")
             print(f"   {'':<28} {finding.detail}")
 
-    print("   Note the second detail line: the code is right and the wording")
-    print("   is not. NO_ELIGIBLE_VEHICLE covers skills and access class, but")
-    print("   `diagnose.py` phrases its detail in terms of skills alone, so an")
-    print("   access failure reads as \"requires no skills\". Printed as found.")
+    print("   One code, three sentences. NO_ELIGIBLE_VEHICLE covers skills and")
+    print("   site access alike, so the detail names whichever filter actually")
+    print("   emptied the fleet -- an access failure that read \"requires no")
+    print("   skills\" would send someone to hire a tail lift.")
     print("   Pre-flight asks whether *some* vehicle could serve one order,")
     print("   ignoring every other order, so it can say no with certainty.")
     print("   INV-10 asks whether a finished plan honoured the answer. Neither")

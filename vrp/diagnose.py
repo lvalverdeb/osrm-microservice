@@ -97,6 +97,39 @@ def _eligible(problem: Problem, order: Order) -> list[Vehicle]:
     return fleet
 
 
+def _why_none_eligible(problem: Problem, order: Order) -> str:
+    """Which of `_eligible`'s filters actually emptied the fleet.
+
+    NO_ELIGIBLE_VEHICLE covers skills and site access, and phrasing every case
+    in terms of skills sent a dispatcher looking for a tail lift when the real
+    obstacle was a weight limit. §6.5 requires the reason be produced by an
+    explicit pass rather than inferred; the sentence deserves the same care as
+    the code, because a wrong code is caught by anything that branches on it
+    and a wrong sentence is read by a person who then acts on it.
+
+    Checked in `_eligible`'s own order, so the first filter to reject the whole
+    fleet is the one named. Falls back to the bare statement when the fleet was
+    emptied by a deployment ban or an operator lock -- naming a constraint that
+    nothing violated would be worse than naming none.
+    """
+    site = problem.location((order.delivery or order.pickup).location_id)
+    everyone = problem.vehicles
+
+    if order.required_skills and not any(order.required_skills <= v.skills
+                                         for v in everyone):
+        return (f"requires {sorted(order.required_skills)}; "
+                f"no vehicle carries it")
+    if site.access_classes and not any(v.access_class in site.access_classes
+                                       for v in everyone):
+        return (f"{site.id} admits {sorted(site.access_classes)}; "
+                f"no vehicle is of that class")
+    if site.max_vehicle_kg is not None and not any(
+            _may_enter(v, site) for v in everyone):
+        return (f"{site.id} takes at most {site.max_vehicle_kg} kg; "
+                f"no vehicle is light enough")
+    return "no vehicle qualifies"
+
+
 def _may_enter(vehicle: Vehicle, site) -> bool:
     """FR-11. Empty `access_classes` means unrestricted, not "admits nothing"."""
     if site.access_classes and vehicle.access_class not in site.access_classes:
@@ -224,9 +257,7 @@ def preflight(problem: Problem) -> dict[str, Finding]:
                 detail=f"{detail} (under an operator lock)" if conflict else detail)
 
         if not fleet:
-            report("NO_ELIGIBLE_VEHICLE",
-                   f"requires {sorted(order.required_skills) or 'no skills'}; "
-                   f"no vehicle qualifies")
+            report("NO_ELIGIBLE_VEHICLE", _why_none_eligible(problem, order))
             continue
 
         if not any(_fits(order, vehicle) for vehicle in fleet):

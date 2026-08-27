@@ -39,9 +39,11 @@ DAY = TimeWindow(start=0, end=12 * 3600)
 
 
 def instance(order: Order, vehicles: tuple[Vehicle, ...],
-             locks: tuple[Lock, ...] = (), leg: int = 600) -> Problem:
+             locks: tuple[Lock, ...] = (), leg: int = 600,
+             site: Location | None = None) -> Problem:
     locations = (Location(id="D", lat=9.9, lon=-84.0, matrix_index=0),
-                 Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1))
+                 site or Location(id="C1", lat=9.91, lon=-84.0,
+                                  matrix_index=1))
     grid = ((0, leg), (leg, 0))
     return Problem(id="pf", locations=locations, orders=(order,),
                    vehicles=vehicles, locks=locks,
@@ -69,6 +71,14 @@ def reason_for(problem: Problem) -> str | None:
     return found["O1"].code if "O1" in found else None
 
 
+def detail_for(problem: Problem) -> str:
+    return preflight(problem)["O1"].detail
+
+
+def restricted(**access) -> Location:
+    return Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1, **access)
+
+
 def test_a_servable_order_is_not_reported():
     """The control. A diagnostic pass that flags everything is useless, and
     would make every test below pass for the wrong reason."""
@@ -84,6 +94,57 @@ def test_no_eligible_vehicle_when_no_one_has_the_skill():
     equipped = instance(an_order(required_skills=frozenset({"TAIL_LIFT"})),
                         (a_van(skills=frozenset({"TAIL_LIFT"})),))
     assert reason_for(equipped) is None
+
+
+def test_the_reason_names_the_constraint_that_disqualified_the_fleet():
+    """NO_ELIGIBLE_VEHICLE covers skills *and* site access, and `_eligible`
+    filters on both. Phrasing every case in terms of skills sends a dispatcher
+    to find a tail lift when the real problem is that a 7.5-tonne lorry may not
+    enter the street -- and §6.5's whole point is that the reason must be
+    produced by an explicit diagnostic pass, not inferred.
+
+    The code was already right in all three cases. Only the sentence was wrong,
+    which is the more dangerous failure: a wrong code is caught by anything
+    branching on it, and a wrong sentence is read by a person who then acts.
+    """
+    skills = instance(an_order(required_skills=frozenset({"TAIL_LIFT"})),
+                      (a_van(),))
+    assert reason_for(skills) == "NO_ELIGIBLE_VEHICLE"
+    assert "TAIL_LIFT" in detail_for(skills), detail_for(skills)
+
+    zone = instance(an_order(), (a_van(access_class="RIGID"),),
+                    site=restricted(access_classes=frozenset({"BIKE"})))
+    assert reason_for(zone) == "NO_ELIGIBLE_VEHICLE"
+    assert "skills" not in detail_for(zone), detail_for(zone)
+    assert "BIKE" in detail_for(zone), detail_for(zone)
+
+    bridge = instance(an_order(), (a_van(gross_weight_kg=7_500),),
+                      site=restricted(max_vehicle_kg=3_500))
+    assert reason_for(bridge) == "NO_ELIGIBLE_VEHICLE"
+    assert "skills" not in detail_for(bridge), detail_for(bridge)
+    assert "3500" in detail_for(bridge), detail_for(bridge)
+
+
+def test_a_skilless_order_no_vehicle_can_reach_does_not_claim_a_skill_problem():
+    """The exact sentence the E-22 example printed: an order requiring nothing
+    at all, reported as "requires no skills; no vehicle qualifies"."""
+    zone = instance(an_order(), (a_van(access_class="RIGID"),),
+                    site=restricted(access_classes=frozenset({"BIKE"})))
+
+    assert "requires no skills" not in detail_for(zone), detail_for(zone)
+
+
+def test_a_fleet_emptied_by_a_lock_does_not_blame_skills_or_the_site():
+    """When a pin removed the alternatives, neither the skill list nor the site
+    is the thing to report -- `report` already appends the lock, and the detail
+    should not also name a constraint that was never violated."""
+    problem = instance(an_order(), (a_van(), a_van(id="V2")),
+                       locks=(Lock(kind="FORBID_DEPLOY", vehicle_id="V1"),
+                              Lock(kind="FORBID_DEPLOY", vehicle_id="V2")))
+
+    detail = detail_for(problem)
+    assert "skills" not in detail, detail
+    assert "admits" not in detail, detail
 
 
 def test_capacity_exceeded_when_the_order_alone_is_too_big():
