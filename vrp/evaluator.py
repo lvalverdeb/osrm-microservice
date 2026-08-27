@@ -248,3 +248,60 @@ def evaluate(problem: Problem, assignment: dict[str, list[str]],
              + totals["earliness_penalty"] + totals["lateness_penalty"]
              + penalty)
     return Evaluation(total=total, breakdown=breakdown, timelines=timelines)
+
+
+def route_is_legal(problem: Problem, vehicle_id: str,
+                   sequence: list[str]) -> bool:
+    """Could this vehicle actually drive this sequence? Capacity, windows, law.
+
+    The companion to `build_timeline`: one builds the day, this says whether it
+    is a day anyone could have. It is what a *constructor* asks before
+    attempting a move -- the generator before proposing a route, the
+    decomposer before moving an order across a cluster border.
+
+    It is emphatically not the verifier. `vrp.verify` shares no code with
+    anything that builds a plan, which is the whole of CON-1; this shares the
+    timeline builder with the plan it is judging, and so can only be trusted to
+    say what the builder would produce. That is exactly enough for deciding
+    what to attempt, and not nearly enough for deciding what is true.
+
+    Capacity is included because omitting it was a real defect: this predicate
+    began life inside the generator checking only windows and hours, and the
+    first caller outside it -- §7.6's cross-boundary repair -- promptly moved
+    orders onto vehicles that could not carry them. INV-5 caught it on a
+    1,000-stop instance.
+
+    Args:
+        problem: the instance.
+        vehicle_id: the vehicle that would drive it.
+        sequence: the order ids, in the order they would be served.
+
+    Returns:
+        Whether every stop falls in a hard window, the duty ends inside the
+        shift, no load exceeds capacity, and any declared hours-of-service rule
+        set is satisfied.
+    """
+    vehicle = problem.vehicle(vehicle_id)
+    steps = build_timeline(problem, vehicle_id, sequence)
+
+    for step in steps:
+        for dimension, amount in (step.load_after or {}).items():
+            if amount > vehicle.capacities.get(dimension, 0):
+                return False
+        if step.order_id is None:
+            continue
+        stop = (problem.order(step.order_id).delivery
+                or problem.order(step.order_id).pickup)
+        hard = [w for w in stop.time_windows if w.hardness == "HARD"]
+        if hard and not any(window.contains(step.start_service) for window in hard):
+            return False
+
+    if steps and steps[-1].arrival > vehicle.shift.end:
+        return False
+
+    if vehicle.hos_rules:
+        from vrp.hos.rules import rules_for
+        from vrp.hos.schedule import schedule_route
+        return schedule_route(problem, vehicle_id, sequence,
+                              rules_for(vehicle.hos_rules)).legal
+    return True

@@ -85,7 +85,7 @@ def solve(problem: Problem, solutions: int = 200, seed: int = 0) -> Solution:
 
     _refuse(problem)
     matrix = problem.matrix
-    size = len(matrix.durations)
+    size = matrix.size
     depot_id = problem.vehicles[0].start_location_id
     depot = problem.location(depot_id).matrix_index
     fleet = list(problem.vehicles)

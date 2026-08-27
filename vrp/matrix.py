@@ -27,6 +27,7 @@ it already owns -- per-request caching, retries, and the cell cap itself.
 
 from __future__ import annotations
 
+import math
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -235,3 +236,127 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
         durations=tuple(tuple(row) for row in durations),
         distances=tuple(tuple(row) for row in distances),
     ), snaps
+
+
+# --------------------------------------------------------------------------
+# Matrices too large to store — §7.6, T-37
+# --------------------------------------------------------------------------
+
+# The generator's speed, restated as this module's default so a PlanarMatrix
+# can be built without importing the generator. Both are the same 30 km/h, and
+# `test_a_planar_matrix_agrees_cell_for_cell_with_a_stored_one` is what keeps
+# them the same.
+PLANAR_SPEED_M_PER_S = 30_000 / 3600
+
+
+@dataclass(frozen=True)
+class PlanarMatrix:
+    """Straight-line travel computed on demand from coordinates. §7.6.
+
+    §7.6 begins "above roughly 2,000-3,000 stops, monolithic search degrades",
+    and NFR-01 asks for 10,000 stops inside an hour. A stored matrix cannot get
+    there: 10,000 squared is 100 million cells, measured at ~3.8 GB and roughly
+    twelve minutes just to build -- a fifth of the budget spent before any
+    solving, on a structure the decomposed solver never reads whole.
+
+    So this computes cells instead of holding them. It is deliberately the same
+    arithmetic as the generator's stored matrices -- whole metres, whole
+    seconds, the same rounding -- because a lazy matrix that merely approximates
+    the stored one would make every comparison between decomposed and
+    monolithic runs meaningless.
+
+    Coordinates are in kilometres about an origin, matching the generator.
+
+    This is a *test and benchmark* matrix, not a road network: real large
+    instances get their cells from OSRM through `build_large_matrix` above, and
+    a production orchestrator would hold a sparse near-neighbour matrix rather
+    than a formula. What it provides here is an instance of the right size whose
+    cells are cheap and exactly reproducible, which is what T-37's acceptance
+    needs and what a dense grid cannot supply.
+    """
+
+    version: str
+    coordinates: tuple[tuple[float, float], ...]
+    speed_m_per_s: float = PLANAR_SPEED_M_PER_S
+
+    def __post_init__(self) -> None:
+        if not self.version:
+            raise ValueError("matrix version must not be empty")
+        if self.speed_m_per_s <= 0:
+            raise ValueError("speed must be positive")
+
+    @property
+    def size(self) -> int:
+        return len(self.coordinates)
+
+    def is_reachable(self, origin: int, destination: int) -> bool:
+        """Always. A plane has no unreachable pairs.
+
+        Stated rather than inherited: MTX-5 makes reachability a question every
+        caller must be able to ask, and answering it honestly for this matrix
+        is a one-line truth rather than a missing method.
+        """
+        _ = self.coordinates[origin], self.coordinates[destination]
+        return True
+
+    def distance(self, origin: int, destination: int) -> int:
+        if origin == destination:
+            return 0
+        (ax, ay), (bx, by) = self.coordinates[origin], self.coordinates[destination]
+        return round(math.hypot(ax - bx, ay - by) * 1000)
+
+    def duration(self, origin: int, destination: int) -> int:
+        if origin == destination:
+            return 0
+        return round(self.distance(origin, destination) / self.speed_m_per_s)
+
+    def extremes(self) -> tuple[int, int]:
+        """A bounding-box bound, in O(n) rather than O(n^2).
+
+        §5.1 asks for "a real upper bound, deliberately loose rather than tight:
+        a bound that is too small breaks the lexicographic guarantee, while one
+        that is too large only makes the numbers bigger". The box diagonal is
+        never shorter than the longest pair inside it, so it qualifies -- and
+        enumerating 100 million cells to tighten it would cost more than the
+        looseness does.
+        """
+        if not self.coordinates:
+            return 0, 0
+        xs = [x for x, _ in self.coordinates]
+        ys = [y for _, y in self.coordinates]
+        diagonal = round(math.hypot(max(xs) - min(xs), max(ys) - min(ys)) * 1000)
+        return diagonal, round(diagonal / self.speed_m_per_s)
+
+
+def submatrix(matrix, indices: list[int]) -> TravelMatrix:
+    """The dense matrix over `indices`, in that order. §7.6(a).
+
+    Decomposition's other half: sub-problems are small enough to store, and the
+    full-fidelity solver wants a real `TravelMatrix`. Row `i` here is global
+    node `indices[i]`, so a sub-solution's node numbers map back by lookup.
+
+    Args:
+        matrix: any matrix answering `duration`, `distance` and `is_reachable`.
+        indices: the global node indices to keep, in the order they should
+            appear.
+
+    Returns:
+        A `TravelMatrix` whose cells equal the corresponding global cells.
+        Unreachable pairs stay unreachable -- rewriting them as a large number
+        is the failure MTX-5 exists to prevent, and a sub-problem is exactly
+        where it would go unnoticed.
+    """
+    durations, distances = [], []
+    for origin in indices:
+        duration_row, distance_row = [], []
+        for destination in indices:
+            if not matrix.is_reachable(origin, destination):
+                duration_row.append(UNREACHABLE)
+                distance_row.append(UNREACHABLE)
+                continue
+            duration_row.append(matrix.duration(origin, destination))
+            distance_row.append(matrix.distance(origin, destination))
+        durations.append(tuple(duration_row))
+        distances.append(tuple(distance_row))
+    return TravelMatrix(version=matrix.version, durations=tuple(durations),
+                        distances=tuple(distances))

@@ -303,6 +303,29 @@ class TravelMatrix:
                              f"{name} cell {cell} is negative and is not "
                              f"UNREACHABLE ({UNREACHABLE})")
 
+    @property
+    def size(self) -> int:
+        """How many locations this matrix covers.
+
+        A property rather than `len(matrix.durations)` at four call sites,
+        because a matrix that computes its cells on demand has no `durations`
+        to take the length of -- and §7.6's instances are too large to store
+        one. Callers want the count, not the storage.
+        """
+        return len(self.durations)
+
+    def extremes(self) -> tuple[int, int]:
+        """The longest leg and the slowest leg. §5.1's instance-derived bounds.
+
+        Owned here for the same reason as `size`: the objective needs a bound,
+        not the grids. A matrix that computes cells on demand can bound itself
+        far more cheaply than by enumerating n^2 of them, and §5.1 asks only
+        that the bound be real -- "deliberately loose rather than tight".
+        """
+        longest = max((max(row) for row in self.distances), default=0)
+        slowest = max((max(row) for row in self.durations), default=0)
+        return longest, slowest
+
     def is_reachable(self, origin: int, destination: int) -> bool:
         """Whether any route connects the pair. Ask before reading travel."""
         return self.durations[origin][destination] != UNREACHABLE
@@ -384,7 +407,7 @@ class Problem:
         _require(len(by_id) == len(self.locations), "duplicate location id")
         indices = {location.matrix_index for location in self.locations}
         _require(len(indices) == len(self.locations), "duplicate matrix_index")
-        _require(all(i < len(self.matrix.durations) for i in indices),
+        _require(all(i < self.matrix.size for i in indices),
                  "matrix_index outside the matrix")
 
         order_ids = {order.id for order in self.orders}

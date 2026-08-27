@@ -143,10 +143,8 @@ class ObjectiveSpec:
         orders = problem.orders
         vehicles = problem.vehicles
         matrix = problem.matrix
-        size = len(matrix.durations)
-
-        longest_leg = max((max(row) for row in matrix.distances), default=0)
-        slowest_leg = max((max(row) for row in matrix.durations), default=0)
+        size = matrix.size
+        longest_leg, slowest_leg = matrix.extremes()
         # A route visits at most every location twice (out and back).
         max_distance = longest_leg * max(size, 1) * 2 * max(len(vehicles), 1)
         max_duration = slowest_leg * max(size, 1) * 2 * max(len(vehicles), 1)

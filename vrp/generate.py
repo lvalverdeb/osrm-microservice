@@ -31,6 +31,7 @@ import math
 import random
 from enum import Enum
 
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
@@ -204,30 +205,14 @@ def plan_greedily(problem: Problem) -> dict[str, list[str]]:
 def _is_legal(problem: Problem, vehicle: Vehicle, sequence: list[str]) -> bool:
     """Would this sequence serve every stop inside its window and the law?
 
-    Uses the same timeline builder the plan itself is built from, which is fine
-    here and would not be in the verifier: this is a constructor deciding what
-    to attempt, not an oracle deciding what is true.
+    Delegates to `vrp.evaluator.route_is_legal`, which is where this predicate
+    now lives: §7.6's cross-boundary repair needs the same question answered,
+    and two copies of "is this route legal" is how two parts of a planner start
+    to disagree about what legal means.
     """
-    from vrp.evaluator import build_timeline
+    from vrp.evaluator import route_is_legal
 
-    steps = build_timeline(problem, vehicle.id, sequence)
-    for step in steps:
-        if step.order_id is None:
-            continue
-        stop = (problem.order(step.order_id).delivery
-                or problem.order(step.order_id).pickup)
-        hard = [w for w in stop.time_windows if w.hardness == "HARD"]
-        if hard and not any(window.contains(step.start_service) for window in hard):
-            return False
-    if steps and steps[-1].arrival > vehicle.shift.end:
-        return False
-
-    if vehicle.hos_rules:
-        from vrp.hos.rules import rules_for
-        from vrp.hos.schedule import schedule_route
-        return schedule_route(problem, vehicle.id, sequence,
-                              rules_for(vehicle.hos_rules)).legal
-    return True
+    return route_is_legal(problem, vehicle.id, sequence)
 
 
 def build_plan(problem: Problem) -> tuple[dict[str, list[str]], dict[str, tuple]]:
@@ -256,3 +241,66 @@ def build_plan(problem: Problem) -> tuple[dict[str, list[str]], dict[str, tuple]
         else:
             timelines[vehicle_id] = build_timeline(problem, vehicle_id, order_ids)
     return assignment, timelines
+
+
+def generate_large_instance(seed: int, stops: int,
+                            depots: int = 1) -> Problem:
+    """A instance of arbitrary size, with a matrix that computes its own cells.
+
+    `generate_instance` deliberately makes small instances -- four to fourteen
+    customers, chosen so a case fits in a test and in a reader's head. §7.6
+    starts where that ends: "above roughly 2,000-3,000 stops, monolithic search
+    degrades", and NFR-01 wants 10,000 inside an hour.
+
+    The difference is not only the count. A stored matrix for 10,000 stops is
+    ~3.8 GB and about twelve minutes to build, so this returns a `PlanarMatrix`
+    that computes cells on demand instead. The arithmetic is the same as
+    `_matrix`'s, and a test pins the two together.
+
+    Args:
+        seed: the run seed. Same seed, same instance (CON-4).
+        stops: how many customers.
+        depots: how many depots the fleet starts from.
+
+    Returns:
+        A `Problem` whose fleet is sized so the instance is feasible with room
+        to spare. Making it tight is `Shape.TIGHT_CAPACITY`'s job on small
+        instances; here the point is scale, and an infeasible 10,000-stop
+        instance would measure the unassigned path rather than decomposition.
+    """
+    rng = random.Random(seed)
+    spread = max(10.0, stops ** 0.5)
+
+    depot_coords = [(0.0, 0.0)]
+    depot_coords += [(rng.uniform(-spread, spread), rng.uniform(-spread, spread))
+                     for _ in range(depots - 1)]
+    coords = depot_coords + _coordinates(rng, stops, spread)
+
+    locations = tuple(
+        Location(id=f"D{index}" if index < depots else f"C{index}",
+                 lat=9.9 + y / 100, lon=-84.0 + x / 100, matrix_index=index)
+        for index, (x, y) in enumerate(coords)
+    )
+    matrix = PlanarMatrix(version=f"generated-large-{seed}",
+                          coordinates=tuple(coords))
+
+    orders = tuple(
+        Order(id=f"O{index}", kind="JOB",
+              quantities={"units": rng.randint(1, 9)},
+              delivery=StopSpec(location_id=locations[index].id,
+                                time_windows=(DAY,),
+                                service_fixed=rng.choice([60, 120, 180])))
+        for index in range(depots, len(coords))
+    )
+
+    # Roughly twenty stops a vehicle, and capacity for thirty of the heaviest.
+    # Deliberately generous: see the docstring.
+    fleet = max(2, stops // 20)
+    vehicles = tuple(
+        Vehicle(id=f"V{n}", capacities={"units": 9 * 30}, shift=DAY,
+                start_location_id=locations[n % depots].id,
+                end_location_id=locations[n % depots].id)
+        for n in range(fleet)
+    )
+    return Problem(id=f"large-{seed}-{stops}", locations=locations,
+                   orders=orders, vehicles=vehicles, matrix=matrix)
