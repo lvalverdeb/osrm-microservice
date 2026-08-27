@@ -185,11 +185,22 @@ def _map(problem: Problem, manager, routing, assignment, order_at_node,
          dimension, fleet, seed: int, solutions: int) -> Solution:
     """Turn OR-Tools' assignment into the domain `Solution`.
 
-    Carries the solver's own arrival times, exactly as the PyVRP mapper does,
-    so the independent verifier checks the engine's arithmetic rather than
-    ours.
+    Carries the solver's own times, exactly as the PyVRP mapper does, so the
+    independent verifier checks the engine's arithmetic rather than ours.
+
+    One thing the solver does *not* report is arrival. OR-Tools' `Time`
+    CumulVar is the start of service -- already advanced past any wait for a
+    window to open -- so writing it into `arrival` claims the vehicle arrived
+    at the moment it began work. On an instance with slack that is wrong by the
+    length of the wait: on RC208 a vehicle reaching C84 at 50 and waiting for a
+    window opening at 259 was recorded as arriving at 259, and INV-4 -- which
+    recomputes arrival from the previous departure and the matrix -- rightly
+    rejected the whole plan. Arrival is therefore derived here, and
+    `start_service` keeps the solver's figure, so INV-4 still checks the
+    engine's route rather than a timeline we invented.
     """
     time_dimension = routing.GetDimensionOrDie("Time")
+    index_of = {location.id: location.matrix_index for location in problem.locations}
     routes: list[Route] = []
     served: set[str] = set()
 
@@ -205,12 +216,15 @@ def _map(problem: Problem, manager, routing, assignment, order_at_node,
         ) if dimension else 0
 
         steps: list[Step] = []
+        here = index_of[vehicle.start_location_id]
+        clock = 0
         while True:
             node = manager.IndexToNode(index)
             when = assignment.Value(time_dimension.CumulVar(index))
             order_id = order_at_node.get(node)
 
             if not steps:
+                clock = when
                 steps.append(Step(type="START", location_id=vehicle.start_location_id,
                                   arrival=when, start_service=when, departure=when,
                                   load_after={dimension: remaining} if dimension else {}))
@@ -222,15 +236,20 @@ def _map(problem: Problem, manager, routing, assignment, order_at_node,
                 stop = order.delivery
                 duration = service_time(order, vehicle,
                                         problem.location(stop.location_id))
+                there = index_of[stop.location_id]
+                arrival = clock + problem.matrix.duration(here, there)
                 steps.append(Step(
                     type="DELIVERY", location_id=stop.location_id,
-                    order_id=order_id, arrival=when, start_service=when,
+                    order_id=order_id, arrival=arrival, start_service=when,
                     departure=when + duration,
                     load_after={dimension: remaining} if dimension else {}))
+                here, clock = there, when + duration
 
             if routing.IsEnd(index):
+                back = clock + problem.matrix.duration(
+                    here, index_of[vehicle.ends_at])
                 steps.append(Step(type="END", location_id=vehicle.ends_at,
-                                  arrival=when, start_service=when, departure=when,
+                                  arrival=back, start_service=back, departure=back,
                                   load_after={dimension: remaining} if dimension else {}))
                 break
             index = assignment.Value(routing.NextVar(index))

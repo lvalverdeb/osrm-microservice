@@ -222,3 +222,45 @@ def test_a_generated_instance_is_solved_by_both():
 
     assert verify(problem, from_pyvrp).ok
     assert verify(problem, from_ortools).ok
+
+
+def test_the_ortools_mapper_reports_arrival_not_start_of_service():
+    """A waiting vehicle arrives before it starts work, and must say so.
+
+    OR-Tools' `Time` CumulVar is the start of service, already advanced past
+    any wait for a window to open. Writing it into `arrival` claims the vehicle
+    arrived at the moment it began work, which is wrong by the length of the
+    wait -- invisible on instances without slack, and fatal on ones with it.
+
+    Found by E-36's portfolio: on RC208 the veto rejected every OR-Tools plan,
+    INV-4 recomputing arrival at C84 as 50 against a reported 259. The engine's
+    route was fine; the mapper's timeline was not.
+
+    The instance below forces the wait: one customer a minute away whose window
+    opens an hour in. `verify` is the real assertion -- INV-4 recomputes
+    arrival from the matrix and catches the conflation on its own -- and the
+    explicit gap check states what INV-4 would be objecting to.
+    """
+    from vrp.solve import ortools_adapter
+
+    grid = ((0, 60), (60, 0))
+    problem = Problem(
+        id="wait",
+        locations=(Location(id="D", lat=9.9, lon=-84.0, matrix_index=0),
+                   Location(id="C", lat=9.91, lon=-84.0, matrix_index=1)),
+        orders=(Order(id="O1", kind="JOB", quantities={"kg": 1},
+                      delivery=StopSpec(
+                          location_id="C", service_fixed=60,
+                          time_windows=(TimeWindow(start=3600, end=7200),))),),
+        vehicles=(Vehicle(id="V1", capacities={"kg": 10}, shift=DAY,
+                          start_location_id="D", end_location_id="D"),),
+        matrix=TravelMatrix(version="wait", durations=grid, distances=grid))
+
+    solution = ortools_adapter.solve(problem, solutions=50, seed=0)
+    report = verify(problem, solution)
+    assert report.ok, [str(v) for v in report.violations]
+
+    stop = next(step for route in solution.routes for step in route.steps
+                if step.order_id == "O1")
+    assert stop.arrival == 60, stop.arrival
+    assert stop.start_service == 3600, stop.start_service
