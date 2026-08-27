@@ -172,14 +172,18 @@ def test_inv9_catches_objective_drift():
 # --- invariants that have no subject yet ---------------------------------
 
 def test_inv7_and_inv8_report_as_not_applicable_rather_than_passing_silently():
-    """No rules engine (T-25) and no locks (T-29) exist yet.
+    """This fixture declares no hours-of-service rules (INV-7), no locks
+    (INV-8) and no depot inventory (INV-13), so none of the three has a
+    subject.
 
     A verifier that returned 'ok' for an invariant it cannot evaluate would be
     lying by omission, and the lie would survive until someone shipped an
-    illegal duty timeline.
+    illegal duty timeline. The set grows as the model does -- INV-13 joined it
+    with T-45 -- which is the point: an invariant added without a subject on
+    this fixture must say so rather than quietly pass.
     """
     report = verify(problem(), legal_solution())
-    assert report.not_applicable == {"INV-7", "INV-8"}
+    assert report.not_applicable == {"INV-7", "INV-8", "INV-13"}
     assert report.ok is True
 
 

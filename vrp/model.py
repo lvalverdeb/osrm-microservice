@@ -89,6 +89,15 @@ class Location:
     # depots are not the bottleneck, and reading an unset value as zero would
     # make every plan fiction.
     dock_capacity: int | None = None
+    # FR-31 / §4.1's `inventory_by_dimension`. A depot is not a spring: it holds
+    # a finite amount of each thing, and §7.8 makes that a *global* constraint
+    # rather than a per-route one. None means unstocked and therefore
+    # unconstrained -- the same reading `dock_capacity` has, and for the same
+    # reason: treating an unmeasured depot as empty would make every existing
+    # plan fiction the moment one depot started counting. A dimension absent
+    # from a stocked depot's inventory is likewise unconstrained; a depot that
+    # counts kilograms has said nothing about pallets.
+    inventory: dict[str, int] | None = None
     access_classes: frozenset[str] = frozenset()
     max_vehicle_kg: int | None = None
 
@@ -104,6 +113,10 @@ class Location:
             _require_int(self.dock_capacity, "dock_capacity")
             _require(self.dock_capacity >= 0,
                      "dock_capacity must not be negative")
+        for dimension, amount in (self.inventory or {}).items():
+            _require_int(amount, f"inventory[{dimension}]")
+            _require(amount >= 0,
+                     f"inventory[{dimension}] must not be negative")
         if self.max_vehicle_kg is not None:
             _require_int(self.max_vehicle_kg, "max_vehicle_kg")
             _require(self.max_vehicle_kg >= 0,

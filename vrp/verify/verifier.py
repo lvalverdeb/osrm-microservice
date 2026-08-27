@@ -78,6 +78,8 @@ def verify(problem: Problem, solution: Solution) -> Report:
         report.not_applicable.add("INV-7")
     if not problem.locks:
         report.not_applicable.add("INV-8")
+    if not any(location.inventory for location in problem.locations):
+        report.not_applicable.add("INV-13")
 
     _check_coverage(problem, solution, report)               # INV-1, INV-2
     for route in solution.routes:
@@ -87,6 +89,7 @@ def verify(problem: Problem, solution: Solution) -> Report:
         _check_compatibility(problem, route, report)         # INV-10
         _check_reloads(problem, route, report)               # INV-11
     _check_docks(problem, solution, report)                  # INV-12
+    _check_inventory(problem, solution, report)              # INV-13
     _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
     return report
@@ -209,6 +212,50 @@ def _check_docks(problem: Problem, solution: Solution, report: Report) -> None:
                             f"{here} vehicles at {location_id} at {start}; "
                             f"{capacity} bay(s)")
                 break
+
+
+def _check_inventory(problem: Problem, solution: Solution,
+                     report: Report) -> None:
+    """INV-13: no depot supplies more than it holds. FR-31, DEC-1, §7.8.
+
+    Counted **globally**, across every route drawing on the depot, because that
+    is the only place the failure lives. Two vans each taking ten units from a
+    fifteen-unit depot are individually beyond reproach, and §7.6's
+    decomposition produces exactly that shape: sub-problems solved apart, each
+    locally feasible, concatenating to a plan that cannot happen. DEC-1 says so
+    directly -- "depot inventory... MUST be enforced globally, never per
+    cluster".
+
+    Drawn quantities are recomputed from the orders each route carries rather
+    than read from `load_after`, per INV-9: a plan need not carry loads at all,
+    and a check that trusts them passes an over-draw by finding nothing to
+    look at.
+    """
+    drawn: dict[str, dict[str, int]] = {}
+    for route in solution.routes:
+        vehicle = problem.vehicle(route.vehicle_id)
+        home = drawn.setdefault(vehicle.start_location_id, {})
+        for step in route.steps:
+            if step.order_id is None:
+                continue
+            order = problem.order(step.order_id)
+            if order.delivery is None:
+                continue          # a pickup is stock arriving, not leaving
+            for dimension, amount in order.quantities.items():
+                home[dimension] = home.get(dimension, 0) + amount
+
+    for location_id, totals in drawn.items():
+        # `or {}` rather than an early `continue` for an unstocked depot: the
+        # per-dimension `held is not None` below already treats an absent
+        # figure as unconstrained, so the guard was unreachable. Perturbation
+        # confirmed it -- removing it changed no result.
+        stock = problem.location(location_id).inventory or {}
+        for dimension, amount in sorted(totals.items()):
+            held = stock.get(dimension)
+            if held is not None and amount > held:
+                report.fail("INV-13",
+                            f"{location_id} supplied {dimension}={amount} "
+                            f"from {held} in stock")
 
 
 def _check_locks(problem: Problem, solution: Solution, report: Report) -> None:

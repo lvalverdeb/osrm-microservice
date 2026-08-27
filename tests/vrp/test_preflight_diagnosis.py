@@ -259,16 +259,17 @@ def test_every_reported_code_is_in_the_closed_vocabulary():
 def test_the_unimplementable_codes_are_named_rather_than_silently_absent():
     """The codes that cannot be decided here, named rather than omitted.
 
-    Two need a solve -- a pre-flight pass cannot know the fleet ran out -- and
-    one needs depot inventory. INCOMPATIBLE_ONLY was among them until E-22
-    modelled order-to-order classes, which is why this set shrinks rather than
-    being a fixed list.
+    Both that remain need a solve: a pre-flight pass cannot know the fleet ran
+    out, and cannot know a prize was below marginal cost before a route exists.
+
+    This set shrinks as the model grows, and has twice. INCOMPATIBLE_ONLY left
+    it with E-22, which modelled order-to-order classes. DEPOT_STOCKOUT left it
+    with T-45, which modelled depot inventory. A code left on this list after
+    it starts being emitted tells callers to keep waiting for something that
+    has already arrived, so the list moving is part of the contract rather than
+    churn.
     """
-    # INCOMPATIBLE_ONLY left this set with E-22, which modelled order-to-order
-    # incompatibility. The two that remain need a solve; the third needs depot
-    # inventory.
-    assert set(UNIMPLEMENTED) == {
-        "FLEET_EXHAUSTED", "DROPPED_BY_PRIZE", "DEPOT_STOCKOUT"}
+    assert set(UNIMPLEMENTED) == {"FLEET_EXHAUSTED", "DROPPED_BY_PRIZE"}
     assert all(why for why in UNIMPLEMENTED.values()), "each needs a reason"
     assert set(UNIMPLEMENTED) <= set(REASONS), "and each must be a real code"
 

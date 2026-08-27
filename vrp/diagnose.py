@@ -51,7 +51,6 @@ UNIMPLEMENTED: dict[str, str] = {
                        "fleet had left",
     "DROPPED_BY_PRIZE": "needs a solve; the marginal cost is only known once a "
                         "route exists",
-    "DEPOT_STOCKOUT": "depot inventory is not modelled",
 }
 
 
@@ -224,6 +223,36 @@ def _forced_together_with_an_enemy(problem: Problem, order: Order,
     return bool(enemies)
 
 
+def _stocked_out(problem: Problem, order: Order,
+                 fleet: list[Vehicle]) -> str | None:
+    """FR-31: whether no eligible depot holds enough for this order alone.
+
+    Pre-flight's usual narrowness applies -- one order at a time, ignoring
+    every other -- and it is what makes the answer trustworthy. A depot short
+    of stock does not make an order unservable while another eligible depot
+    holds enough, so this reports only when *every* depot the eligible fleet
+    starts from is short. Whether the depots can supply the whole day's work
+    between them is INV-13's question, and needs the plan.
+    """
+    homes = {vehicle.start_location_id for vehicle in fleet}
+    shortfalls = []
+    for home in sorted(homes):
+        stock = problem.location(home).inventory
+        if not stock:
+            return None           # an unstocked depot is unconstrained
+        lacking = [f"{dimension}={stock.get(dimension)}"
+                   for dimension, amount in sorted(order.quantities.items())
+                   if stock.get(dimension) is not None
+                   and stock[dimension] < amount]
+        if not lacking:
+            return None
+        shortfalls.append(f"{home} holds {', '.join(lacking)}")
+    if not shortfalls:
+        return None
+    return (f"needs {order.quantities}; no eligible depot holds it "
+            f"({'; '.join(shortfalls)})")
+
+
 def preflight(problem: Problem) -> dict[str, Finding]:
     """Diagnose every order that no vehicle can serve on its own.
 
@@ -265,6 +294,11 @@ def preflight(problem: Problem) -> dict[str, Finding]:
                           default=0)
             report("CAPACITY_EXCEEDED",
                    f"needs {order.quantities}; largest eligible capacity {biggest}")
+            continue
+
+        short = _stocked_out(problem, order, fleet)
+        if short:
+            report("DEPOT_STOCKOUT", short)
             continue
 
         stop = order.delivery or order.pickup

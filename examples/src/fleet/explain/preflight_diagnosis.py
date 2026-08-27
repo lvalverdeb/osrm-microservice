@@ -221,11 +221,14 @@ def main() -> int:
     print("  That is the difference §6.5 is after: the solver knows it failed,")
     print("  never why.")
 
-    print(f"\n  ({len(UNIMPLEMENTED)} of {len(REASONS)} codes need a solve or a "
-          f"model concept that does not exist yet:")
+    print(f"\n  ({len(UNIMPLEMENTED)} of {len(REASONS)} codes cannot be "
+          f"decided before a solve:")
     for code, why in UNIMPLEMENTED.items():
         print(f"     {code}: {why}")
-    print("   named rather than omitted, so nobody waits for one.)")
+    print("   named rather than omitted, so nobody waits for one. This list")
+    print("   shrinks as the model grows: INCOMPATIBLE_ONLY left it with E-22")
+    print("   and DEPOT_STOCKOUT with T-45, both of which stopped being")
+    print("   \"not modelled\" and started being answerable.)")
     return 0
 
 
