@@ -37,6 +37,7 @@ import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
+from vrp.committed import moved_between
 from vrp.epochs import Policy, classify, decide, epochs
 from vrp.evaluator import evaluate
 from vrp.model import Problem, TimeWindow
@@ -77,6 +78,11 @@ class EpochRecord:
     # waited three hours, not one plus two plus three, and a per-wave accrual
     # would make the penalty quadratic in the wait for no defensible reason.
     delay: int = 0
+    # §8.3's other churn: stops whose *provisional* vehicle changed since the
+    # last epoch. DYN-1 has the epoch controller "publish plans", so postponed
+    # work carries a vehicle a driver has already seen -- and putting it on a
+    # different one next epoch is the reassignment §8.3 names.
+    moves: int = 0
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,16 @@ class Run:
     def delay(self) -> int:
         """Total order-seconds of postponement across the day."""
         return sum(record.delay for record in self.epochs)
+
+    @property
+    def moves(self) -> int:
+        """Stops whose provisional vehicle changed, across the day.
+
+        Kept apart from `delay` because §8.3 names both and T-57 separated them
+        deliberately: one reassigns a driver, the other changes what a customer
+        was told, and they are not equally expensive to anybody.
+        """
+        return sum(record.moves for record in self.epochs)
 
     @property
     def dispatched(self) -> tuple[str, ...]:
@@ -117,6 +133,7 @@ class PolicyResult:
     forced: int
     versus_baseline: int
     delay: int = 0
+    moves: int = 0
 
 
 @dataclass(frozen=True)
@@ -133,6 +150,7 @@ class Comparison:
     # the price, so a default here would be unreachable -- perturbation showed
     # it could be set to anything without a test noticing.
     delay_price: int
+    move_price: int
 
 
 def dispatchable(problem: Problem, horizon: TimeWindow,
@@ -202,7 +220,8 @@ def generate_days(problem: Problem, count: int, seed: int,
 
 
 def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
-           construct: Construct | None = None, delay_price: int = 0) -> Run:
+           construct: Construct | None = None, delay_price: int = 0,
+           move_price: int = 0) -> Run:
     """Replay one day, epoch by epoch, under one policy. DYN-6.
 
     Args:
@@ -235,6 +254,18 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
             no window is missed and a day costs only the routing of each wave,
             so "hold until forced" is close to optimal by construction and the
             room any cleverer policy has to beat it is correspondingly thin.
+        move_price: what reassigning one stop to a different vehicle costs,
+            in the same units as distance. §8.3's other churn term.
+
+            Postponed work is provisionally assigned to a vehicle, because
+            DYN-1 has the epoch controller "publish plans" -- a driver has seen
+            tomorrow's load. Moving it to a different vehicle next epoch is the
+            reassignment §8.3 asks to be priced, and it is charged once, when
+            the move happens, rather than for every epoch it stays moved.
+
+            Zero by default, and greedy scores zero at any price: it dispatches
+            on arrival, so nothing is ever provisional and nothing can change.
+            That is a structural property rather than a lucky fixture.
         construct: builds an assignment for one epoch's dispatch set, so the
             cost is whatever the caller's operational solver would charge.
             Defaults to a first-fit, which is enough to separate policies and
@@ -255,6 +286,8 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
     # When each request first became visible, so the wait can be charged once
     # against the moment it went out rather than against the epoch it landed in.
     first_seen: dict[str, int] = {}
+    # What the last epoch published for the work it held over.
+    provisional: dict[str, str] = {}
 
     for wave in waves:
         last = wave is waves[-1]
@@ -289,16 +322,45 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
 
         waited = sum(max(wave.start - first_seen.get(order_id, wave.start), 0)
                      for order_id in decision.dispatched)
+
+        # Plan the work that is being held as well as the work going out, so
+        # the held part has a vehicle to be published against. The dispatched
+        # cost is unchanged by this -- it is still the routing of what actually
+        # left -- because a term that quietly altered it would invalidate every
+        # number measured before this existed.
+        published = _assign(problem, decision.postponed, build)
+        moved = len(moved_between(
+            {order_id: vehicle for order_id, vehicle in provisional.items()
+             if order_id in set(decision.postponed)},
+            published))
+        provisional = published
+
         records.append(EpochRecord(
             index=wave.index, dispatched=decision.dispatched,
             postponed=decision.postponed, must_go=split.must_go,
-            forced=decision.forced, delay=waited,
+            forced=decision.forced, delay=waited, moves=moved,
             cost=_cost_of(problem, decision.dispatched, build)
-            + waited * delay_price // 1_000))
+            + waited * delay_price // 1_000
+            + moved * move_price))
         dispatched_ever.update(decision.dispatched)
         carried = list(decision.postponed)
 
     return Run(day=day.id, epochs=tuple(records))
+
+
+def _assign(problem: Problem, order_ids: Sequence[str],
+            construct: Construct) -> dict[str, str]:
+    """Which vehicle each held order is provisionally on. DYN-1's published plan.
+
+    Only the held work: what has already gone out is not provisional any more,
+    and a driver cannot be reassigned a delivery they have made.
+    """
+    if not order_ids:
+        return {}
+    wave = replace(problem, orders=tuple(problem.order(o) for o in order_ids))
+    return {order_id: vehicle_id
+            for vehicle_id, ids in construct(wave).items()
+            for order_id in ids}
 
 
 def _cost_of(problem: Problem, order_ids: Sequence[str],
@@ -335,7 +397,7 @@ def _first_fit(problem: Problem) -> dict[str, list[str]]:
 
 def compare(problem: Problem, days: Sequence[Day],
             policies: Mapping[str, Policy], epoch_length: int,
-            delay_price: int = 0) -> Comparison:
+            delay_price: int = 0, move_price: int = 0) -> Comparison:
     """Replay every policy over the corpus and report against greedy. AC-3.2.
 
     Raises:
@@ -348,17 +410,20 @@ def compare(problem: Problem, days: Sequence[Day],
                          f"got {sorted(policies)}")
 
     runs = {name: [replay(problem, day, policy, epoch_length,
-                          delay_price=delay_price) for day in days]
+                          delay_price=delay_price, move_price=move_price)
+                   for day in days]
             for name, policy in policies.items()}
     totals = {name: sum(run.cost for run in these)
               for name, these in runs.items()}
 
-    return Comparison(baseline=BASELINE, delay_price=delay_price, results={
+    return Comparison(baseline=BASELINE, delay_price=delay_price,
+                      move_price=move_price, results={
         name: PolicyResult(
             policy=name, days=len(days), cost=totals[name],
             dispatch_epochs=sum(run.dispatch_epochs for run in these),
             forced=sum(len(record.forced) for run in these
                        for record in run.epochs),
             versus_baseline=totals[name] - totals[BASELINE],
-            delay=sum(run.delay for run in these))
+            delay=sum(run.delay for run in these),
+            moves=sum(run.moves for run in these))
         for name, these in runs.items()})

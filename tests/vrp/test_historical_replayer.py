@@ -397,3 +397,137 @@ def test_the_comparison_report_carries_the_delay_price():
     # in order-seconds whatever the price, so it is positive either way.
     assert priced.results["lazy"].cost > free.results["lazy"].cost
     assert priced.results["greedy"].cost == free.results["greedy"].cost
+
+
+# --------------------------------------------------------------------------
+# §8.3's other churn: stops moved between vehicles
+# --------------------------------------------------------------------------
+
+def test_move_price_defaults_to_leaving_the_cost_alone():
+    """Same contract as the delay price. Two terms added in two commits, and
+    neither may move a number that was measured before it existed."""
+    instance = dispatchable(problem(stops=6), DAY, window=3 * HOUR)
+    days = generate_days(instance, count=10, seed=0, horizon=DAY)
+
+    for day in days:
+        assert replay(instance, day, lazy, epoch_length=HOUR).cost == \
+            replay(instance, day, lazy, epoch_length=HOUR, move_price=0).cost
+
+
+def crowded(stops: int = 8, capacity: int = 2) -> Problem:
+    """An instance whose fleet is tight enough for the split to move.
+
+    The move term only bites when reassignment is possible at all. With 1 kg
+    orders in 100 kg vans, first-fit puts everything on the first vehicle and
+    nothing can ever change hands -- measured, that is exactly zero moves at any
+    price, which reads as a broken term rather than a roomy fleet. Squeezing the
+    capacity is what gives the held work somewhere else to go.
+    """
+    from dataclasses import replace as _replace
+
+    base = problem(stops=stops, vans=3)
+    tightened = _replace(base, vehicles=tuple(
+        _replace(vehicle, capacities={"kg": capacity})
+        for vehicle in base.vehicles))
+    return dispatchable(tightened, DAY, window=3 * HOUR)
+
+
+def test_greedy_never_moves_a_stop_between_vehicles():
+    """The control, and it is structural rather than lucky: greedy dispatches
+    on arrival, so no order is ever provisionally assigned to a vehicle it
+    might later be taken off. Nothing was published, so nothing can change."""
+    instance = crowded()
+    days = generate_days(instance, count=30, seed=0, horizon=DAY)
+
+    moves = sum(replay(instance, day, greedy, epoch_length=HOUR,
+                       move_price=1_000).moves for day in days)
+
+    assert moves == 0
+
+
+def test_holding_work_lets_its_provisional_vehicle_change():
+    """DYN-1 has the epoch controller "publish plans", so postponed work has a
+    vehicle a driver has already seen. When the next epoch puts it on a
+    different one, that is §8.3's "stops moved between vehicles"."""
+    instance = crowded()
+    days = generate_days(instance, count=30, seed=0, horizon=DAY)
+
+    moves = sum(replay(instance, day, lazy, epoch_length=HOUR,
+                       move_price=1_000).moves for day in days)
+
+    assert moves > 0
+
+
+def test_dispatching_held_work_is_not_itself_a_move():
+    """A stop that goes out has not been reassigned -- it has been delivered.
+
+    Counting it would make every dispatch look like churn, and a policy that
+    holds work and then sends it (which is what lazy is) would show enormous
+    fake reassignment. Perturbation found this: dropping the filter that keeps
+    already-dispatched orders out of the comparison changed no result, because
+    the other tests only assert that moves are positive.
+    """
+    instance = crowded(stops=1)
+    days = generate_days(instance, count=10, seed=0, horizon=DAY)
+
+    for day in days:
+        run = replay(instance, day, lazy, epoch_length=HOUR, move_price=1_000)
+        assert run.dispatched, "fixture: the order must actually go out"
+        assert run.moves == 0, [r.moves for r in run.epochs]
+
+
+def test_a_move_is_charged_once_rather_than_every_epoch_after():
+    """An order that moves from V1 to V2 and stays there moved once. Charging
+    it again every epoch it remains on V2 would make the penalty grow with how
+    early in the day the reassignment happened, which is backwards."""
+    instance = dispatchable(problem(stops=6), DAY, window=3 * HOUR)
+    day = generate_days(instance, count=1, seed=0, horizon=DAY)[0]
+
+    run = replay(instance, day, lazy, epoch_length=HOUR, move_price=1_000)
+    per_epoch = [record.moves for record in run.epochs]
+
+    assert sum(per_epoch) == run.moves
+    assert all(count >= 0 for count in per_epoch)
+
+
+def test_pricing_moves_makes_a_churning_policy_dearer():
+    instance = crowded()
+    days = generate_days(instance, count=30, seed=0, horizon=DAY)
+
+    free = sum(replay(instance, day, lazy, epoch_length=HOUR).cost
+               for day in days)
+    priced = sum(replay(instance, day, lazy, epoch_length=HOUR,
+                        move_price=1_000).cost for day in days)
+
+    assert priced > free
+
+
+def test_the_two_churn_terms_are_reported_separately():
+    """§8.3 names both and T-57 kept them apart on purpose: one reassigns a
+    driver, the other changes what a customer was told. A replayer that summed
+    them would undo that."""
+    instance = dispatchable(problem(stops=8), DAY, window=3 * HOUR)
+    day = generate_days(instance, count=1, seed=0, horizon=DAY)[0]
+
+    run = replay(instance, day, lazy, epoch_length=HOUR,
+                 delay_price=100, move_price=1_000)
+
+    assert run.delay > 0
+    assert run.moves >= 0
+    assert not hasattr(run, "churn")
+
+
+def test_the_comparison_report_carries_the_move_price():
+    instance = dispatchable(problem(stops=6), DAY, window=3 * HOUR)
+    days = generate_days(instance, count=10, seed=0, horizon=DAY)
+
+    instance = crowded()
+    days = generate_days(instance, count=30, seed=0, horizon=DAY)
+    priced = compare(instance, days, BASELINES, epoch_length=HOUR,
+                     move_price=1_000)
+    free = compare(instance, days, BASELINES, epoch_length=HOUR)
+
+    assert priced.move_price == 1_000
+    assert free.move_price == 0
+    assert priced.results["lazy"].cost > free.results["lazy"].cost
+    assert priced.results["greedy"].cost == free.results["greedy"].cost

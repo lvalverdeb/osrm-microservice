@@ -29,6 +29,10 @@ Four things, in order:
    so strong. §8.3 says it is not free, and the sweep shows what happens once
    the customer's wait is on the bill.
 
+6. **Pricing the reassignment**, §8.3's other churn term -- and an honest
+   account of how little it moves here, and why that is about the constructor
+   rather than about the term.
+
 Runs offline. No gateway required.
 
 Usage:
@@ -190,6 +194,46 @@ def show_the_price_of_waiting(problem, days) -> None:
     print("   wearing the costume of a result.")
 
 
+def show_the_price_of_reassignment(problem) -> None:
+    print("\n6. Pricing the reassignment (§8.3's \"stops moved between"
+          " vehicles\")")
+    from dataclasses import replace as _replace
+
+    from vrp.replay import dispatchable
+
+    # Tight enough that the split across vehicles can actually change. With
+    # roomy vans first-fit puts everything on the first one and no reassignment
+    # is possible at all -- zero moves at any price, which reads as a broken
+    # term rather than a comfortable fleet.
+    tight = _replace(problem, vehicles=tuple(
+        _replace(vehicle, capacities={"kg": 3})
+        for vehicle in problem.vehicles))
+    corpus = dispatchable(tight, DAY, window=3 * HOUR)
+    corpus_days = generate_days(corpus, count=90, seed=0, horizon=DAY)
+
+    print(f"   {'policy':<10}{'reassignments in 90 days':>26}")
+    for name, policy in (("greedy", greedy), ("lazy", lazy)):
+        moves = sum(replay(corpus, day, policy, epoch_length=HOUR,
+                           move_price=1).moves for day in corpus_days)
+        print(f"   {name:<10}{moves:>26}")
+
+    print("   Greedy is structurally zero: it dispatches on arrival, so nothing")
+    print("   is ever provisionally assigned and nothing can change hands.")
+    print("   DYN-1 has the epoch controller \"publish plans\", which is what")
+    print("   makes a held order's vehicle something a driver has already seen")
+    print("   -- and moving it the reassignment §8.3 asks to be priced.")
+    print("   Lazy's seven over ninety days is a real number and a small one,")
+    print("   and the reason is the constructor rather than the term. First-fit")
+    print("   is deterministic: the same held set always packs the same way, so")
+    print("   a vehicle only changes when the set itself changes shape. A real")
+    print("   solver rebuilding the plan each epoch would churn far more, and")
+    print("   this measurement understates what the term would cost in")
+    print("   production rather than showing it does not matter.")
+    print("   The two terms stay separate -- §8.3 names both and T-57 kept them")
+    print("   apart because one reassigns a driver and the other changes what a")
+    print("   customer was told. Summing them here would undo that.")
+
+
 def main() -> int:
     problem = instance()
     days = generate_days(problem, count=90, seed=0, horizon=DAY)
@@ -199,6 +243,7 @@ def main() -> int:
     show_the_report(problem, days)
     show_what_it_is_careful_about(problem, days)
     show_the_price_of_waiting(problem, days)
+    show_the_price_of_reassignment(problem)
     return 0
 
 

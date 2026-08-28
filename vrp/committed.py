@@ -34,6 +34,7 @@ and it changes whenever either does.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from vrp.model import Lock, Problem, Route, Solution
@@ -152,12 +153,24 @@ def moved_since(before: Solution, after: Solution) -> dict[str, tuple[str, str |
     different facts with different consequences: one reassigns a driver, the
     other changes what a customer was told.
     """
-    def owners(solution: Solution) -> dict[str, str]:
-        return {step.order_id: route.vehicle_id
-                for route in solution.routes for step in route.steps
-                if step.order_id is not None}
+    return moved_between(_owners(before), _owners(after))
 
-    was, now = owners(before), owners(after)
+
+def _owners(solution: Solution) -> dict[str, str]:
+    return {step.order_id: route.vehicle_id
+            for route in solution.routes for step in route.steps
+            if step.order_id is not None}
+
+
+def moved_between(was: Mapping[str, str],
+                  now: Mapping[str, str]) -> dict[str, tuple[str, str | None]]:
+    """The same comparison over bare order-to-vehicle maps.
+
+    Extracted so the replayer can use it on the provisional assignments it
+    carries between epochs, which are maps rather than plans. Duplicating four
+    lines would have been easier and would have left two definitions of "moved"
+    to drift apart.
+    """
     return {order_id: (vehicle, now.get(order_id))
             for order_id, vehicle in was.items()
             if now.get(order_id) != vehicle}
