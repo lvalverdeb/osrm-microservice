@@ -36,7 +36,7 @@ changes whenever the domain model does.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import pairwise
 
 from vrp.model import Problem, Solution
@@ -59,6 +59,11 @@ class ExecutedRoute:
     territory: str
     sequence: tuple[str, ...]
     arrivals: dict[str, int]
+    # §12.1 fits service duration from telematics, which needs both ends of the
+    # stop. Optional because adherence (§12.4) needs only the sequence and the
+    # arrivals, and a fleet whose trackers report arrivals alone can still be
+    # measured for adherence -- it just cannot be calibrated.
+    departures: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -134,9 +139,9 @@ def ingest(problem: Problem,
     known = {order.id for order in problem.orders}
     executed = []
     for record in records:
-        for field in ("vehicle_id", "driver_id", "depot_id", "territory"):
-            if not record.get(field):
-                raise ValueError(f"telematics record is missing {field}: "
+        for required in ("vehicle_id", "driver_id", "depot_id", "territory"):
+            if not record.get(required):
+                raise ValueError(f"telematics record is missing {required}: "
                                  f"{dict(record)}")
         stops = list(record.get("stops", ()))
         for stop in stops:
@@ -148,7 +153,9 @@ def ingest(problem: Problem,
             vehicle_id=record["vehicle_id"], driver_id=record["driver_id"],
             depot_id=record["depot_id"], territory=record["territory"],
             sequence=tuple(stop["order_id"] for stop in stops),
-            arrivals={stop["order_id"]: stop["arrival"] for stop in stops}))
+            arrivals={stop["order_id"]: stop["arrival"] for stop in stops},
+            departures={stop["order_id"]: stop["departure"] for stop in stops
+                        if "departure" in stop}))
     return tuple(executed)
 
 
