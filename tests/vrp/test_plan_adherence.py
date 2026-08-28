@@ -37,6 +37,7 @@ pattern can be told from a Tuesday.
 from __future__ import annotations
 
 import pytest
+
 from vrp.adherence import (
     ExecutedRoute,
     adherence,
@@ -44,7 +45,6 @@ from vrp.adherence import (
     dissimilarity,
     ingest,
 )
-
 from vrp.model import (
     Location,
     Order,
