@@ -115,6 +115,44 @@ class Comparison:
     results: dict[str, PolicyResult]
 
 
+def dispatchable(problem: Problem, horizon: TimeWindow,
+                 window: int) -> Problem:
+    """The same instance with windows narrow enough for dispatch to be a
+    decision. §8.1.
+
+    Measured, and this is the point: with day-long windows nothing is ever
+    must-go until the final wave, postponing costs nothing, and "hold
+    everything" is optimal by a wide margin -- 882,000 against greedy's
+    1,465,200 on a 30-day corpus, with the best of forty sampled probabilities
+    at 1,013,400. No policy can beat lazy there, so T-54's "beats greedy and
+    lazy" is unreachable and every dispatch policy is measured on a problem
+    that has no trade in it.
+
+    §8.1's premise is that postponing *risks* something. Narrow the windows and
+    the trade appears: on the same corpus lazy becomes dearer than greedy.
+    That is the regime the competition instances are in and the one a dispatch
+    policy is for.
+
+    Args:
+        problem: the instance.
+        horizon: the planning day.
+        window: how long each order's window stays open, staggered across the
+            day so the whole fleet is not urgent at once.
+    """
+    from dataclasses import replace as _replace
+
+    span = max(horizon.end - horizon.start - window, 1)
+    orders = []
+    for index, order in enumerate(problem.orders):
+        opens = horizon.start + (index * span // max(len(problem.orders), 1))
+        stop = order.delivery or order.pickup
+        narrowed = _replace(stop, time_windows=(
+            TimeWindow(start=opens, end=min(opens + window, horizon.end)),))
+        orders.append(_replace(order, **{
+            "delivery" if order.delivery else "pickup": narrowed}))
+    return _replace(problem, orders=tuple(orders))
+
+
 def generate_days(problem: Problem, count: int, seed: int,
                   horizon: TimeWindow) -> tuple[Day, ...]:
     """A synthetic corpus of arrival schedules.
@@ -189,11 +227,10 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
         split = classify(problem, open_ids, postponed_to=wave.end)
         if last:
             # Nothing may be left over at the end of the day.
-            decision = decide(problem, open_ids, postponed_to=wave.end,
-                              policy=lambda ids, s: tuple(ids))
+            decision = decide(problem, open_ids, wave,
+                              policy=lambda ids, s, e: tuple(ids))
         else:
-            decision = decide(problem, open_ids, postponed_to=wave.end,
-                              policy=policy)
+            decision = decide(problem, open_ids, wave, policy=policy)
 
         records.append(EpochRecord(
             index=wave.index, dispatched=decision.dispatched,

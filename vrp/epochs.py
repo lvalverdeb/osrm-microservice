@@ -70,7 +70,11 @@ class Dispatch:
     forced: tuple[str, ...]
 
 
-Policy = Callable[[Sequence[str], Classification], Sequence[str]]
+# A policy sees the open work, its classification, and *which wave it is*.
+# The epoch is not decoration: a policy that reasons about how much day is left
+# -- T-54's ICD does -- is otherwise judging every wave against the same
+# imagined future, and measures identically to one that never thinks at all.
+Policy = Callable[[Sequence[str], "Classification", "Epoch"], Sequence[str]]
 
 
 def epochs(horizon: TimeWindow, length: int) -> tuple[Epoch, ...]:
@@ -138,16 +142,18 @@ def classify(problem: Problem, open_ids: Sequence[str],
     return Classification(must_go=tuple(must), deferrable=tuple(defer))
 
 
-def decide(problem: Problem, open_ids: Sequence[str], postponed_to: int,
+def decide(problem: Problem, open_ids: Sequence[str], epoch: Epoch,
            policy: Policy) -> Dispatch:
     """One epoch's dispatch decision, with AC-3.1 enforced. FR-22, DYN-1.
 
     Args:
         problem: the instance.
         open_ids: the requests known and not yet dispatched.
-        postponed_to: when postponed work would wait until.
-        policy: chooses the dispatch set from the open work and its
-            classification. §8.2's policies are T-52; this takes whichever.
+        epoch: the wave being decided. Postponed work waits until its end,
+            which is also what the policy is told -- a single concept rather
+            than an instant passed alongside the wave it came from.
+        policy: chooses the dispatch set from the open work, its classification
+            and the wave. §8.2's policies are T-52; this takes whichever.
 
     Returns:
         A partition of `open_ids` into dispatched and postponed, plus whatever
@@ -157,8 +163,8 @@ def decide(problem: Problem, open_ids: Sequence[str], postponed_to: int,
         ValueError: if the policy names an order that is not open. Dropping it
             silently would make the partition quietly false.
     """
-    split = classify(problem, open_ids, postponed_to)
-    chosen = list(dict.fromkeys(policy(open_ids, split)))
+    split = classify(problem, open_ids, epoch.end)
+    chosen = list(dict.fromkeys(policy(open_ids, split, epoch)))
 
     unknown = [order_id for order_id in chosen if order_id not in set(open_ids)]
     if unknown:

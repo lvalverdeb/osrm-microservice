@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import pytest
 
-from vrp.epochs import Classification, decide, epochs
+from vrp.epochs import Classification, Epoch, decide, epochs
 from vrp.model import (
     Location,
     Order,
@@ -44,6 +44,13 @@ from vrp.model import (
 from vrp.policies import BASELINES, greedy, lazy, random_policy
 
 HOUR = 3600
+
+
+def wave_of(end: int) -> Epoch:
+    """A single wave ending at `end`, for fixtures that care only about when
+    postponed work would wait until."""
+    return Epoch(index=0, start=0, end=end)
+
 DAY = TimeWindow(start=0, end=8 * HOUR)
 LEG = 1800
 
@@ -71,6 +78,7 @@ def problem(closes: dict[str, int]) -> Problem:
 
 
 OPEN = ["O1", "O2", "O3", "O4"]
+WAVE = Epoch(index=0, start=0, end=HOUR)
 SPLIT = Classification(must_go=("O1",), deferrable=("O2", "O3", "O4"))
 LATE = {f"O{i}": 8 * HOUR for i in range(1, 5)}
 
@@ -80,11 +88,11 @@ LATE = {f"O{i}": 8 * HOUR for i in range(1, 5)}
 # --------------------------------------------------------------------------
 
 def test_greedy_dispatches_everything_known_now():
-    assert list(greedy(OPEN, SPLIT)) == OPEN
+    assert list(greedy(OPEN, SPLIT, WAVE)) == OPEN
 
 
 def test_lazy_dispatches_only_the_must_go_work():
-    assert list(lazy(OPEN, SPLIT)) == ["O1"]
+    assert list(lazy(OPEN, SPLIT, WAVE)) == ["O1"]
 
 
 def test_lazy_dispatches_nothing_when_nothing_must_go():
@@ -93,11 +101,11 @@ def test_lazy_dispatches_nothing_when_nothing_must_go():
     measured against it."""
     nothing_urgent = Classification(must_go=(), deferrable=tuple(OPEN))
 
-    assert list(lazy(OPEN, nothing_urgent)) == []
+    assert list(lazy(OPEN, nothing_urgent, WAVE)) == []
 
 
 def test_random_takes_the_must_go_work_and_some_of_the_rest():
-    chosen = list(random_policy(probability=500, seed=0)(OPEN, SPLIT))
+    chosen = list(random_policy(probability=500, seed=0)(OPEN, SPLIT, WAVE))
 
     assert "O1" in chosen
     assert set(chosen) <= set(OPEN)
@@ -115,13 +123,13 @@ def test_random_at_probability_zero_is_lazy():
     never = random_policy(probability=0, seed=0)
 
     for _ in range(2_000):
-        assert list(never(OPEN, SPLIT)) == list(lazy(OPEN, SPLIT))
+        assert list(never(OPEN, SPLIT, WAVE)) == list(lazy(OPEN, SPLIT, WAVE))
 
 
 def test_random_at_full_probability_is_greedy():
     always = random_policy(probability=1000, seed=0)
 
-    assert sorted(always(OPEN, SPLIT)) == sorted(greedy(OPEN, SPLIT))
+    assert sorted(always(OPEN, SPLIT, WAVE)) == sorted(greedy(OPEN, SPLIT, WAVE))
 
 
 def test_random_draws_afresh_each_epoch():
@@ -138,7 +146,7 @@ def test_random_draws_afresh_each_epoch():
     nothing_urgent = Classification(must_go=(), deferrable=tuple(open_ids))
     policy = random_policy(probability=500, seed=3)
 
-    draws = [tuple(policy(open_ids, nothing_urgent)) for _ in range(8)]
+    draws = [tuple(policy(open_ids, nothing_urgent, WAVE)) for _ in range(8)]
     assert len(set(draws)) > 1, draws
     assert set().union(*draws) == set(open_ids), draws
 
@@ -149,13 +157,13 @@ def test_random_is_reproducible_for_a_seed():
     left = random_policy(probability=500, seed=7)
     right = random_policy(probability=500, seed=7)
 
-    assert [tuple(left(OPEN, SPLIT)) for _ in range(5)] == \
-           [tuple(right(OPEN, SPLIT)) for _ in range(5)], \
+    assert [tuple(left(OPEN, SPLIT, WAVE)) for _ in range(5)] == \
+           [tuple(right(OPEN, SPLIT, WAVE)) for _ in range(5)], \
         "two policies built from one seed diverged"
 
 
 def test_a_different_seed_gives_a_different_draw():
-    draws = {tuple(random_policy(probability=500, seed=s)(OPEN, SPLIT))
+    draws = {tuple(random_policy(probability=500, seed=s)(OPEN, SPLIT, WAVE))
              for s in range(12)}
 
     assert len(draws) > 1, draws
@@ -179,7 +187,7 @@ def test_all_three_baselines_are_registered():
 
 def test_every_registered_baseline_is_callable_as_a_policy():
     for name, policy in BASELINES.items():
-        chosen = policy(OPEN, SPLIT)
+        chosen = policy(OPEN, SPLIT, WAVE)
         assert set(chosen) <= set(OPEN), name
 
 
@@ -190,7 +198,7 @@ def test_the_registry_is_what_a_replayer_enumerates():
     instance = problem(LATE)
 
     for name, policy in BASELINES.items():
-        decision = decide(instance, OPEN, postponed_to=HOUR, policy=policy)
+        decision = decide(instance, OPEN, wave_of(HOUR), policy=policy)
         assert set(decision.dispatched) | set(decision.postponed) == set(OPEN), \
             name
 
@@ -211,7 +219,7 @@ def test_no_baseline_can_postpone_a_must_go():
                       "O4": 8 * HOUR})
 
     for name, policy in BASELINES.items():
-        decision = decide(urgent, OPEN, postponed_to=HOUR, policy=policy)
+        decision = decide(urgent, OPEN, wave_of(HOUR), policy=policy)
         assert "O1" in decision.dispatched, name
         assert "O1" not in decision.postponed, name
 
@@ -224,7 +232,7 @@ def test_lazy_is_overruled_and_says_so():
     urgent = problem({"O1": HOUR // 2, "O2": 8 * HOUR, "O3": 8 * HOUR,
                       "O4": 8 * HOUR})
 
-    decision = decide(urgent, OPEN, postponed_to=HOUR, policy=lazy)
+    decision = decide(urgent, OPEN, wave_of(HOUR), policy=lazy)
 
     assert decision.forced == ()
     assert decision.dispatched == ("O1",)
@@ -235,7 +243,7 @@ def test_greedy_is_never_overruled():
     urgent = problem({"O1": HOUR // 2, "O2": 8 * HOUR, "O3": 8 * HOUR,
                       "O4": 8 * HOUR})
 
-    assert decide(urgent, OPEN, postponed_to=HOUR, policy=greedy).forced == ()
+    assert decide(urgent, OPEN, wave_of(HOUR), policy=greedy).forced == ()
 
 
 # --------------------------------------------------------------------------
@@ -256,8 +264,7 @@ def test_the_baselines_separate_on_a_replayed_day():
         for wave in waves:
             if not open_ids:
                 break
-            decision = decide(instance, open_ids, postponed_to=wave.end,
-                              policy=policy)
+            decision = decide(instance, open_ids, wave, policy=policy)
             if decision.dispatched:
                 used += 1
             open_ids = list(decision.postponed)

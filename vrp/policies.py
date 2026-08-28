@@ -32,7 +32,7 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 
-from vrp.epochs import Classification, Policy
+from vrp.epochs import Classification, Epoch, Policy
 
 # Probability in parts per thousand, per CON-4: this project does not
 # accumulate floats, and a comparison against a baseline has to reproduce
@@ -40,12 +40,18 @@ from vrp.epochs import Classification, Policy
 FULL = 1000
 
 
-def greedy(open_ids: Sequence[str], split: Classification) -> Sequence[str]:
-    """Dispatch everything known now. §8.2's ceiling on service."""
+def greedy(open_ids: Sequence[str], split: Classification,
+           epoch: Epoch) -> Sequence[str]:
+    """Dispatch everything known now. §8.2's ceiling on service.
+
+    Ignores the epoch, and that is the point of a baseline: it has no view
+    about how much day is left.
+    """
     return tuple(open_ids)
 
 
-def lazy(open_ids: Sequence[str], split: Classification) -> Sequence[str]:
+def lazy(open_ids: Sequence[str], split: Classification,
+         epoch: Epoch) -> Sequence[str]:
     """Dispatch only what must go. §8.2's floor on service.
 
     It looks bad because it is meant to: a baseline that behaved sensibly would
@@ -85,7 +91,8 @@ def random_policy(probability: int, seed: int) -> Policy:
                          f"got {probability}")
     rng = random.Random(seed)
 
-    def policy(open_ids: Sequence[str], split: Classification) -> Sequence[str]:
+    def policy(open_ids: Sequence[str], split: Classification,
+               epoch: Epoch) -> Sequence[str]:
         chosen = list(split.must_go)
         for order_id in open_ids:
             if order_id in split.must_go:

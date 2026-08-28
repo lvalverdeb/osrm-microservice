@@ -32,7 +32,7 @@ from itertools import pairwise
 
 import pytest
 
-from vrp.epochs import classify, decide, epochs, must_go
+from vrp.epochs import Epoch, classify, decide, epochs, must_go
 from vrp.model import (
     UNREACHABLE,
     Location,
@@ -45,6 +45,13 @@ from vrp.model import (
 )
 
 HOUR = 3600
+
+
+def wave_of(end: int) -> Epoch:
+    """A single wave ending at `end`, for fixtures that care only about when
+    postponed work would wait until."""
+    return Epoch(index=0, start=0, end=end)
+
 DAY = TimeWindow(start=0, end=12 * HOUR)
 LEG = 1800
 
@@ -211,8 +218,8 @@ def test_classify_splits_the_open_work():
 def test_the_controller_dispatches_what_the_policy_asks_for():
     instance = problem()
 
-    decision = decide(instance, ["O1", "O2", "O3"], postponed_to=HOUR,
-                      policy=lambda ids, split: ("O1",))
+    decision = decide(instance, ["O1", "O2", "O3"], wave_of(HOUR),
+                      policy=lambda ids, split, epoch: ("O1",))
 
     assert decision.dispatched == ("O1",)
     assert decision.postponed == ("O2", "O3")
@@ -227,8 +234,8 @@ def test_a_policy_that_tries_to_postpone_a_must_go_is_overruled():
     """
     instance = problem(windows={"O1": TimeWindow(start=0, end=HOUR // 2)})
 
-    decision = decide(instance, ["O1", "O2"], postponed_to=HOUR,
-                      policy=lambda ids, split: ("O2",))
+    decision = decide(instance, ["O1", "O2"], wave_of(HOUR),
+                      policy=lambda ids, split, epoch: ("O2",))
 
     assert "O1" in decision.dispatched
     assert "O1" not in decision.postponed
@@ -240,8 +247,8 @@ def test_the_override_is_reported_rather_than_silent():
     T-53's replayer needs to tell them apart."""
     instance = problem(windows={"O1": TimeWindow(start=0, end=HOUR // 2)})
 
-    decision = decide(instance, ["O1", "O2"], postponed_to=HOUR,
-                      policy=lambda ids, split: ("O2",))
+    decision = decide(instance, ["O1", "O2"], wave_of(HOUR),
+                      policy=lambda ids, split, epoch: ("O2",))
 
     assert decision.forced == ("O1",)
 
@@ -249,8 +256,8 @@ def test_the_override_is_reported_rather_than_silent():
 def test_nothing_is_forced_when_the_policy_behaves():
     instance = problem(windows={"O1": TimeWindow(start=0, end=HOUR // 2)})
 
-    decision = decide(instance, ["O1", "O2"], postponed_to=HOUR,
-                      policy=lambda ids, split: ("O1", "O2"))
+    decision = decide(instance, ["O1", "O2"], wave_of(HOUR),
+                      policy=lambda ids, split, epoch: ("O1", "O2"))
 
     assert decision.forced == ()
 
@@ -260,8 +267,8 @@ def test_every_open_order_is_either_dispatched_or_postponed():
     order in both has been dispatched twice."""
     instance = problem()
 
-    decision = decide(instance, ["O1", "O2", "O3"], postponed_to=HOUR,
-                      policy=lambda ids, split: ("O2",))
+    decision = decide(instance, ["O1", "O2", "O3"], wave_of(HOUR),
+                      policy=lambda ids, split, epoch: ("O2",))
 
     assert set(decision.dispatched) | set(decision.postponed) == {"O1", "O2",
                                                                   "O3"}
@@ -273,8 +280,8 @@ def test_a_policy_naming_an_order_that_is_not_open_is_refused():
     instance = problem()
 
     with pytest.raises(ValueError, match="not open"):
-        decide(instance, ["O1"], postponed_to=HOUR,
-               policy=lambda ids, split: ("O1", "O99"))
+        decide(instance, ["O1"], wave_of(HOUR),
+               policy=lambda ids, split, epoch: ("O1", "O99"))
 
 
 # --------------------------------------------------------------------------
@@ -299,8 +306,8 @@ def test_no_must_go_is_ever_postponed_across_a_replayed_day():
     for wave in epochs(DAY, length=HOUR):
         if not open_ids:
             break
-        decision = decide(instance, open_ids, postponed_to=wave.end,
-                          policy=lambda ids, split: ())
+        decision = decide(instance, open_ids, wave,
+                          policy=lambda ids, split, epoch: ())
         # The guarantee: nothing postponed here may be must-go.
         for order_id in decision.postponed:
             assert not must_go(instance, instance.order(order_id),
