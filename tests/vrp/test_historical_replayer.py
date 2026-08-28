@@ -39,7 +39,13 @@ from vrp.model import (
     Vehicle,
 )
 from vrp.policies import BASELINES, greedy, lazy
-from vrp.replay import Day, compare, generate_days, replay
+from vrp.replay import (
+    Day,
+    compare,
+    dispatchable,
+    generate_days,
+    replay,
+)
 
 HOUR = 3600
 DAY = TimeWindow(start=0, end=8 * HOUR)
@@ -291,3 +297,103 @@ def test_no_must_go_is_postponed_anywhere_in_the_corpus():
             for epoch in run.epochs:
                 assert not (set(epoch.postponed) & set(epoch.must_go)), (
                     day.id, epoch.index)
+
+
+# --------------------------------------------------------------------------
+# §8.3's ETA shift, priced into the replay
+# --------------------------------------------------------------------------
+
+def test_the_cost_is_unchanged_when_delay_is_not_priced():
+    """The default has to be the behaviour every earlier measurement was taken
+    under. A new term that silently moved the numbers would invalidate T-53's
+    baseline table, T-54's seed sweep and T-55's tuning curve all at once."""
+    instance = dispatchable(problem(stops=6), DAY, window=3 * HOUR)
+    days = generate_days(instance, count=10, seed=0, horizon=DAY)
+
+    for day in days:
+        assert replay(instance, day, lazy, epoch_length=HOUR).cost == \
+            replay(instance, day, lazy, epoch_length=HOUR,
+                   delay_price=0).cost
+
+
+def test_work_dispatched_the_moment_it_arrives_accrues_no_delay():
+    instance = problem(stops=2)
+    day = Day(id="d", arrivals={"O1": 0, "O2": 0})
+
+    run = replay(instance, day, greedy, epoch_length=HOUR, delay_price=1)
+
+    assert sum(record.delay for record in run.epochs) == 0
+
+
+def test_holding_an_order_accrues_the_time_it_waited():
+    """§8.3's "ETA shifts communicated to customers". A request that arrives at
+    09:00 and goes out at 12:00 was three hours late being dealt with, and the
+    customer is the one who noticed."""
+    instance = problem(stops=2)
+    day = Day(id="d", arrivals={"O1": 0, "O2": 0})
+
+    run = replay(instance, day, lazy, epoch_length=HOUR, delay_price=1)
+
+    assert sum(record.delay for record in run.epochs) > 0
+
+
+def test_delay_is_charged_once_rather_than_every_wave():
+    """An order held three waves waited three hours, not one plus two plus
+    three. Accruing per wave would make the penalty quadratic in the wait for
+    no reason anybody could defend."""
+    instance = problem(stops=1)
+    day = Day(id="d", arrivals={"O1": 0})
+
+    run = replay(instance, day, lazy, epoch_length=HOUR, delay_price=1)
+    held_until = max(record.index for record in run.epochs
+                     if record.dispatched)
+
+    assert sum(record.delay for record in run.epochs) == held_until * HOUR
+
+
+def test_pricing_delay_makes_holding_work_more_expensive():
+    """The point of the exercise. Lazy is only near-optimal because postponing
+    costs nothing; §8.3 says it does."""
+    instance = dispatchable(problem(stops=8), DAY, window=3 * HOUR)
+    days = generate_days(instance, count=30, seed=0, horizon=DAY)
+
+    free = sum(replay(instance, day, lazy, epoch_length=HOUR).cost
+               for day in days)
+    priced = sum(replay(instance, day, lazy, epoch_length=HOUR,
+                        delay_price=1).cost for day in days)
+
+    assert priced > free
+
+
+def test_greedy_is_barely_affected_by_the_delay_price():
+    """It dispatches on arrival, so it has almost no delay to be charged for --
+    which is what makes the term a real trade rather than a flat tax."""
+    instance = dispatchable(problem(stops=8), DAY, window=3 * HOUR)
+    days = generate_days(instance, count=30, seed=0, horizon=DAY)
+
+    free = sum(replay(instance, day, greedy, epoch_length=HOUR).cost
+               for day in days)
+    priced = sum(replay(instance, day, greedy, epoch_length=HOUR,
+                        delay_price=1).cost for day in days)
+
+    assert priced == free
+
+
+def test_the_comparison_report_carries_the_delay_price():
+    """A policy table measured at one price is not comparable with one measured
+    at another, so the report says which it was."""
+    instance = dispatchable(problem(stops=6), DAY, window=3 * HOUR)
+    days = generate_days(instance, count=10, seed=0, horizon=DAY)
+
+    priced = compare(instance, days, BASELINES, epoch_length=HOUR,
+                     delay_price=500)
+    free = compare(instance, days, BASELINES, epoch_length=HOUR)
+
+    assert priced.delay_price == 500
+    assert free.delay_price == 0, "the default must stay the unpriced behaviour"
+
+    # The price has to reach the cost, not merely be recorded beside it.
+    # Asserting only that `delay` is positive proves nothing: delay is measured
+    # in order-seconds whatever the price, so it is positive either way.
+    assert priced.results["lazy"].cost > free.results["lazy"].cost
+    assert priced.results["greedy"].cost == free.results["greedy"].cost

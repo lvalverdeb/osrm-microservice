@@ -71,6 +71,12 @@ class EpochRecord:
     must_go: tuple[str, ...]
     forced: tuple[str, ...]
     cost: int
+    # §8.3's "ETA shifts communicated to customers", in order-seconds: how long
+    # the work dispatched here had been waiting since it arrived. Charged once,
+    # at dispatch, rather than accruing every wave -- an order held three hours
+    # waited three hours, not one plus two plus three, and a per-wave accrual
+    # would make the penalty quadratic in the wait for no defensible reason.
+    delay: int = 0
 
 
 @dataclass(frozen=True)
@@ -83,6 +89,11 @@ class Run:
     @property
     def cost(self) -> int:
         return sum(record.cost for record in self.epochs)
+
+    @property
+    def delay(self) -> int:
+        """Total order-seconds of postponement across the day."""
+        return sum(record.delay for record in self.epochs)
 
     @property
     def dispatched(self) -> tuple[str, ...]:
@@ -105,6 +116,7 @@ class PolicyResult:
     dispatch_epochs: int
     forced: int
     versus_baseline: int
+    delay: int = 0
 
 
 @dataclass(frozen=True)
@@ -113,6 +125,14 @@ class Comparison:
 
     baseline: str
     results: dict[str, PolicyResult]
+    # Which delay price the table was measured at. A policy comparison taken at
+    # one price is not comparable with one taken at another, and a table that
+    # did not say which would silently invite that.
+    #
+    # No default: `compare` is the only thing that builds one and always knows
+    # the price, so a default here would be unreachable -- perturbation showed
+    # it could be set to anything without a test noticing.
+    delay_price: int
 
 
 def dispatchable(problem: Problem, horizon: TimeWindow,
@@ -182,7 +202,7 @@ def generate_days(problem: Problem, count: int, seed: int,
 
 
 def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
-           construct: Construct | None = None) -> Run:
+           construct: Construct | None = None, delay_price: int = 0) -> Run:
     """Replay one day, epoch by epoch, under one policy. DYN-6.
 
     Args:
@@ -190,6 +210,31 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
         day: the arrival schedule.
         policy: the dispatch policy under test.
         epoch_length: wave length in seconds.
+        delay_price: what keeping a customer waiting costs, per *thousand*
+            order-seconds, in the same units as distance. §8.3 asks for churn
+            to be "optionally" penalised and names "ETA shifts communicated to
+            customers" as one of its two forms; postponing a request is exactly
+            that shift.
+
+            Per thousand rather than per second because measurement said so.
+            At one metre per order-second the term swamps routing entirely --
+            90 days of work carries roughly 5 million order-seconds of delay
+            against 4.3 million metres of driving -- and greedy wins at every
+            price above zero, which is a unit problem masquerading as a result.
+            The interesting band sits below one metre per second, and CON-4
+            forbids the float that would express it, so the scale moves instead.
+            Parts per thousand is the convention this project already uses for
+            utilisation, service factors and dissimilarity.
+
+            Zero by default, which is the behaviour every earlier measurement
+            was taken under -- T-53's baseline table, T-54's seed sweep and
+            T-55's tuning curve would all be invalidated by a term that moved
+            the numbers without being asked.
+
+            It matters because without it postponing is free: AC-3.1 guarantees
+            no window is missed and a day costs only the routing of each wave,
+            so "hold until forced" is close to optimal by construction and the
+            room any cleverer policy has to beat it is correspondingly thin.
         construct: builds an assignment for one epoch's dispatch set, so the
             cost is whatever the caller's operational solver would charge.
             Defaults to a first-fit, which is enough to separate policies and
@@ -207,6 +252,9 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
     build = construct or _first_fit
     waves = epochs(problem.vehicles[0].shift, epoch_length)
     records, carried, dispatched_ever = [], [], set()
+    # When each request first became visible, so the wait can be charged once
+    # against the moment it went out rather than against the epoch it landed in.
+    first_seen: dict[str, int] = {}
 
     for wave in waves:
         last = wave is waves[-1]
@@ -220,6 +268,13 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
         arrived = [order_id for order_id in visible
                    if order_id not in dispatched_ever
                    and order_id not in carried]
+        for order_id in arrived:
+            # A plain assignment, not `setdefault`: `arrived` already excludes
+            # anything carried or dispatched, so an order reaches here exactly
+            # once. Perturbation confirmed the defensive version was
+            # unreachable, and a guard no test can justify reads as a case
+            # somebody has thought about.
+            first_seen[order_id] = wave.start
         open_ids = carried + arrived
         if not open_ids:
             continue
@@ -232,11 +287,14 @@ def replay(problem: Problem, day: Day, policy: Policy, epoch_length: int,
         else:
             decision = decide(problem, open_ids, wave, policy=policy)
 
+        waited = sum(max(wave.start - first_seen.get(order_id, wave.start), 0)
+                     for order_id in decision.dispatched)
         records.append(EpochRecord(
             index=wave.index, dispatched=decision.dispatched,
             postponed=decision.postponed, must_go=split.must_go,
-            forced=decision.forced,
-            cost=_cost_of(problem, decision.dispatched, build)))
+            forced=decision.forced, delay=waited,
+            cost=_cost_of(problem, decision.dispatched, build)
+            + waited * delay_price // 1_000))
         dispatched_ever.update(decision.dispatched)
         carried = list(decision.postponed)
 
@@ -276,7 +334,8 @@ def _first_fit(problem: Problem) -> dict[str, list[str]]:
 
 
 def compare(problem: Problem, days: Sequence[Day],
-            policies: Mapping[str, Policy], epoch_length: int) -> Comparison:
+            policies: Mapping[str, Policy], epoch_length: int,
+            delay_price: int = 0) -> Comparison:
     """Replay every policy over the corpus and report against greedy. AC-3.2.
 
     Raises:
@@ -288,16 +347,18 @@ def compare(problem: Problem, days: Sequence[Day],
         raise ValueError(f"AC-3.2 reports against a {BASELINE!r} baseline; "
                          f"got {sorted(policies)}")
 
-    runs = {name: [replay(problem, day, policy, epoch_length) for day in days]
+    runs = {name: [replay(problem, day, policy, epoch_length,
+                          delay_price=delay_price) for day in days]
             for name, policy in policies.items()}
     totals = {name: sum(run.cost for run in these)
               for name, these in runs.items()}
 
-    return Comparison(baseline=BASELINE, results={
+    return Comparison(baseline=BASELINE, delay_price=delay_price, results={
         name: PolicyResult(
             policy=name, days=len(days), cost=totals[name],
             dispatch_epochs=sum(run.dispatch_epochs for run in these),
             forced=sum(len(record.forced) for run in these
                        for record in run.epochs),
-            versus_baseline=totals[name] - totals[BASELINE])
+            versus_baseline=totals[name] - totals[BASELINE],
+            delay=sum(run.delay for run in these))
         for name, these in runs.items()})

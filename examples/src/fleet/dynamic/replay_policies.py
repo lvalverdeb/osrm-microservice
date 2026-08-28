@@ -25,6 +25,10 @@ Four things, in order:
 4. **What the report is careful about.** Cost is not the whole story, and a
    policy being overruled is a different finding from one that is expensive.
 
+5. **Pricing the wait.** Postponing is free by default, which is why lazy looks
+   so strong. §8.3 says it is not free, and the sweep shows what happens once
+   the customer's wait is on the bill.
+
 Runs offline. No gateway required.
 
 Usage:
@@ -152,6 +156,40 @@ def show_what_it_is_careful_about(problem, days) -> None:
     print("   existed. It exists now, and the promise holds.")
 
 
+def show_the_price_of_waiting(problem, days) -> None:
+    print("\n5. Pricing the wait (§8.3's \"ETA shifts communicated to"
+          " customers\")")
+    from vrp.replay import dispatchable
+
+    corpus = dispatchable(problem, DAY, window=3 * HOUR)
+    corpus_days = generate_days(corpus, count=90, seed=0, horizon=DAY)
+
+    print(f"   {'price/1000s':>12}{'greedy':>12}{'lazy':>12}   cheaper")
+    for price in (0, 100, 200, 400, 700):
+        totals = {}
+        for name, policy in (("greedy", greedy), ("lazy", lazy)):
+            totals[name] = sum(
+                replay(corpus, day, policy, epoch_length=HOUR,
+                       delay_price=price).cost for day in corpus_days)
+        winner = min(totals, key=lambda n: totals[n])
+        print(f"   {price:>12}{totals['greedy']:>12,}{totals['lazy']:>12,}"
+              f"   {winner}")
+
+    print("   At zero, holding work costs nothing and lazy wins by 9%. §8.3")
+    print("   says that is wrong: \"report and optionally penalise churn (stops")
+    print("   moved between vehicles, ETA shifts communicated to customers)\",")
+    print("   and a request held four hours is exactly such a shift.")
+    print("   The crossover sits between 200 and 400 thousandths of a metre per")
+    print("   order-second. Where a fleet actually sits on that scale is a")
+    print("   judgement about their customers, not about routing -- which is")
+    print("   why the price is an argument and the default is the unpriced")
+    print("   behaviour every earlier measurement was taken under.")
+    print("   The unit is per *thousand* order-seconds because measurement said")
+    print("   so: at one metre per second the term swamps routing entirely and")
+    print("   greedy wins at every price above zero, which is a unit problem")
+    print("   wearing the costume of a result.")
+
+
 def main() -> int:
     problem = instance()
     days = generate_days(problem, count=90, seed=0, horizon=DAY)
@@ -160,6 +198,7 @@ def main() -> int:
     show_one_day(problem, days[0])
     show_the_report(problem, days)
     show_what_it_is_careful_about(problem, days)
+    show_the_price_of_waiting(problem, days)
     return 0
 
 
