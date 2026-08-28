@@ -263,6 +263,21 @@ def total(values: TierValues, scales: dict[Tier, int]) -> int:
     return sum(values[tier] * scale for tier, scale in scales.items())
 
 
+def _churn_term(previous: Solution | None, candidate: Solution) -> int:
+    """§8.3's stability term. Stops moved plus ETA drift in seconds, unweighted.
+
+    Unweighted because Tier 6 is already the bottom of §5.1 and cannot outrank
+    a metre of driving whatever it holds; the *pricing* choice belongs to the
+    caller and lives in `stability.churn_cost`, where an operation can set it.
+    """
+    if previous is None:
+        return 0
+    from vrp.stability import churn
+
+    measured = churn(previous, candidate)
+    return measured.moved + measured.eta_shift
+
+
 def _fleet_prices_itself(problem: Problem) -> bool:
     """Whether any vehicle states a cost of its own. See `ObjectiveSpec.rates`."""
     return any(v.fixed_cost or v.cost_per_metre or v.cost_per_second
@@ -288,8 +303,15 @@ def _operating(problem: Problem, spec: ObjectiveSpec, route) -> int:
     return (distance * rates.per_metre + duration * rates.per_second + per_job)
 
 
-def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
+def score(problem: Problem, solution: Solution, spec: ObjectiveSpec,
+          previous: Solution | None = None) -> Score:
     """Score a solution across the tiers this module can observe.
+
+    `previous` is the plan this one replaces, when there is one. §8.3 asks for
+    churn "as a Tier-6 objective term", so it joins the imbalance there. Without
+    a previous plan there is no churn to measure and Tier 6 holds imbalance
+    alone -- inventing a baseline would rewrite the objective for every static
+    solve in the system.
 
     Tier 6 carries §5.1's "workload imbalance" since T-47 -- the spread of
     duration, distance and stop count across the drivers who actually worked.
@@ -337,6 +359,7 @@ def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
         Tier.FLEET: fleet,
         Tier.OPERATING: operating,
         Tier.SOFT: soft,
-        Tier.QUALITY: imbalance(problem, solution),
+        Tier.QUALITY: imbalance(problem, solution) + _churn_term(previous,
+                                                                  solution),
     })
     return Score(values=values, total=total(values, tier_scales(problem, spec)))

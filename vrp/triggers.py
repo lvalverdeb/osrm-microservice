@@ -165,7 +165,8 @@ def _centre(problem: Problem, plan: Solution, vehicle_id: str) -> float:
 
 
 def reoptimise(problem: Problem, plan: Solution, trigger: Trigger, now: int,
-               neighbours: int = 1, solve: Solve | None = None) -> Response:
+               neighbours: int = 1, solve: Solve | None = None,
+               churn_weight: int = 0) -> Response:
     """Re-optimise the affected routes only, and report the delta. §8.3, §8.4.
 
     Args:
@@ -178,6 +179,9 @@ def reoptimise(problem: Problem, plan: Solution, trigger: Trigger, now: int,
             elsewhere; the default is a cheapest-insertion pass, which is what
             §8.4's T0/T1 tiers describe and is fast enough to leave the
             thirty-second budget almost untouched.
+        churn_weight: what moving a stop to a different vehicle costs, in the
+            same units as distance. §8.3's "optionally penalise"; zero is the
+            behaviour before T-57. T-57's curve is this weight swept.
 
     Returns:
         The new plan, the delta AC-2.3 asks for, the locks that held the rest
@@ -215,8 +219,11 @@ def reoptimise(problem: Problem, plan: Solution, trigger: Trigger, now: int,
               if not (trigger.kind == "BREAKDOWN"
                       and vehicle_id == trigger.vehicle_id)}
     rebuilt = build(problem, {**frozen, **{v: frozen.get(v, []) for v in usable}})
+    home = {step.order_id: route.vehicle_id for route in plan.routes
+            for step in route.steps if step.order_id}
     for order_id in loose:
-        _insert(problem, rebuilt, order_id, usable)
+        _insert(problem, rebuilt, order_id, usable,
+                churn_weight=churn_weight, home=home.get(order_id))
 
     after = _rebuild(problem, plan, rebuilt)
     locked = sum(len(ids) for vehicle_id, ids in frozen.items()
@@ -245,8 +252,15 @@ def _cheapest_insertion(problem: Problem,
 
 
 def _insert(problem: Problem, assignment: dict[str, list[str]], order_id: str,
-            usable: set[str]) -> None:
-    """Put one order on the cheapest open route that can carry it."""
+            usable: set[str], churn_weight: int = 0,
+            home: str | None = None) -> None:
+    """Put one order on the cheapest open route that can carry it.
+
+    "Cheapest" includes `churn_weight` when the candidate is not the vehicle
+    the order started on. That is how §8.3's penalty actually changes a plan
+    rather than merely scoring one: a weight large enough makes staying put
+    win, and the sweep between the two is T-57's curve.
+    """
     from vrp.evaluator import route_is_legal
 
     best = None
@@ -257,6 +271,8 @@ def _insert(problem: Problem, assignment: dict[str, list[str]], order_id: str,
             if not route_is_legal(problem, vehicle_id, candidate):
                 continue
             cost = _length(problem, vehicle_id, candidate)
+            if home is not None and vehicle_id != home:
+                cost += churn_weight
             if best is None or cost < best[0]:
                 best = (cost, vehicle_id, candidate)
     if best is not None:
