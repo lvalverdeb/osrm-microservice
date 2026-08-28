@@ -40,6 +40,7 @@ from enum import IntEnum
 from itertools import pairwise
 from typing import NamedTuple
 
+from vrp.consistency import imbalance
 from vrp.model import Problem, Solution
 
 
@@ -211,7 +212,9 @@ class ObjectiveSpec:
                                                      for v in vehicles),
                                                     default=0), 1),
             Tier.SOFT: max(max_duration, 1),
-            Tier.QUALITY: max(max_distance, 1),
+            # Imbalance is a difference between two routes, so it cannot
+            # exceed what one route can reach on any of FR-17's three measures.
+            Tier.QUALITY: max(max_distance, max_duration, len(orders), 1),
         }
 
 
@@ -288,10 +291,11 @@ def _operating(problem: Problem, spec: ObjectiveSpec, route) -> int:
 def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
     """Score a solution across the tiers this module can observe.
 
-    Tier 6 stays zero: the quality tie-breakers are `T-47`. It is left in the
-    hierarchy rather than removed so adding it later cannot renumber anything,
-    and reported as zero rather than omitted so nobody reads a missing tier as
-    a passing one.
+    Tier 6 carries §5.1's "workload imbalance" since T-47 -- the spread of
+    duration, distance and stop count across the drivers who actually worked.
+    It is the bottom of the hierarchy and stays there: §6.7 makes consistency a
+    tie-breaker, never a reason to drive further, so no amount of imbalance can
+    outrank a metre of operating cost.
 
     Tier 5 is the soft-violation total, and it is taken from the canonical
     evaluator rather than recomputed here. Two implementations of "how late is
@@ -333,6 +337,6 @@ def score(problem: Problem, solution: Solution, spec: ObjectiveSpec) -> Score:
         Tier.FLEET: fleet,
         Tier.OPERATING: operating,
         Tier.SOFT: soft,
-        Tier.QUALITY: 0,
+        Tier.QUALITY: imbalance(problem, solution),
     })
     return Score(values=values, total=total(values, tier_scales(problem, spec)))
