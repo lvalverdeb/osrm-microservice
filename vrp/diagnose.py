@@ -159,12 +159,21 @@ def _fits(order: Order, vehicle: Vehicle) -> bool:
                for dimension, quantity in order.quantities.items())
 
 
-def _reachable(problem: Problem, order: Order, vehicle: Vehicle) -> bool:
+def _reachable(problem: Problem, order: Order, vehicle: Vehicle,
+               not_before: int = 0) -> bool:
     """Could this vehicle start at its depot and serve the stop in a window?
 
     Optimistic on purpose: straight out from the depot with nothing else on
     board. If that cannot make the window, nothing can, and a pre-flight pass
     that guessed pessimistically would reject work the solver could have done.
+
+    Args:
+        problem: the instance.
+        order: the order in question.
+        vehicle: the candidate.
+        not_before: the earliest the vehicle could leave. Zero for pre-flight,
+            which asks about the whole day; T-51's must-go classifier passes
+            the next epoch's start, which is the same question asked later.
     """
     stop = order.delivery or order.pickup
     hard = [w for w in stop.time_windows if w.hardness == "HARD"]
@@ -175,7 +184,7 @@ def _reachable(problem: Problem, order: Order, vehicle: Vehicle) -> bool:
     destination = problem.location(stop.location_id).matrix_index
     if not problem.matrix.is_reachable(start, destination):
         return False
-    arrival = max(vehicle.shift.start, order.release_time) \
+    arrival = max(vehicle.shift.start, order.release_time, not_before) \
         + problem.matrix.duration(start, destination)
     return any(arrival <= window.end for window in hard)
 
