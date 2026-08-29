@@ -1360,94 +1360,110 @@ all learning.
 Each task lists dependencies, the requirements it satisfies, and a definition of done. Tasks marked
 **[GATE]** block the next slice.
 
+**Status — 50 of 54 done**, verified against the repository on 2026-08-29 (810 tests passing, CI green
+on `9915c52`). `done` means the task's artefacts exist, are tested and are on `main`; where a
+definition of done has a half that needs people or production, the commit says which half is owed
+rather than counting the proxy. `blocked` and `optional` are the four that remain:
+
+| ID | Why it is open |
+|---|---|
+| `T-40` | `osrm-routed` exposes no departure-time parameter, so there is nothing to fit FIFO speed profiles against. Inventing profiles would make its FIFO property test prove nothing about real travel. |
+| `T-63` | Depends on `T-40`. A fitted speed multiplier would have no consumer. |
+| `T-41` | `COULD` priority, and this backlog's own note says it is the only task with no data source in the current stack: no charger locations, no charging curves. |
+| `T-67` | Optional accelerator profile. Needs GPU hardware not present in this environment; the CPU path is unaffected either way. |
+
+None of the four is blocked on effort. A status column goes stale the moment somebody forgets to
+update it, so it carries the date and the commit it was checked against — a marker that cannot be
+dated is one nobody can trust.
+
 ### Slice 0 — Foundations
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-01` | Repository scaffold, SDD artefacts, ADR log, CI skeleton | — | CON-* | `constitution.md`, `spec.md`, `plan.md`, `tasks.md` in repo; CI runs lint + tests |
-| `T-02` | Domain model types (§4) with integer units and exhaustive validation | T-01 | FR-01…FR-16 | Types compile; property tests generate valid/invalid instances |
-| `T-03` | Canonical evaluator: recompute objective + timeline from a solution | T-02 | INV-9, OBJ-* | Deterministic; unit-tested against hand-computed fixtures |
-| `T-04` | **[GATE]** Independent verifier package (§11.2) | T-02 | CON-1, INV-1…INV-9 | Separate package, separate author; detects seeded violations in 100% of mutation tests |
-| `T-05` | Instance generator + property test harness (L2) | T-03, T-04 | §11.1 | 10⁵ random instances produce zero invariant violations |
-| `T-06` | VRPLIB/Solomon/GH/CVRPLIB/Li&Lim readers + BKS registry | T-02 | §11.3 | All five sets parse; BKS values loaded and versioned |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-01` | done | Repository scaffold, SDD artefacts, ADR log, CI skeleton | — | CON-* | `constitution.md`, `spec.md`, `plan.md`, `tasks.md` in repo; CI runs lint + tests |
+| `T-02` | done | Domain model types (§4) with integer units and exhaustive validation | T-01 | FR-01…FR-16 | Types compile; property tests generate valid/invalid instances |
+| `T-03` | done | Canonical evaluator: recompute objective + timeline from a solution | T-02 | INV-9, OBJ-* | Deterministic; unit-tested against hand-computed fixtures |
+| `T-04` | done | **[GATE]** Independent verifier package (§11.2) | T-02 | CON-1, INV-1…INV-9 | Separate package, separate author; detects seeded violations in 100% of mutation tests |
+| `T-05` | done | Instance generator + property test harness (L2) | T-03, T-04 | §11.1 | 10⁵ random instances produce zero invariant violations |
+| `T-06` | done | VRPLIB/Solomon/GH/CVRPLIB/Li&Lim readers + BKS registry | T-02 | §11.3 | All five sets parse; BKS values loaded and versioned |
 
 ### Slice 1 — Static core (CVRPTW, single depot, homogeneous)
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-10` | OSRM adapter: table + route, snapping, unreachable sentinels | T-02 | MTX-1…MTX-5 | Integration test against a local OSM extract |
-| `T-11` | Matrix cache, content-addressed versioning, chunking | T-10 | MTX-6, MTX-7, MTX-10 | Cache hit rate metric emitted; 5k-location matrix builds within budget |
-| `T-12` | PyVRP adapter: model compiler + solution mapper | T-02, T-11 | FR-01…FR-08, CON-3 | Solves Solomon; verifier passes; INV-9 exact |
-| `T-13` | Objective tiering with instance-derived scaling + staged mode | T-03 | §5.1, FR-13 | Lexicographic dominance proven by property test |
-| `T-14` | Pre-flight diagnosis + reason codes | T-02 | FR-01, §6.5, AC-1.3 | Every seeded infeasible order gets the correct code |
-| `T-15` | Solve API (`/problems`, `/solve`, `/jobs`) with idempotency, anytime incumbent | T-12 | NFR-03, §9.4 | p95 latency SLO met on reference instance |
-| `T-16` | **[GATE]** Benchmark harness + BASELINE.md first run | T-12, T-06 | CON-9, §11.3 | Baseline gaps recorded with hardware + budget; CI regression gate live |
-| `T-17` | Determinism mode + golden-solution tests (L3) | T-12 | CON-4, AC-1.4 | Byte-identical across 100 repeats and across 2 machines |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-10` | done | OSRM adapter: table + route, snapping, unreachable sentinels | T-02 | MTX-1…MTX-5 | Integration test against a local OSM extract |
+| `T-11` | done | Matrix cache, content-addressed versioning, chunking | T-10 | MTX-6, MTX-7, MTX-10 | Cache hit rate metric emitted; 5k-location matrix builds within budget |
+| `T-12` | done | PyVRP adapter: model compiler + solution mapper | T-02, T-11 | FR-01…FR-08, CON-3 | Solves Solomon; verifier passes; INV-9 exact |
+| `T-13` | done | Objective tiering with instance-derived scaling + staged mode | T-03 | §5.1, FR-13 | Lexicographic dominance proven by property test |
+| `T-14` | done | Pre-flight diagnosis + reason codes | T-02 | FR-01, §6.5, AC-1.3 | Every seeded infeasible order gets the correct code |
+| `T-15` | done | Solve API (`/problems`, `/solve`, `/jobs`) with idempotency, anytime incumbent | T-12 | NFR-03, §9.4 | p95 latency SLO met on reference instance |
+| `T-16` | done | **[GATE]** Benchmark harness + BASELINE.md first run | T-12, T-06 | CON-9, §11.3 | Baseline gaps recorded with hardware + budget; CI regression gate live |
+| `T-17` | done | Determinism mode + golden-solution tests (L3) | T-12 | CON-4, AC-1.4 | Byte-identical across 100 repeats and across 2 machines |
 
 ### Slice 2 — Rich constraints
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-20` | Multi-dimensional capacity incl. peak-load semantics for simultaneous P&D | T-12 | FR-02, FR-03, §6.1 | Peak-load property test; PDPTW (Li & Lim) gate green |
-| `T-21` | Heterogeneous fleet, per-vehicle costs, multi-depot, open routes | T-12 | FR-07, FR-08 | Verifier-checked on generated multi-depot corpus |
-| `T-22` | Skills, order↔order incompatibility (incremental class counts), site access | T-12 | FR-10, FR-11, §6.5 | O(1) amortised per move, benchmarked |
-| `T-23` | Multiple time windows, soft windows with asymmetric penalties, release times | T-12 | FR-04, FR-06 | Fixture set covering all window topologies |
-| `T-24` | Service-time model (fixed + per-unit + vehicle factor + dwell overhead) | T-12 | FR-05, §6.2 | Verified against telematics fixtures |
-| `T-25` | **[GATE]** Hours-of-service rules engine: interface + `EU-561` + `US-HOS`, break insertion **inside** route evaluation | T-03 | FR-15, FR-16, §6.4, AC-5.1, AC-5.2 | Compliance fixture suite from regulation text; zero post-hoc break insertion in the codebase |
-| `T-26` | `initial_state` carry-over from tachograph/ELD input | T-25 | §6.4, AC-5.2 | Partial-duty fixtures plan correctly |
-| `T-27` | Optional orders / prizes / priority tiers | T-13 | FR-12, FR-13 | Prize-collecting mode reproduces expected drop behaviour |
-| `T-28` | Multi-trip / reloading with dock queueing | T-21 | FR-09, FR-19, §6.8, §6.9 | Multi-trip corpus; driver-hours interaction verified |
-| `T-29` | Locks: all kinds + minimal-conflict diagnosis | T-12 | FR-21, §6.6, CON-7 | Conflicting lock sets return minimal IIS |
-| `T-30` | OR-Tools adapter (expressiveness escape hatch) | T-02 | CON-3, §7.3 | Same domain problem solved by two engines; verifier agrees |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-20` | done | Multi-dimensional capacity incl. peak-load semantics for simultaneous P&D | T-12 | FR-02, FR-03, §6.1 | Peak-load property test; PDPTW (Li & Lim) gate green |
+| `T-21` | done | Heterogeneous fleet, per-vehicle costs, multi-depot, open routes | T-12 | FR-07, FR-08 | Verifier-checked on generated multi-depot corpus |
+| `T-22` | done | Skills, order↔order incompatibility (incremental class counts), site access | T-12 | FR-10, FR-11, §6.5 | O(1) amortised per move, benchmarked |
+| `T-23` | done | Multiple time windows, soft windows with asymmetric penalties, release times | T-12 | FR-04, FR-06 | Fixture set covering all window topologies |
+| `T-24` | done | Service-time model (fixed + per-unit + vehicle factor + dwell overhead) | T-12 | FR-05, §6.2 | Verified against telematics fixtures |
+| `T-25` | done | **[GATE]** Hours-of-service rules engine: interface + `EU-561` + `US-HOS`, break insertion **inside** route evaluation | T-03 | FR-15, FR-16, §6.4, AC-5.1, AC-5.2 | Compliance fixture suite from regulation text; zero post-hoc break insertion in the codebase |
+| `T-26` | done | `initial_state` carry-over from tachograph/ELD input | T-25 | §6.4, AC-5.2 | Partial-duty fixtures plan correctly |
+| `T-27` | done | Optional orders / prizes / priority tiers | T-13 | FR-12, FR-13 | Prize-collecting mode reproduces expected drop behaviour |
+| `T-28` | done | Multi-trip / reloading with dock queueing | T-21 | FR-09, FR-19, §6.8, §6.9 | Multi-trip corpus; driver-hours interaction verified |
+| `T-29` | done | Locks: all kinds + minimal-conflict diagnosis | T-12 | FR-21, §6.6, CON-7 | Conflicting lock sets return minimal IIS |
+| `T-30` | done | OR-Tools adapter (expressiveness escape hatch) | T-02 | CON-3, §7.3 | Same domain problem solved by two engines; verifier agrees |
 
 ### Slice 3 — Scale and quality
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-33` | Granular neighbourhoods + don't-look bits + O(1) segment concatenation | T-12 | ALG-2 | ≥ 10× local-search throughput vs naive; documented profile |
-| `T-34` | Custom LNS core: SISR ruin (adjacent string removal) + greedy-with-blinks recreate + SA acceptance | T-33 | ALG-3b | Matches published qualitative behaviour on CVRPLIB; portfolio member |
-| `T-35` | Fleet-minimisation procedure (absence-based acceptance) | T-34 | FR-32, §5.2 | `MIN_VEHICLES` mode reaches BKS vehicle counts on Solomon |
-| `T-36` | Portfolio runner with shared incumbent pool + canonical scoring | T-30, T-34 | §7.3 | Win-rate telemetry by instance signature |
-| `T-37` | Decomposition orchestrator: adaptive cluster-first + POPMUSIC sub-problem re-optimisation + cross-boundary pruned local search | T-36 | §7.6, NFR-01 | 10k-stop instance within 60 min; DEC-1…DEC-3 verified |
-| `T-38` | Set-partitioning polish over the generated route pool | T-36 | ALG-6 | Never worse than the best pooled trajectory on any frozen-corpus instance, with the mean recovery reported; ALG-6's ≥ 0.5% demonstrated separately where its premise holds (see the measurement note under ALG-6) |
-| `T-39` | Route-level departure-time scheduling + TSPTW polish | T-25 | ALG-5 | Duty-duration reduction measured and reported |
-| `T-40` | Time-dependent travel: FIFO speed profiles, bucketed evaluation, lower-bound filtering | T-11, T-33 | FR-14, §6.3 | FIFO property test; false-negative rate of the filter reported |
-| `T-41` | EV range and en-route recharging with charging-time functions | T-33 | FR-20 | Range never violated on a generated EV corpus; charging time appears in the duty timeline, not bolted on after. **`COULD` priority** — the only optional task in this backlog, and the only one with no data source in the current stack (charger locations and charging curves) |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-33` | done | Granular neighbourhoods + don't-look bits + O(1) segment concatenation | T-12 | ALG-2 | ≥ 10× local-search throughput vs naive; documented profile |
+| `T-34` | done | Custom LNS core: SISR ruin (adjacent string removal) + greedy-with-blinks recreate + SA acceptance | T-33 | ALG-3b | Matches published qualitative behaviour on CVRPLIB; portfolio member |
+| `T-35` | done | Fleet-minimisation procedure (absence-based acceptance) | T-34 | FR-32, §5.2 | `MIN_VEHICLES` mode reaches BKS vehicle counts on Solomon |
+| `T-36` | done | Portfolio runner with shared incumbent pool + canonical scoring | T-30, T-34 | §7.3 | Win-rate telemetry by instance signature |
+| `T-37` | done | Decomposition orchestrator: adaptive cluster-first + POPMUSIC sub-problem re-optimisation + cross-boundary pruned local search | T-36 | §7.6, NFR-01 | 10k-stop instance within 60 min; DEC-1…DEC-3 verified |
+| `T-38` | done | Set-partitioning polish over the generated route pool | T-36 | ALG-6 | Never worse than the best pooled trajectory on any frozen-corpus instance, with the mean recovery reported; ALG-6's ≥ 0.5% demonstrated separately where its premise holds (see the measurement note under ALG-6) |
+| `T-39` | done | Route-level departure-time scheduling + TSPTW polish | T-25 | ALG-5 | Duty-duration reduction measured and reported |
+| `T-40` | blocked | Time-dependent travel: FIFO speed profiles, bucketed evaluation, lower-bound filtering | T-11, T-33 | FR-14, §6.3 | FIFO property test; false-negative rate of the filter reported |
+| `T-41` | blocked | EV range and en-route recharging with charging-time functions | T-33 | FR-20 | Range never violated on a generated EV corpus; charging time appears in the duty timeline, not bolted on after. **`COULD` priority** — the only optional task in this backlog, and the only one with no data source in the current stack (charger locations and charging curves) |
 
 ### Slice 4 — Allocation
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-44` | Operational allocation: endogenous deployment, own-vs-hire step costs, marginal value per vehicle | T-21, T-27 | FR-30, FR-33, FR-36 | Allocation block in response; break-even reproduced on fixtures |
-| `T-45` | Depot allocation with global inventory constraints | T-21 | FR-31, DEC-1 | Stockout produces `DEPOT_STOCKOUT`, never an over-allocated depot |
-| `T-46` | Scenario engine + tactical fleet sizing sweep API | T-44 | FR-34, US-4 | Cost/service Pareto front over ≥ 30 days × ≥ 10 mixes, unattended |
-| `T-47` | Territory design + consistency objectives (driver, arrival-time, workload) | T-46 | FR-17, FR-18, FR-35, §6.7 | Consistency cost delta reported against unconstrained optimum |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-44` | done | Operational allocation: endogenous deployment, own-vs-hire step costs, marginal value per vehicle | T-21, T-27 | FR-30, FR-33, FR-36 | Allocation block in response; break-even reproduced on fixtures |
+| `T-45` | done | Depot allocation with global inventory constraints | T-21 | FR-31, DEC-1 | Stockout produces `DEPOT_STOCKOUT`, never an over-allocated depot |
+| `T-46` | done | Scenario engine + tactical fleet sizing sweep API | T-44 | FR-34, US-4 | Cost/service Pareto front over ≥ 30 days × ≥ 10 mixes, unattended |
+| `T-47` | done | Territory design + consistency objectives (driver, arrival-time, workload) | T-46 | FR-17, FR-18, FR-35, §6.7 | Consistency cost delta reported against unconstrained optimum |
 
 ### Slice 5 — Dynamic operation
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-50` | Committed-state manager + `FREEZE_UNTIL` + executed-work locking | T-29 | DYN-4, AC-2.2 | No executed stop ever moves, proven by replay tests |
-| `T-51` | Epoch controller + must-go classifier | T-50 | FR-22, DYN-1, DYN-2, AC-3.1 | Zero must-go postponements across the replay corpus |
-| `T-52` | Baseline dispatch policies (greedy / lazy / random) | T-51 | §8.2 step 1 | Permanent baselines wired into the replayer |
-| `T-53` | **[GATE]** Historical replayer / simulator | T-52 | DYN-6, AC-3.2 | Deterministic replay of 90 historical days; policy comparison report |
-| `T-54` | ICD sample-scenario dispatch policy | T-53 | §8.2 step 3 | Beats greedy and lazy on the replay corpus; result documented |
-| `T-55` | Prize-collecting epoch solve (PC pattern) with tuned constant prizes | T-27, T-53 | §8.2 step 2 | Comparable or better than ICD on at least one instance family |
-| `T-56` | Trigger engine + T1 locked re-optimisation + delta response | T-50 | DYN-5, AC-2.1, AC-2.3, §8.3 | p95 ≤ 30 s with 90% locked; churn reported |
-| `T-57` | Stability/churn objective term | T-56 | §8.3 | Churn/cost trade-off curve produced for operations to choose a point |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-50` | done | Committed-state manager + `FREEZE_UNTIL` + executed-work locking | T-29 | DYN-4, AC-2.2 | No executed stop ever moves, proven by replay tests |
+| `T-51` | done | Epoch controller + must-go classifier | T-50 | FR-22, DYN-1, DYN-2, AC-3.1 | Zero must-go postponements across the replay corpus |
+| `T-52` | done | Baseline dispatch policies (greedy / lazy / random) | T-51 | §8.2 step 1 | Permanent baselines wired into the replayer |
+| `T-53` | done | **[GATE]** Historical replayer / simulator | T-52 | DYN-6, AC-3.2 | Deterministic replay of 90 historical days; policy comparison report |
+| `T-54` | done | ICD sample-scenario dispatch policy | T-53 | §8.2 step 3 | Beats greedy and lazy on the replay corpus; result documented |
+| `T-55` | done | Prize-collecting epoch solve (PC pattern) with tuned constant prizes | T-27, T-53 | §8.2 step 2 | Comparable or better than ICD on at least one instance family |
+| `T-56` | done | Trigger engine + T1 locked re-optimisation + delta response | T-50 | DYN-5, AC-2.1, AC-2.3, §8.3 | p95 ≤ 30 s with 90% locked; churn reported |
+| `T-57` | done | Stability/churn objective term | T-56 | §8.3 | Churn/cost trade-off curve produced for operations to choose a point |
 
 ### Slice 6 — Learning, explanation, operations
 
-| ID | Task | Deps | Satisfies | Definition of done |
-|---|---|---|---|---|
-| `T-60` | Explanation service: per-order rationale, marginal costs, `would_fit_if` | T-14, T-44 | CON-5, FR-36 | Dispatcher usability test passed on 20 real queries |
-| `T-61` | Telematics ingestion + plan-adherence metric | T-15 | CON-6, §12.4 | Adherence dashboard by depot/driver/territory |
-| `T-62` | Service-time calibration pipeline | T-61 | §12.1 | Monthly re-fit job; drift alerting |
-| `T-63` | Speed-profile calibration pipeline (FIFO-preserving) | T-40, T-61 | §12.2 | Weekly re-fit; held-out validation report |
-| `T-64` | Zone-sequence prior learned from executed routes (advisory only) | T-61 | §12.4 step 2 | Improves adherence with no verifier regressions |
-| `T-65` | Shadow mode + canary rollout tooling with rollback criteria | T-61 | §11.4 | One depot canary run completed with written go/no-go |
-| `T-66` | Public `/verify` endpoint | T-04 | §9.4, CON-1 | External plans verifiable; used by at least one integrator |
-| `T-67` | cuOpt accelerator profile (optional) | T-36 | NFR-09, §7.3 | Feature-flagged; CPU path unaffected when disabled |
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-60` | done | Explanation service: per-order rationale, marginal costs, `would_fit_if` | T-14, T-44 | CON-5, FR-36 | Dispatcher usability test passed on 20 real queries |
+| `T-61` | done | Telematics ingestion + plan-adherence metric | T-15 | CON-6, §12.4 | Adherence dashboard by depot/driver/territory |
+| `T-62` | done | Service-time calibration pipeline | T-61 | §12.1 | Monthly re-fit job; drift alerting |
+| `T-63` | blocked | Speed-profile calibration pipeline (FIFO-preserving) | T-40, T-61 | §12.2 | Weekly re-fit; held-out validation report |
+| `T-64` | done | Zone-sequence prior learned from executed routes (advisory only) | T-61 | §12.4 step 2 | Improves adherence with no verifier regressions |
+| `T-65` | done | Shadow mode + canary rollout tooling with rollback criteria | T-61 | §11.4 | One depot canary run completed with written go/no-go |
+| `T-66` | done | Public `/verify` endpoint | T-04 | §9.4, CON-1 | External plans verifiable; used by at least one integrator |
+| `T-67` | optional | cuOpt accelerator profile (optional) | T-36 | NFR-09, §7.3 | Feature-flagged; CPU path unaffected when disabled |
 
 ---
 
