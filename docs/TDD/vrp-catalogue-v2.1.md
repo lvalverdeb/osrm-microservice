@@ -25,16 +25,16 @@ counts:
   by_tier: {P0: 14, P1: 49, P2: 79}
 ---
 
-# Real-World Problem Catalogue — v2.0
+# Real-World Problem Catalogue — v2.1
 ## Domain scenarios, constraints, and documented deployments
 
 | Field | Value |
 |---|---|
 | Document ID | `CAT-VRP-003` |
-| Version | 2.0 (supersedes 1.0) |
+| Version | 2.1 (supersedes 2.0) |
 | Companion to | `SDD-VRP-001` (engine), `SDD-VRP-UI-002` (workbench) |
 | Purpose | Ground requirements in real operations; generate the fixture corpus |
-| Scenarios | 148 (134 operational + 14 adversarial… see §11) |
+| Scenarios | 157 (142 operational + 15 adversarial… see §11) |
 
 ### What changed in v2.1
 
@@ -136,7 +136,42 @@ Common questions and how to answer them from `scenarios.jsonl` rather than by re
 | Which fixtures test capacity semantics? | `"FR-02" in requirements` |
 | What breaks a naive capacity model? | search `breaks` for `peak`, `total`, `aggregate` |
 
-### 0.6 Instructions for an agent editing this catalogue
+### 0.6 Requirement identifiers used by the entries
+
+`Exercises` cites two namespaces, and only one of them resolves against the
+design document.
+
+`FR-nn` are requirements defined in `SDD-VRP-001` §3. `FR-Pnn` are **proposed**
+requirements: identifiers this catalogue introduced in v2.1 to replace dangling
+pseudo-references, for needs the entries found and the design document does not
+yet cover. A reader who greps `SDD-VRP-001` for one will not find it, which is
+correct and previously undocumented — hence this table.
+
+| ID | Proposed requirement | Cited by |
+|---|---|---|
+| `FR-P01` | Multi-period horizon: recurring visits planned across several periods as one problem rather than as independent days. The entries citing it bind on cycle adherence and statutory inspection intervals, neither of which a single-day plan can express | `UC-108`, `UC-129`, `UC-162` |
+| `FR-P03` | Crew as a resource distinct from the vehicle: crew hours bind separately from vehicle availability, so a van that is free and a crew that is not are different answers | `UC-122`, `UC-153` |
+
+Both glosses are the entries' own parenthetical wording expanded against what
+those entries say they bind on, not a specification of the requirement. Writing
+one is `SDD-VRP-001`'s job, and this table exists so somebody doing that can see
+who is asking and why.
+
+`FR-P02` and `FR-P04`–`FR-P10` were reserved by the v2.1 changelog and are not
+cited by any entry. Reserved-but-unused is not the same as retired: the range is
+held so a later entry can claim one without renumbering, and an identifier that
+appears here for the first time should be added to this table in the same edit.
+
+**One requirement is exercised by no entry.** `FR-32` (vehicle-count
+minimisation) is defined in `SDD-VRP-001` §3 and implemented under `T-35`, and
+no scenario cites it. That is a coverage gap in this catalogue rather than a
+defect in either document: several entries are close — `UC-171` (driver absence
+discovered at shift start) and `UC-136` (mixed own-fleet and courier network)
+both turn on doing the work with fewer vehicles than planned — but deciding
+which of them *tests* fleet minimisation is a judgement about the operation, and
+it is recorded here rather than settled by whoever noticed the gap.
+
+### 0.7 Instructions for an agent editing this catalogue
 
 1. Edit the **source** markdown, never the generated output.
 2. Adding a scenario: take the next free `UC-nnn`, use the exact field set in §0.3, and write a
