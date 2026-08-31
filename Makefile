@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: property-soak examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: property-soak examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -55,6 +55,7 @@ help:
 	@echo "  clean-pkg      - Remove Python build artifacts"
 	@echo "  examples       - Interactive menu of the example client scripts (examples/)"
 	@echo "  test           - Run the pytest suite"
+	@echo "  catalogue      - Rebuild the VRP scenario catalogue from vrp-catalogue-v2.1.src.md"
 	@echo "  lint           - Run ruff checks"
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
@@ -233,6 +234,17 @@ test:
 
 lint:
 	uv run ruff check .
+
+
+# docs/TDD/vrp-catalogue-v2.1.md and scenarios.jsonl are both generated. The
+# builder parses the authored form and emits a normalised one, so it cannot read
+# its own output: edits made to the generated .md are silently lost on the next
+# run, and for a while the source was not committed at all. Edit the .src.md.
+catalogue:
+	uv run python docs/TDD/build_catalogue.py \
+	  docs/TDD/vrp-catalogue-v2.1.src.md \
+	  docs/TDD/vrp-catalogue-v2.1.md \
+	  docs/TDD/scenarios.jsonl
 
 
 # --baseline suppresses only the fingerprints listed in the file, each matched on

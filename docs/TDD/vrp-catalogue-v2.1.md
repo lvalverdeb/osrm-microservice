@@ -5,6 +5,7 @@ version: 2.1
 companion_documents: [SDD-VRP-001, SDD-VRP-UI-002]
 machine_readable_extract: scenarios.jsonl
 build_script: build_catalogue.py
+source_document: vrp-catalogue-v2.1.src.md
 entry_schema:
   id: string, stable, pattern UC-nnn
   name: string
