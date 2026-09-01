@@ -586,14 +586,18 @@ def uc134_overlapping_depot_catchments(size: str = "small") -> Problem:
 def uc032_breakdown_at_midday(size: str = "small") -> Problem:
     """A day's plan, built to be interrupted. The trigger is applied by the test."""
     count = stops_for(size)
-    coordinates = ((0.0, 0.0),) + scatter(count, seed=32, spread_km=16.0, clusters=3)
+    coordinates = ((0.0, 0.0),) + scatter(count, seed=32, spread_km=25.0, clusters=3)
+    # Half-hour drops over a wide catchment, and few enough vans that a round
+    # genuinely runs into the afternoon. A breakdown at noon is only a scenario
+    # if there is work left at noon: sized any slacker, the whole plan finished
+    # before 09:00 and the trigger moved nothing.
     return Problem(
         id=f"uc032-{size}", locations=planar_sites(coordinates),
-        orders=tuple(drop(f"O{i}", f"C{i}", service=300, kg=5)
+        orders=tuple(drop(f"O{i}", f"C{i}", service=30 * 60, kg=5)
                      for i in range(1, count + 1)),
         vehicles=tuple(van(f"V{v}", capacities={"kg": 40},
                            shift=TimeWindow(7 * HOUR, 19 * HOUR))
-                       for v in range(1, max(3, count // 4) + 1)),
+                       for v in range(1, max(2, count // 6) + 1)),
         matrix=planar_matrix(f"uc032-{size}", coordinates))
 
 

@@ -434,8 +434,16 @@ def test_uc032_a_breakdown_moves_the_affected_work_not_the_whole_day():
     already passed and reshuffles routes that were fine."""
     problem = FIXTURES["UC-032"]()
     plan = solve(problem, iterations=600, seed=0)
-    broken = plan.routes[0].vehicle_id
-    now = 12 * HOUR
+    # The busiest round, not whichever route came back first: breaking a van
+    # that has already finished moves nothing and proves nothing.
+    broken_route = max(plan.routes,
+                       key=lambda r: len([s for s in r.steps if s.order_id]))
+    broken = broken_route.vehicle_id
+    # Mid-round, taken from the plan rather than named as a clock time. A
+    # synthetic round may finish before lunch, and a breakdown after the last
+    # drop moves nothing however dramatic the hour sounds.
+    times = [s.start_service for s in broken_route.steps if s.order_id]
+    now = times[len(times) // 2]
 
     response = reoptimise(problem, plan, Trigger("BREAKDOWN", at=now, vehicle_id=broken),
                           now=now, neighbours=1)
@@ -445,6 +453,10 @@ def test_uc032_a_breakdown_moves_the_affected_work_not_the_whole_day():
                  if lock.order_id}
     assert not (set(response.delta.moved) & committed), (
         "a stop already committed by 12:00 was moved; §8.3 forbids it outright")
+    assert response.delta.churn > 0, (
+        "the broken van still had work at noon, so something has to move; a "
+        "churn of zero means the trigger fired after the round had finished "
+        "and this instance proved nothing")
     assert response.delta.churn < len(moved_since(plan, from_scratch)), (
         f"locked re-optimisation moved {response.delta.churn} stops and a full "
         f"re-solve moved {len(moved_since(plan, from_scratch))}. If they were "

@@ -314,7 +314,15 @@ the house convention of driving examples off the Costa Rica dataset, because
 §13.2 requires these instances to be "hand-built and tiny" — wiring in the
 gateway would contradict the catalogue and slow the thing down.
 
-Writing it exposed a separate defect. `examples/main.py` walked only one level
+Phase 3 shipped `examples/src/fleet/p0/must_work_at_v1.py`: the fourteen
+operations in five groups, each printing the naive answer beside the engine's on
+one instance. Writing it caught a test that was passing for the wrong reason --
+`UC-032` broke whichever route came back first, at a hardcoded noon, and the
+synthetic round had finished by 11:52, so the trigger moved nothing and the
+churn comparison held vacuously. Both the test and the example now break the
+busiest round at a moment taken from the plan.
+
+Writing the Phase 1 example exposed a separate defect. `examples/main.py` walked only one level
 of `examples/src/`, so 31 of the 51 examples — every rich-VRP, allocation,
 dynamic-dispatch and learning one — never appeared in the menu. The walk is now
 recursive.
