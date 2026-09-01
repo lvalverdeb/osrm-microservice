@@ -8,8 +8,9 @@ Companion to [VRP_SDD_FIT_GAP.md](VRP_SDD_FIT_GAP.md), which measures how far
 today's implementation is from the specification. This document is the route
 from one to the other.
 
-**Status — 50 of 54 examples done**, verified against the repository on
-2026-08-29 (810 tests passing, CI green on `4ac30ff`). Every row below is marked
+**Status — 50 of 61 examples done**, verified against the repository on
+2026-09-01 (839 tests passing, CI green on `a70a341`). The seven added in §11a
+are Slice 7's, and none is started. Every row below is marked
 `**Done.**`, `**Blocked**` or `**Not built**` in its *Passes when* column.
 
 The authority on task status is the backlog in
@@ -344,6 +345,26 @@ stating because they are what make this a TDD plan rather than a list:
 In order: **E-03** (verifier), **E-12** (the first real solve), **E-16**
 (benchmark gate), **E-25** (hours of service — the constraint most likely to be
 got subtly wrong, and the one with legal consequences).
+
+---
+
+## 11a. Slice 7 — the examples the catalogue's requirements will need
+
+`T-72`–`T-78` were written into the SDD backlog from what the scenario corpus
+found (`CAT-VRP-003` §12.2 and the four strict xfails in `tests/vrp/`). None is
+started, so none has an example yet — these rows say what each will have to
+show, which is the same discipline as the rest of this document: the example is
+written first and fails.
+
+| Ex | Where | Task | Requirement | Level | Passes when |
+|---|---|---|---|---|---|
+| `E-72` | `examples/src/fleet/rich/eligibility.py` | `T-72` | FR-10, FR-11, FR-31 | L1 | A plan the verifier would reject on skills, order class, site access or depot stock is never built in the first place. **Not built** |
+| `E-73` | `examples/src/fleet/rich/multi_period.py` | `T-73` | FR-23 | L2 | A quarterly inspection round meets its interval, and seven independent days do not. **Not built** |
+| `E-74` | `examples/src/fleet/rich/ride_time.py` | `T-74` | FR-24 | L2 | A patient's time aboard is bounded independently of the appointment window. **Not built** |
+| `E-75` | `examples/src/fleet/rich/priority_sources.py` | `T-75` | FR-25 | L1 | Three orders equal on tier are ordered by SLA clock and statutory obligation, and the plan says which decided. **Not built** |
+| `E-76` | `examples/src/fleet/rich/synchronisation.py` | `T-76` | FR-26 | L2 | Two routes meet at a satellite; moving one moves the other. **Not built** |
+| `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work mid-shift and the displaced work reappears. **Not built** |
+| `E-78` | `examples/src/fleet/dynamic/absent_driver.py` | `T-78` | FR-30, FR-32 | L2 | Stripping and redistributing beats replanning the reduced fleet — `UC-171`'s claim, which today is false and pinned as an xfail. **Not built** |
 
 ---
 

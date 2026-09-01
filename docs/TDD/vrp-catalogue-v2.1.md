@@ -150,7 +150,7 @@ correct and previously undocumented — hence this table.
 
 | ID | Proposed requirement | Cited by |
 |---|---|---|
-| `FR-P01` | Multi-period horizon: recurring visits planned across several periods as one problem rather than as independent days. The entries citing it bind on cycle adherence and statutory inspection intervals, neither of which a single-day plan can express | `UC-108`, `UC-129`, `UC-162` |
+| `FR-P02` | Sequence-dependent service and setup time: what a stop costs depends on the stop before it, because a tanker needs a wash-out between product classes and an engineer needs the right part already aboard | `UC-020`, `UC-097` |
 | `FR-P03` | Crew as a resource distinct from the vehicle: crew hours bind separately from vehicle availability, so a van that is free and a crew that is not are different answers | `UC-122`, `UC-153` |
 
 Both glosses are the entries' own parenthetical wording expanded against what
@@ -158,21 +158,53 @@ those entries say they bind on, not a specification of the requirement. Writing
 one is `SDD-VRP-001`'s job, and this table exists so somebody doing that can see
 who is asking and why.
 
+`FR-P01` was retired in this edit: §3.1 of the design document now defines
+`FR-23` for the multi-period horizon, and the entries citing the placeholder were
+renumbered to the real identifier. That is this section's own rule applied, and
+`test_proposed_requirements_are_held_apart_from_real_ones` fails if a proposal
+and a definition ever name the same thing.
+
+Both remaining proposals sit below §12.2's three-scenario bar, with two
+supporters each. They are held rather than written: a requirement justified by
+two operations is a requirement justified by one customer and a coincidence.
+
 `FR-P02` and `FR-P04`–`FR-P10` were reserved by the v2.1 changelog and are not
 cited by any entry. Reserved-but-unused is not the same as retired: the range is
 held so a later entry can claim one without renumbering, and an identifier that
 appears here for the first time should be added to this table in the same edit.
 
-**One requirement is exercised by no entry.** `FR-32` (vehicle-count
-minimisation) is defined in `SDD-VRP-001` §3 and implemented under `T-35`, and
-no scenario cites it. That is a coverage gap in this catalogue rather than a
-defect in either document: several entries are close — `UC-171` (driver absence
-discovered at shift start) and `UC-136` (mixed own-fleet and courier network)
-both turn on doing the work with fewer vehicles than planned — but deciding
-which of them *tests* fleet minimisation is a judgement about the operation, and
-it is recorded here rather than settled by whoever noticed the gap.
+**`FR-32` was exercised by no entry, and now is.** Vehicle-count minimisation is
+defined in `SDD-VRP-001` §3 and implemented under `T-35`, and no scenario cited
+it. The two candidates were `UC-171` (driver absence discovered at shift start)
+and `UC-136` (mixed own-fleet and courier network), and the judgement is settled
+in favour of `UC-171`: an absence is exactly the question `FR-32` answers — the
+same work, deliberately fewer vehicles, and the count minimised before travel
+cost. `UC-136` is about own capacity against hired, which is `FR-33`'s subject,
+and filing the evidence there would have answered a different question.
 
-### 0.7 Instructions for an agent editing this catalogue
+### 0.7 Retired identifiers
+
+`UC-nnn` never changes meaning and is never reused (§0.1). These identifiers are
+absent from the catalogue and stay that way: reissuing one would silently
+contradict any earlier document still citing it. `build_catalogue.py` reads this
+table, so naming a retired identifier in prose is legitimate and reusing one as
+an entry id fails the build.
+
+| Identifier | Note |
+|---|---|
+| `UC-021` | cited by §12.2 as evidence for cross-vehicle precedence; content lost |
+| `UC-023` | referenced nowhere |
+| `UC-038` | referenced nowhere |
+| `UC-040` | cited by §12.2 as evidence for crew as a resource; content lost |
+| `UC-041` | cited by §12.2 as evidence for the cargo-side regulatory clock; content lost |
+| `UC-047` – `UC-059` | a contiguous block, referenced nowhere |
+
+Most were lost in the v2.0 reorganisation, which the v2.1 changelog already
+records for two other casualties (`UC-011`, `UC-039`, both restored). These were
+not found at the time because nothing referenced them in a form the validator
+could check.
+
+### 0.8 Instructions for an agent editing this catalogue
 
 1. Edit the **source** markdown, never the generated output.
 2. Adding a scenario: take the next free `UC-nnn`, use the exact field set in §0.3, and write a
@@ -746,7 +778,7 @@ Concrete from a batching plant to pours.
 - **Tier:** P1
 - **Tags:** hard-perishability
 - **Binds:** load volume and the concrete's working life
-- **Exercises:** FR-02, FR-06, FR-04 (a maximum time from batching)
+- **Exercises:** FR-02, FR-06, FR-04 (a maximum time from batching), FR-24 (maximum ride time)
 - **Breaks:** treating the deadline as a delivery window. The clock starts at loading, so the constraint is elapsed time since departure, not arrival time at the customer
 #### UC-093 — Animal feed bulk blowing
 
@@ -796,7 +828,7 @@ Tankers requiring cleaning between incompatible products.
 - **Tier:** P2
 - **Tags:** wash-out
 - **Binds:** wash-out time between product classes
-- **Exercises:** FR-10, FR-05, FR-09 (wash station as an intermediate facility)
+- **Exercises:** FR-10, FR-05, FR-09 (wash station as an intermediate facility), FR-P02 (sequence-dependent service)
 - **Breaks:** sequence-independent service time. The cost of a stop depends on what the tanker carried previously, which is a sequence-dependent setup time
 #### UC-098 — Pallet network trunking to hubs
 
@@ -908,7 +940,7 @@ Clean linen delivered, soiled collected, on a fixed weekly cycle.
 - **Tier:** P2
 - **Tags:** simultaneous-pandd
 - **Binds:** cage positions both ways
-- **Exercises:** FR-03, FR-18, FR-P01 (multi-period horizon)
+- **Exercises:** FR-03, FR-18, FR-23 (multi-period horizon)
 - **Breaks:** planning days independently. The weekly cycle is the unit of commitment, so a locally cheap Tuesday can make Friday's promised visits infeasible
 #### UC-109 — Agricultural input delivery to farms
 
@@ -978,7 +1010,7 @@ High-density residential and business parcel delivery.
 - **Variant:** VRPTW
 - **Tier:** P0
 - **Binds:** stops per hour, which is service and access time
-- **Exercises:** FR-05, FR-13, FR-18
+- **Exercises:** FR-05, FR-13, FR-18, FR-25 (priority source)
 - **Breaks:** optimising distance. Travel is roughly a third of the driver's day (§4.2); a plan saving 8% of distance and adding parking difficulty is worse
 #### UC-010 — Newspaper and periodical distribution
 
@@ -996,7 +1028,7 @@ Samples from clinics to a central laboratory.
 - **Variant:** VRPTW
 - **Tier:** P1
 - **Binds:** specimen stability windows and lab cut-off
-- **Exercises:** FR-04, FR-06, FR-13, FR-16
+- **Exercises:** FR-04, FR-06, FR-13, FR-16, FR-25 (priority source)
 - **Breaks:** no route-end constraint. A sample collected in-window but delivered after cut-off is destroyed
 #### UC-019 — Utility installation and repair appointments
 
@@ -1027,7 +1059,7 @@ Compliance visits with a due-by date rather than a window.
 - **Tier:** P2
 - **Tags:** multi-period
 - **Binds:** a monthly compliance deadline across a horizon
-- **Exercises:** FR-06, FR-13, FR-18
+- **Exercises:** FR-06, FR-13, FR-18, FR-23 (multi-period horizon)
 - **Breaks:** daily planning in isolation. The unit of optimisation is the month; a locally optimal Tuesday leaves an infeasible Friday
 #### UC-025 — Mobile veterinary and rural service
 
@@ -1047,7 +1079,7 @@ Periodic visits to fixed assets on a repeating cycle.
 - **Tier:** P1
 - **Tags:** periodic
 - **Binds:** visit-frequency compliance across the horizon
-- **Exercises:** FR-06, FR-17, FR-18, FR-35
+- **Exercises:** FR-06, FR-17, FR-18, FR-35, FR-23 (multi-period horizon)
 - **Breaks:** daily optimisation. The decision is which days to visit which assets; optimising each day independently makes the cycle infeasible
 #### UC-046 — Postal delivery under universal service obligation
 
@@ -1056,7 +1088,7 @@ Statutory coverage regardless of economics.
 - **Variant:** VRPTW
 - **Tier:** P2
 - **Binds:** the legal obligation to serve every address
-- **Exercises:** FR-13, FR-17, FR-35
+- **Exercises:** FR-13, FR-17, FR-35, FR-25 (priority source)
 - **Breaks:** prize-collecting logic. No address may be declined, so the drop-the-unprofitable-stop behaviour that helps elsewhere is prohibited
 #### UC-111 — Boiler and appliance annual service visits
 
@@ -1066,7 +1098,7 @@ Compliance-driven annual services with customer-chosen slots.
 - **Tier:** P1
 - **Tags:** periodic
 - **Binds:** the anniversary window plus customer availability
-- **Exercises:** FR-04, FR-06, FR-10, FR-18
+- **Exercises:** FR-04, FR-06, FR-10, FR-18, FR-23 (multi-period horizon)
 - **Breaks:** treating the anniversary as a soft target. Missing it breaks the service contract, so it is a hard deadline with a soft preference inside it
 #### UC-112 — Legal and court document service
 
@@ -1111,7 +1143,7 @@ Engineers servicing machines under uptime SLAs.
 - **Variant:** VRPTW
 - **Tier:** P1
 - **Binds:** SLA response clocks that start when the fault is reported
-- **Exercises:** FR-06, FR-13, FR-04, FR-10
+- **Exercises:** FR-06, FR-13, FR-04, FR-10, FR-25 (priority source)
 - **Breaks:** fixed windows. The window is derived from the fault timestamp plus the SLA, so it is computed at intake and differs per order
 #### UC-117 — IT field support with tiered SLAs
 
@@ -1120,7 +1152,7 @@ Break-fix visits with four-hour, next-business-day and best-effort tiers.
 - **Variant:** VRPTW
 - **Tier:** P1
 - **Binds:** the mix of SLA tiers on any given day
-- **Exercises:** FR-13, FR-12, FR-04
+- **Exercises:** FR-13, FR-12, FR-04, FR-25 (priority source)
 - **Breaks:** one priority scale. Three tiers with different clocks are three different constraints, not three weights on one — see the `FR-13` split recommended in §12.2
 #### UC-118 — Window cleaning and facade maintenance rounds
 
@@ -1232,7 +1264,7 @@ Annual and semi-annual statutory inspections.
 - **Tier:** P2
 - **Tags:** periodic
 - **Binds:** statutory inspection intervals
-- **Exercises:** FR-06, FR-18, FR-P01 (multi-period horizon)
+- **Exercises:** FR-06, FR-18, FR-23 (multi-period horizon)
 - **Breaks:** treating each visit as independent. The next due date is set by the last visit, so today's plan determines next year's feasible plan
 #### UC-130 — EV charge-point maintenance
 
@@ -1282,7 +1314,7 @@ Service calls requiring specific parts carried on the van.
 - **Variant:** MDHVRPTW
 - **Tier:** P1
 - **Binds:** parts availability on the assigned vehicle
-- **Exercises:** FR-02, FR-09 (depot restock mid-day), FR-10
+- **Exercises:** FR-02, FR-09 (depot restock mid-day), FR-10, FR-P02 (sequence-dependent service)
 - **Breaks:** static skills. Van inventory depletes as jobs complete, so eligibility is sequence-dependent — the gap identified in v1.0 §11.1
 #### UC-037 — Urban distribution with low-emission zone restrictions
 
@@ -1301,7 +1333,7 @@ Large vehicles to satellite hubs, cargo bikes and vans onward.
 - **Tier:** P1
 - **Tags:** 2e
 - **Binds:** synchronisation between echelons at the satellite
-- **Exercises:** FR-08, FR-07, FR-09, FR-19
+- **Exercises:** FR-08, FR-07, FR-09, FR-19, FR-26 (route synchronisation)
 - **Breaks:** solving the echelons independently. The second-echelon departure depends on the first echelon's arrival, which is a synchronisation constraint across two routing problems
 #### UC-132 — National 3PL with shared customer networks
 
@@ -1414,7 +1446,7 @@ Planned maintenance interrupted by emergency callouts.
 - **Variant:** MDHVRPTW
 - **Tier:** P1
 - **Binds:** reserving capacity for unplanned work
-- **Exercises:** FR-12, FR-13, FR-22, FR-30
+- **Exercises:** FR-12, FR-13, FR-22, FR-30, FR-27 (preemption)
 - **Breaks:** full utilisation. Planning every crew to 100% leaves nothing for emergencies, so the model must deliberately hold capacity back
 #### UC-144 — Airline catering and aircraft servicing
 
@@ -1432,7 +1464,7 @@ Yard tractors moving containers within terminal boundaries.
 - **Variant:** MDHVRPTW
 - **Tier:** P2
 - **Binds:** crane schedules and yard congestion
-- **Exercises:** FR-14, FR-19, FR-01
+- **Exercises:** FR-14, FR-19, FR-01, FR-26 (route synchronisation)
 - **Breaks:** an external road network. The network is private, congestion is endogenous to the plan, and travel times depend on the plan's own vehicle density
 #### UC-146 — Mining and quarry haulage
 
@@ -1450,7 +1482,7 @@ Supplies from staging areas to forward locations.
 - **Variant:** MDHVRPTW
 - **Tier:** P2
 - **Binds:** security windows, convoy grouping, and route risk
-- **Exercises:** FR-11, FR-13, FR-10, FR-21
+- **Exercises:** FR-11, FR-13, FR-10, FR-21, FR-26 (route synchronisation)
 - **Breaks:** independent vehicle routing. Vehicles must travel in convoy, which is a synchronisation constraint forcing several routes to share a path and a schedule
 #### UC-148 — Ski resort and remote site servicing
 
@@ -1506,7 +1538,7 @@ Reps visiting accounts on a call-cycle frequency.
 - **Tier:** P2
 - **Tags:** periodic
 - **Binds:** call frequency by account tier
-- **Exercises:** FR-18, FR-35, FR-06, FR-13
+- **Exercises:** FR-18, FR-35, FR-06, FR-13, FR-23 (multi-period horizon)
 - **Breaks:** cost minimisation. The objective is coverage compliance and relationship consistency, with travel cost a distant third
 ## 9. PDPTW — the goods or people have their own origin
 
@@ -1552,7 +1584,7 @@ Casualty vehicles collected and taken to a garage or home.
 - **Tier:** P1
 - **Tags:** dynamic
 - **Binds:** response-time targets and recovery-vehicle compatibility
-- **Exercises:** FR-01, FR-07, FR-10, FR-13, FR-22
+- **Exercises:** FR-01, FR-07, FR-10, FR-13, FR-22, FR-27 (preemption)
 - **Breaks:** capacity as a number. A recovery truck carries one vehicle, and vehicle-to-casualty compatibility (weight, drivetrain, damage) decides eligibility
 #### UC-155 — Car transporter delivery to dealerships
 
@@ -1580,7 +1612,7 @@ Time-critical medical items between hospitals.
 - **Variant:** PDPTW
 - **Tier:** P1
 - **Binds:** viability windows measured in hours
-- **Exercises:** FR-01, FR-04, FR-06, FR-13
+- **Exercises:** FR-01, FR-04, FR-06, FR-13, FR-24 (maximum ride time)
 - **Breaks:** treating the window as a delivery constraint. The clock starts at collection, making it a maximum elapsed time per shipment, not an arrival window
 #### UC-158 — Pallet and equipment repositioning between depots
 
@@ -1659,7 +1691,7 @@ Clean garments delivered, used collected, on a fixed weekly cycle.
 - **Tier:** P2
 - **Tags:** simultaneous
 - **Binds:** garment volume both ways, plus cycle adherence
-- **Exercises:** FR-03, FR-18, FR-P01 (multi-period horizon)
+- **Exercises:** FR-03, FR-18, FR-23 (multi-period horizon)
 - **Breaks:** optimising each week in isolation. Garment stock in circulation couples consecutive weeks, so this week's plan constrains next week's
 #### UC-163 — Medical sharps and clinical waste exchange
 
@@ -1681,7 +1713,7 @@ Pupils collected to schools against bell times.
 - **Tier:** P1
 - **Tags:** ride-time
 - **Binds:** bell time, then maximum time aboard
-- **Exercises:** FR-01, FR-02, FR-04, FR-17
+- **Exercises:** FR-01, FR-02, FR-04, FR-17, FR-24 (maximum ride time)
 - **Breaks:** no ride-time limit. A cost-optimal route can leave a five-year-old aboard for 90 minutes
 #### UC-027 — Non-emergency patient transport
 
@@ -1690,7 +1722,7 @@ Patients to and from appointments, some wheelchair or stretcher.
 - **Variant:** DARP
 - **Tier:** P1
 - **Binds:** appointment times in both directions and vehicle equipment
-- **Exercises:** FR-01, FR-02, FR-04, FR-10, FR-13
+- **Exercises:** FR-01, FR-02, FR-04, FR-10, FR-13, FR-24 (maximum ride time)
 - **Breaks:** modelling the return as independent. The return cannot be planned before the appointment ends, which is itself uncertain
 #### UC-028 — Paratransit and community transport
 
@@ -1700,7 +1732,7 @@ Demand-responsive service for people with mobility needs.
 - **Tier:** P2
 - **Tags:** dynamic
 - **Binds:** booking lead time versus vehicle availability
-- **Exercises:** FR-02, FR-04, FR-12, FR-22
+- **Exercises:** FR-02, FR-04, FR-12, FR-22, FR-24 (maximum ride time)
 - **Breaks:** static planning. The accept-or-decline decision is part of the problem
 #### UC-029 — Employee shuttle and crew transport
 
@@ -1719,7 +1751,7 @@ Passengers pooled to and from terminals against flight times.
 - **Tier:** P2
 - **Tags:** ride-time
 - **Binds:** flight departure minus check-in buffer
-- **Exercises:** FR-01, FR-04, FR-13
+- **Exercises:** FR-01, FR-04, FR-13, FR-24 (maximum ride time)
 - **Breaks:** symmetric treatment of arrivals and departures. A missed departure is catastrophic; a delayed arrival pickup is an inconvenience, so the two directions have different cost asymmetry
 #### UC-165 — Ride pooling and shared taxi
 
@@ -1737,7 +1769,7 @@ Regular clients to day centres with consistent seating and carers.
 - **Variant:** DARP
 - **Tier:** P2
 - **Binds:** consistency and equipment matching
-- **Exercises:** FR-18, FR-10, FR-02, FR-04
+- **Exercises:** FR-18, FR-10, FR-02, FR-04, FR-24 (maximum ride time)
 - **Breaks:** treating passengers as interchangeable. Specific individuals need specific vehicles, specific seats and, often, specific companions
 #### UC-167 — Crew change transport for offshore and remote sites
 
@@ -1758,7 +1790,7 @@ Part-loads consolidated through hubs.
 - **Tier:** P1
 - **Tags:** transhipment
 - **Binds:** hub cut-offs and trailer utilisation
-- **Exercises:** FR-01, FR-02, FR-08, FR-19
+- **Exercises:** FR-01, FR-02, FR-08, FR-19, FR-26 (route synchronisation)
 - **Breaks:** same-vehicle enforcement. Transhipment is permitted and often optimal, which violates the defining constraint of standard PDPTW — this needs an explicit model extension
 #### UC-169 — Freight exchange and backload matching
 
@@ -1839,7 +1871,7 @@ Leak and outage response with severity-driven priority.
 - **Tier:** P1
 - **Tags:** dynamic, preemptive
 - **Binds:** response-time targets by severity
-- **Exercises:** FR-12, FR-13, FR-21, FR-22
+- **Exercises:** FR-12, FR-13, FR-21, FR-22, FR-27 (preemption)
 - **Breaks:** uniform priority. A P1 gas escape preempts work already in progress, requiring the plan to be interruptible mid-route
 #### UC-171 — Driver absence discovered at shift start
 
@@ -1849,7 +1881,7 @@ Two drivers call in sick at 05:30 for a 06:00 departure.
 - **Tier:** P0
 - **Tags:** dynamic, re-planning
 - **Binds:** reduced fleet against an already-built plan
-- **Exercises:** FR-30, FR-13, FR-21, FR-12
+- **Exercises:** FR-30, FR-13, FR-21, FR-12, FR-32 (the same work with fewer vehicles)
 - **Breaks:** re-solving from scratch. Vehicles are loaded; the practical question is which stops to strip and redistribute, not how to re-plan the day
 - **Status:** PARTIALLY_MODELLED — priority tiers are protected and the absent vehicle's route is emptied, but §8.4's cheapest-insertion recovery is built for a mid-day disruption with most of the plan committed: at shift start it drops half the round that re-planning the reduced fleet keeps
 #### UC-172 — Weather event cancelling a region
@@ -1905,7 +1937,7 @@ Municipal services whose demand lies along street segments rather than at addres
 - **Binds:** segment coverage within a shift, plus one-way and parking-restriction timing
 - **Exercises:** nothing in the current model
 - **Breaks:** node routing, for the same reason as UC-042 — demand is on the arcs, not at points
-- **Status:** NOT_MODELLED
+- **Status:** NOT_MODELLED — declined on the same ground as winter gritting: demand lies along street segments rather than at addresses, so a node model either explodes the instance or drops coverage silently, and neither is a service anybody should buy
 #### UC-175 — Postal walk and round design
 
 Delivery-office round boundaries drawn on a street network.
@@ -2087,26 +2119,58 @@ The v1.0 gaps are now covered or explicitly deferred:
 |---|---|---|
 | Route-level sequence realism | 075, 078, 087, 090 | New section §5 |
 | Sequence-dependent vehicle inventory | 020, 097 (wash-out) | Still a requirement gap — `FR-10` extension needed |
-| Cross-vehicle precedence | 021, 121, 158 | Still a requirement gap |
+| Cross-vehicle precedence | 121, 158 | Still a requirement gap |
 | Multi-period horizon | 024, 043, 108, 111, 129, 152, 162 | Now well-evidenced; justifies a `FR-*` addition |
 | Maximum ride time | 026, 027, 028, 164, 166 | Now well-evidenced; justifies a `FR-*` addition |
-| Crew as a distinct resource | 040, 122, 153 | Justifies a `FR-*` addition |
-| Cargo-side regulatory clock | 041, 092, 157 | Confirms the rules interface must be entity-agnostic |
+| Crew as a distinct resource | 122, 153 | Below the three-scenario bar; see §12.2.1 |
+| Cargo-side regulatory clock | 092, 157 | Confirms the rules interface must be entity-agnostic |
 | Preemption of in-progress work | 044, 143, 154 | Justifies a `FR-*` addition |
 | Transhipment | 168 | Explicit model extension needed for LTL |
 | Synchronisation between routes | 131, 145, 147 | Two-echelon and convoy cases; justifies a `FR-*` addition |
 
-**Recommended new requirements**, each now supported by three or more scenarios:
+**Recommended new requirements.** The bar is three scenarios: fewer than that is
+an observation about one customer, not evidence about a market. Rows below the
+bar are kept rather than deleted, because a proposal with two supporters is one
+scenario away from having three and deleting it loses the two.
 
-| Proposed | Covering |
-|---|---|
-| Multi-period planning horizon with visit-frequency compliance | 024, 043, 108, 111, 129, 152, 162 |
-| Maximum ride time per passenger or shipment | 026, 027, 028, 092, 157, 164, 166 |
-| Crew as a resource independent of the vehicle | 040, 122, 153 |
-| Route synchronisation (two-echelon, convoy, transhipment) | 131, 145, 147, 168 |
-| Sequence-dependent service and setup time | 020, 097 |
-| Preemption of in-progress work by higher priority | 044, 143, 154 |
-| Split `FR-13` into commercial priority, SLA clock, and statutory obligation | 009, 018, 046, 116, 117 |
+| Proposed | Covering | Count | Requirement |
+|---|---|---|---|
+| Multi-period planning horizon with visit-frequency compliance | 024, 043, 108, 111, 129, 152, 162 | 7 | `FR-23` |
+| Maximum ride time per passenger or shipment | 026, 027, 028, 092, 157, 164, 166 | 7 | `FR-24` |
+| Split `FR-13` into commercial priority, SLA clock, and statutory obligation | 009, 018, 046, 116, 117 | 5 | `FR-25` |
+| Route synchronisation (two-echelon, convoy, transhipment) | 131, 145, 147, 168 | 4 | `FR-26` |
+| Preemption of in-progress work by higher priority | 044, 143, 154 | 3 | `FR-27` |
+| Crew as a resource independent of the vehicle | 122, 153 | 2 | held, `FR-P03` |
+| Sequence-dependent service and setup time | 020, 097 | 2 | held, `FR-P05` |
+
+### 12.2.1 Two corrections this table needed
+
+**Three of these rows rested on scenarios that do not exist.** `UC-021`,
+`UC-040` and `UC-041` were cited as evidence and are not defined anywhere in
+this catalogue. The crew row was one of them, which is why it now sits at two
+supporters rather than three and is held below the bar: writing a requirement
+justified by an entry nobody can read is worse than not writing one.
+
+The reason it survived so long is mechanical. `build_catalogue.py` checked every
+reference written as `UC-nnn` and these tables cite scenarios as bare numbers,
+so the strictest check in the build could not see the weakest references in the
+document. It reads both forms now, and a coverage table is exactly where a
+dangling reference does the most damage, because it is the evidence a
+requirement gets written on.
+
+**The stable-identifier range has holes.** §0.1 guarantees that `UC-nnn` never
+changes meaning and is never reused, and the v2.0 note says identifiers
+`UC-001`–`UC-074` are unchanged. Eighteen of them are absent: `UC-021`,
+`UC-023`, `UC-038`, `UC-040`, `UC-041`, and the contiguous block `UC-047`
+through `UC-059`. The v2.1 changelog records restoring two such casualties
+(`UC-011`, `UC-039`); these were not found because nothing referenced them by a
+form the validator could check.
+
+Absent is not the same as reusable. The guarantee is that an identifier never
+changes meaning, so these stay retired: a future `UC-047` would silently
+contradict any v1.0 document still citing the old one. What is lost is the
+content, which is not recoverable from here -- three of the holes were carrying
+evidence and the rest were carrying nothing anybody has missed.
 
 ### 12.3 What the industry deployments validate
 

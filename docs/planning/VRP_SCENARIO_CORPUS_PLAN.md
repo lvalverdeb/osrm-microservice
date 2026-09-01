@@ -290,7 +290,7 @@ field.
 
 ---
 
-## 7. Phase 5 — the requirements the catalogue found (§12.2)
+## 7. Phase 5 — the requirements the catalogue found (§12.2) — **shipped**
 
 Only now, because these change the SDD rather than the tests. §12.2 lists seven
 recommended requirements, each *"supported by three or more scenarios"*. Ordered by
@@ -311,6 +311,41 @@ table exists so somebody doing that can see who is asking and why."* So each ite
 is: write the `FR`, add its `T-xx` with a definition of done, add its `E-xx`
 example, then build. Five of the seven have no proposed id yet; assigning them from
 the reserved `FR-P02`, `FR-P04`–`FR-P10` range is part of the same edit, per §0.6.
+
+**Shipped**, and the phase began by finding that some of the evidence did not
+exist. Three of §12.2's rows cited `UC-021`, `UC-040` and `UC-041` as
+supporters, and none of those entries is defined anywhere in the catalogue. The
+build stayed green because `build_catalogue.py` checked references written as
+`UC-nnn` while the coverage tables cite scenarios as bare numbers -- so the
+strictest check in the build could not see the weakest references in the
+document, which are the ones a requirement gets written on.
+
+Closing that turned up eighteen holes in the identifier range §0.1 calls stable
+and unchanged: `UC-021`, `UC-023`, `UC-038`, `UC-040`, `UC-041`, and the block
+`UC-047`–`UC-059`. §0.7 now lists them as retired, the builder reads that list
+so naming one in prose is legitimate, and reusing one as an entry id fails the
+build. The guarantee finally has teeth rather than a sentence.
+
+With the evidence corrected, five of the seven proposals clear §12.2's
+three-scenario bar and are written into SDD §3.1 as `FR-23`–`FR-27`, with
+priority taken from the tier of the scenarios asking (`FR-25` has a P0
+supporter and is MUST; the rest peak at P1 and are SHOULD). Twenty-eight
+entries were updated to cite them, `FR-P01` was retired into `FR-23`, and
+`FR-P02` was assigned to sequence-dependent service so it can be held with an
+identifier rather than as a description.
+
+Two proposals stay below the bar with two supporters each -- crew as a distinct
+resource, and sequence-dependent service -- and a new gate assertion fails if
+either quietly acquires a third without being written up.
+
+`FR-32` is settled on `UC-171`: an absence asks exactly what vehicle-count
+minimisation answers, where `UC-136` is about own capacity against hired and
+would have filed the evidence under `FR-33`. So **no requirement in §3 is now
+without an operation behind it**, and the gate asserts the empty set rather
+than a documented exception.
+
+Slice 7 (`T-72`–`T-78`) and examples `E-72`–`E-78` are written and unstarted.
+`T-72` is the gate: the four constraints the engine checks and does not enforce.
 
 Two smaller items belong here:
 

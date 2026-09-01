@@ -28,6 +28,7 @@ from vrp.bench.catalogue import (
     by_tier,
     citing,
     coverage,
+    declined,
     load,
     operational,
     pathological,
@@ -36,11 +37,13 @@ from vrp.bench.fixtures import FIXTURES, NOT_AN_INSTANCE
 
 SCENARIOS = load()
 
-# §0.6 records this and declines to settle it: "`FR-32` (vehicle-count
-# minimisation) is defined in `SDD-VRP-001` §3 and implemented under `T-35`, and
-# no scenario cites it... deciding which of them *tests* fleet minimisation is a
-# judgement about the operation."
-UNEVIDENCED_BY_AGREEMENT = frozenset({"FR-32"})
+# Empty, and that is the interesting state rather than a vacuous one. `FR-32`
+# was the last requirement with no operation behind it; §0.6 settled it on
+# `UC-171`, where an absence asks exactly what vehicle-count minimisation
+# answers. Every requirement the design document defines is now something a
+# named real operation asked for, and this assertion is what keeps that true:
+# the next requirement written without a scenario fails here.
+UNEVIDENCED_BY_AGREEMENT: frozenset[str] = frozenset()
 
 
 # --------------------------------------------------------------------------
@@ -124,7 +127,7 @@ def test_proposed_requirements_are_held_apart_from_real_ones():
     it, which is correct". They are proposals, not dangling references."""
     report = coverage(SCENARIOS)
 
-    assert report.proposed == {"FR-P01", "FR-P03"}, (
+    assert report.proposed == {"FR-P02", "FR-P03"}, (
         f"proposed requirements in use are {sorted(report.proposed)}; §0.6's "
         "table must list every one, with the entries asking for it")
     assert not (report.proposed & report.defined), (
@@ -138,10 +141,10 @@ def test_a_requirement_with_no_scenario_is_reported():
     report = coverage(SCENARIOS)
 
     assert report.unevidenced == UNEVIDENCED_BY_AGREEMENT, (
-        f"requirements with no scenario: {sorted(report.unevidenced)}. Expected "
-        f"only {sorted(UNEVIDENCED_BY_AGREEMENT)}, which §0.6 records as an open "
-        "judgement. A new one means a requirement landed with no operation "
-        "behind it; a smaller set means §0.6 is now out of date.")
+        f"requirements with no scenario: {sorted(report.unevidenced)}. Every "
+        "requirement in §3 is meant to be something a named operation asked "
+        "for, so a new one here means a requirement landed with nothing behind "
+        "it -- write the scenario, or do not write the requirement.")
 
 
 def test_the_requirements_every_p0_scenario_cites_are_all_implemented():
@@ -211,3 +214,63 @@ def test_every_p0_fixture_offers_the_three_sizes_13_1_asks_for():
             f"{scenario.id} builds {counts} at small/medium/large. The sizes "
             "must actually differ, or two thirds of the corpus measures the "
             "same instance twice.")
+
+
+def test_a_proposal_below_the_evidence_bar_is_held_rather_than_written():
+    """§12.2 sets the bar at three scenarios: "fewer than that is an
+    observation about one customer, not evidence about a market."
+
+    Both surviving proposals sit at two. Holding them is the decision; this
+    pins it, so a third scenario arriving is what promotes them rather than
+    somebody's enthusiasm.
+    """
+    report = coverage(SCENARIOS)
+
+    for proposal in sorted(report.proposed):
+        supporters = citing(SCENARIOS, proposal)
+        assert len(supporters) < 3, (
+            f"{proposal} now has {len(supporters)} scenarios "
+            f"({sorted(s.id for s in supporters)}), which clears §12.2's bar. "
+            "Write it into SDD-VRP-001 §3 and renumber the entries citing it.")
+
+
+# --------------------------------------------------------------------------
+# What the engine declines, and how it declines it
+# --------------------------------------------------------------------------
+
+def test_nothing_the_engine_declines_is_claimed_as_a_v1_requirement():
+    """§10.5 calls the boundary "deliberately partial", and a boundary is only
+    honest if it is drawn in the same document that makes the promises.
+
+    A `NOT_MODELLED` entry at P0 would be the engine claiming something must
+    work at v1 and recording that it does not.
+    """
+    for scenario in declined(SCENARIOS):
+        if scenario.status == "NOT_MODELLED":
+            assert scenario.tier != "P0", (
+                f"{scenario.id} is P0 and NOT_MODELLED, which is a promise and "
+                "its own contradiction in one entry")
+
+
+def test_every_partial_or_declined_entry_says_which_half_is_missing():
+    """A status without a note is a status nobody can act on: it says the
+    engine falls short and not of what."""
+    for scenario in declined(SCENARIOS):
+        assert len(scenario.status_note) >= 40, (
+            f"{scenario.id} is {scenario.status} with a note of "
+            f"{len(scenario.status_note)} characters; say which half is owed")
+
+
+def test_the_arc_routing_refusal_stays_a_refusal():
+    """`UC-042` is described as "declined explicitly. The most common request
+    the platform should refuse". A refusal that quietly acquires a fixture has
+    stopped being one, and CARP demand lies on arcs -- expressing it as stops
+    either explodes the instance or silently drops coverage."""
+    arc_routing = [s for s in SCENARIOS if s.variant == "CARP"]
+
+    assert arc_routing, "the CARP entries exist to be declined, not deleted"
+    for scenario in arc_routing:
+        assert scenario.status != "MODELLED", f"{scenario.id}"
+        assert scenario.id not in FIXTURES, (
+            f"{scenario.id} has a fixture, so something is being tested that "
+            "the catalogue says the platform refuses")

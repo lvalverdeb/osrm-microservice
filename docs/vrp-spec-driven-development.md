@@ -232,6 +232,20 @@ Explicitly excluded, to be revisited only via a spec amendment:
 | `FR-20` | Support **EV range and en-route recharging** with charging-time functions | COULD |
 | `FR-21` | Support **route locking**: fixed prefixes, pinned order→vehicle assignments, forbidden assignments, pinned sequences | MUST |
 | `FR-22` | Support **partial dispatch decisions**: mark orders as dispatched-now vs postponed-to-next-wave | MUST |
+| `FR-23` | Support a **multi-period planning horizon**: recurring visits planned across several periods as one problem rather than as independent days, with per-order visit frequency, permitted-day patterns, and compliance measured against the interval rather than the day | SHOULD |
+| `FR-24` | Support a **maximum ride time** between a shipment's pickup and its delivery — for passengers, time aboard; for goods, a viability or working-life clock that starts at loading and is not the delivery window | SHOULD |
+| `FR-25` | **Distinguish the sources of priority.** Commercial priority, a contractual SLA clock, and a statutory obligation are separate attributes, not one tier number: they are ordered differently, they expire differently, and only one of them is negotiable. `FR-13`'s tiers remain the mechanism; this requires that what fills them is not conflated | MUST |
+| `FR-26` | Support **route synchronisation**: constraints coupling two routes at a place and time — a satellite transfer in a two-echelon network, vehicles departing as a convoy, a trailer meeting a hub cut-off | SHOULD |
+| `FR-27` | Support **preemption**: higher-priority work arriving mid-shift may displace planned work that has not yet been executed, with the displaced work re-planned rather than silently dropped | SHOULD |
+
+`FR-23`–`FR-27` were written from `CAT-VRP-003` §12.2, which records how many real
+operations ask for each and which ones. Each has at least three, which is the bar
+that section sets — below it a proposal is an observation about one customer.
+Two of its rows remain below the bar and are deliberately not requirements yet:
+crew as a resource distinct from the vehicle (`FR-P03`, two scenarios) and
+sequence-dependent service and setup time (`FR-P02`, two). Both are one scenario
+away, and the catalogue holds the identifiers so they can be claimed without
+renumbering.
 
 ### 3.2 Functional requirements — vehicle allocation
 
@@ -1360,8 +1374,9 @@ all learning.
 Each task lists dependencies, the requirements it satisfies, and a definition of done. Tasks marked
 **[GATE]** block the next slice.
 
-**Status — 50 of 54 done**, verified against the repository on 2026-08-29 (810 tests passing, CI green
-on `9915c52`). `done` means the task's artefacts exist, are tested and are on `main`; where a
+**Status — 50 of 61 done**, verified against the repository on 2026-09-01 (839 tests passing, CI green
+on `a70a341`). `T-72`–`T-78` are Slice 7, written in this edit from what the
+scenario corpus found; none is started. `done` means the task's artefacts exist, are tested and are on `main`; where a
 definition of done has a half that needs people or production, the commit says which half is owed
 rather than counting the proxy. `blocked` and `optional` are the four that remain:
 
@@ -1464,6 +1479,24 @@ dated is one nobody can trust.
 | `T-65` | done | Shadow mode + canary rollout tooling with rollback criteria | T-61 | §11.4 | One depot canary run completed with written go/no-go |
 | `T-66` | done | Public `/verify` endpoint | T-04 | §9.4, CON-1 | External plans verifiable; used by at least one integrator |
 | `T-67` | optional | cuOpt accelerator profile (optional) | T-36 | NFR-09, §7.3 | Feature-flagged; CPU path unaffected when disabled |
+
+### Slice 7 — Requirements the catalogue asked for
+
+`FR-23`–`FR-27` came from `CAT-VRP-003` §12.2, which counts the real operations
+behind each. The order below is that count, not preference: the requirement
+seven operations ask for is worth more than the one three ask for, and nothing
+here is worth starting before the four gaps `T-72` covers, because those are
+constraints the engine already claims to enforce and does not.
+
+| ID | Status | Task | Deps | Satisfies | Definition of done |
+|---|---|---|---|---|---|
+| `T-72` | todo | **[GATE]** Compile eligibility into the search: skills, order-class incompatibility, site access, depot inventory | T-12, T-22, T-45 | FR-10, FR-11, FR-31, INV-10, INV-13 | The four strict xfails in `tests/vrp/test_p0_scenarios.py` and `test_pathological.py` xpass; no plan is published that the verifier then rejects on a constraint the model declared |
+| `T-73` | todo | Multi-period horizon: visit frequency, permitted-day patterns, interval compliance | T-47 | FR-23, §12.2 | A visit-frequency instance plans a horizon, not seven days; compliance measured against the interval and reported per order |
+| `T-74` | todo | Maximum ride time from pickup to delivery, for passengers and for perishable goods | T-20 | FR-24 | Li & Lim PDPTW still passes; a ride-time-bounded instance never exceeds the bound, and the bound is distinguishable from a delivery window |
+| `T-75` | todo | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; the objective reports which source decided |
+| `T-76` | todo | Route synchronisation: satellite transfer, convoy departure, hub cut-off | T-28, T-37 | FR-26, DEC-1 | Two coupled routes meet at a place and time, and the verifier checks the coupling rather than each route alone |
+| `T-77` | todo | Preemption of planned work by higher-priority arrivals | T-51, T-56 | FR-27, DYN-5 | Displaced work is re-planned and reported, never silently dropped; churn attributable to preemption is separated from ordinary churn |
+| `T-78` | todo | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-30, FR-32 | Stripping and redistributing serves at least as much as re-planning the reduced fleet, at lower churn — `UC-171`'s claim, currently false |
 
 ---
 

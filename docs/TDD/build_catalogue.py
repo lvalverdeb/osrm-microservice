@@ -142,14 +142,68 @@ def validate(records, src):
         # self-containment: an entry must not depend on a neighbour to be understood
         if re.search(r'\bas above\b|\bsame\b\.|\bditto\b', r["breaks"], re.IGNORECASE):
             errs.append(f"{r['id']}: breaks field is not self-contained")
+    # Identifiers §0.7 retires. Naming one in prose is legitimate; reusing one
+    # as an entry id is the renumbering §0.1 prohibits, and is caught below.
+    retired = _retired_identifiers(src)
+    for reused in sorted(retired & set(ids)):
+        errs.append(f"{reused} is retired in §0.7 and must never be reused; "
+                    f"take the next free identifier instead")
+
     # referenced-but-undefined ids
-    defined = set(ids) | set(re.findall(r'\| `(UC-\d{3})` \|', src))
+    defined = set(ids) | retired | set(re.findall(r'\| `(UC-\d{3})` \|', src))
     for ref in sorted(set(re.findall(r'UC-\d{3}', src))):
         if ref not in defined:
             errs.append(f"{ref} referenced but never defined")
+    # The coverage tables of §12 cite scenarios as bare three-digit numbers --
+    # "024, 043, 108" -- which the check above cannot see, because it looks for
+    # the `UC-nnn` form. That blind spot let §12.2 rest three of its claims on
+    # `UC-021`, `UC-040` and `UC-041`, none of which exists, while the build
+    # stayed green. A coverage table is exactly where a dangling reference does
+    # the most damage: it is the evidence a requirement gets written on.
+    errs.extend(_dangling_in_coverage_tables(src, defined))
     if re.search(r'FR-\d+-style', src):
         errs.append("dangling pseudo-requirement reference (FR-nn-style)")
     return errs, warns
+
+
+def _retired_identifiers(src):
+    """The `UC-nnn` values §0.7 lists, expanding any `UC-a` - `UC-b` range."""
+    match = re.search(r'^### 0\.7 Retired identifiers\n(.*?)(?=^### )',
+                      src, re.MULTILINE | re.DOTALL)
+    if not match:
+        return set()
+    # Table rows only. The prose under the table names `UC-011` and `UC-039`
+    # as casualties that were *restored*, and reading those as retired would
+    # retire two live entries.
+    rows = "\n".join(line for line in match.group(1).splitlines()
+                     if line.startswith("|") and "Identifier" not in line)
+    retired = set()
+    for low, high in re.findall(r'`UC-(\d{3})`\s*[–-]\s*`UC-(\d{3})`', rows):
+        retired |= {f"UC-{n:03d}" for n in range(int(low), int(high) + 1)}
+    retired |= set(re.findall(r'`(UC-\d{3})`(?!\s*[–-])', rows))
+    return retired
+
+
+def _dangling_in_coverage_tables(src, defined):
+    """Scenario numbers cited in §12's tables that resolve to no entry."""
+    found = []
+    for heading, table in re.findall(r'^### (12\.\d[^\n]*)\n(.*?)(?=^#{2,3} |\Z)',
+                                     src, re.MULTILINE | re.DOTALL):
+        for row in table.splitlines():
+            if not row.startswith("|") or set(row) <= set("|- "):
+                continue
+            cells = [c.strip() for c in row.strip("|").split("|")]
+            for cell in cells[1:]:
+                # An id list, and nothing else: "024, 043, 108". Requiring the
+                # whole cell to be numbers keeps a three-digit figure in prose
+                # from being read as a scenario reference.
+                if not re.fullmatch(r'\d{3}(?:\s*,\s*\d{3})*', cell):
+                    continue
+                for number in re.findall(r'\d{3}', cell):
+                    if f"UC-{number}" not in defined:
+                        found.append(f"§{heading.split()[0]} cites UC-{number} "
+                                     f"in {cells[0][:40]!r}, which is not defined")
+    return sorted(set(found))
 
 
 def main():
