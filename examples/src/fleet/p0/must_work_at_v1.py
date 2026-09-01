@@ -68,11 +68,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from vrp.adherence import ExecutedRoute
 from vrp.bench import fixtures
 from vrp.bench.fixtures import FIXTURES
-from vrp.committed import moved_since
+from vrp.committed import loading_locks, moved_since
 from vrp.depots import drawn_per_depot, over_drawn, solve_within_inventory
 from vrp.evaluator import evaluate
 from vrp.solve.pyvrp_adapter import solve
-from vrp.triggers import Trigger, reoptimise
+from vrp.triggers import Trigger, recover_from_absence, reoptimise
 from vrp.verify import verify
 from vrp.zones import learn_prior, order_by_prior
 
@@ -365,26 +365,28 @@ def the_day_happens() -> None:
 
     case("UC-171", "a driver does not arrive")
     problem, plan = plan_for("UC-171")
-    absent = plan.routes[0].vehicle_id
-    response = reoptimise(problem, plan, Trigger("BREAKDOWN", at=7 * HOUR,
-                                                 vehicle_id=absent),
-                          now=7 * HOUR, neighbours=2)
-    reduced = problem.__class__(**{**problem.__dict__, "id": "reduced",
-                                   "vehicles": tuple(v for v in problem.vehicles
-                                                     if v.id != absent)})
-    scratch = solve(reduced, iterations=600, seed=2)
+    absent = max(plan.routes,
+                 key=lambda r: len([s for s in r.steps if s.order_id])).vehicle_id
+    loaded = {lock.order_id: lock.vehicle_id
+              for lock in loading_locks(problem, plan, absent=[absent])}
+    response = recover_from_absence(
+        problem, plan, [absent], lambda p: solve(p, iterations=600, seed=0))
+    carrier = {s.order_id: r.vehicle_id for r in response.plan.routes
+               for s in r.steps if s.order_id}
+    repacked = [o for o, van in loaded.items()
+                if carrier.get(o) not in (None, van)]
     tier0 = {o.id for o in problem.orders if o.priority_tier == 0}
-    say(f"strip and redistribute: serves {len(served(response.plan))}"
-        f"/{len(problem.orders)}, moves {response.delta.churn}, "
-        f"objective {response.delta.cost_before} -> {response.delta.cost_after}",
-        f"re-plan reduced fleet:  serves {len(served(scratch))}"
-        f"/{len(problem.orders)}, moves {len(moved_since(plan, scratch))}",
-        f"tier-0 work kept either way: {sorted(tier0 & served(response.plan))}",
-        "", "INCOMPLETE. §8.4's cheapest-insertion recovery is built for a",
-        "mid-day disruption with most of the plan committed. Discovered at",
-        "shift start, where nothing is, it drops half the round that replanning",
-        "keeps. Priority tiers still protect what matters, which is what makes",
-        "the loss a choice rather than an accident.")
+    say(f"{absent} does not arrive; {len(loaded)} orders are already aboard "
+        "the vans that do",
+        f"strip and redistribute: serves {len(served(response.plan))}"
+        f"/{len(problem.orders)}, moves {response.delta.churn}, objective "
+        f"{response.delta.cost_before} -> {response.delta.cost_after}",
+        f"already-loaded work asked to move: {repacked or 'none'}",
+        f"tier-0 work kept: {sorted(tier0 & served(response.plan))}",
+        "A free re-plan of the two remaining vans scores better on paper and",
+        "is not available: at 05:30 it means drivers moving stock between",
+        "vehicles in the yard. Loading is a commitment, so it is pinned, and",
+        "the only thing free to move is the stock nobody is driving.")
 
 
 def main() -> int:
@@ -398,13 +400,13 @@ def main() -> int:
     many_origins()
     the_day_happens()
     print(f"\n{'=' * 74}")
-    print("Thirteen of the fourteen behave as the catalogue requires.")
-    print("UC-019 and UC-134 joined them with T-72, which compiled skills, site")
-    print("access and operator locks into the search and made depot inventory a")
-    print("constraint the plan is held to rather than a note the verifier makes")
-    print("afterwards. UC-171 is the one left, and it is a different question:")
-    print("not what the engine may do, but which recovery §8.4 reaches for when")
-    print("a driver does not arrive.")
+    print("All fourteen now behave as the catalogue requires. The last three to")
+    print("arrive were UC-019, UC-134 and UC-171, and the last of those was not")
+    print("an engine gap at all: the entry was right and the measurement was")
+    print("wrong, because a re-plan of the reduced fleet was being scored on a")
+    print("freedom the depot does not have. Loading is a commitment. Once it is")
+    print("written down as one, the question the morning actually asks is which")
+    print("stops to strip, and that is the question the engine answers.")
     print(f"\nInstances: vrp/bench/fixtures.py, three sizes each "
           f"({', '.join(f'{k}={v}' for k, v in fixtures.SIZES.items())} stops; "
           f"single-tour and appointment-day operations scale within a duty).")

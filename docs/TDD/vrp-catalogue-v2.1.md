@@ -1882,7 +1882,6 @@ Two drivers call in sick at 05:30 for a 06:00 departure.
 - **Binds:** reduced fleet against an already-built plan
 - **Exercises:** FR-30, FR-13, FR-21, FR-12, FR-32 (the same work with fewer vehicles)
 - **Breaks:** re-solving from scratch. Vehicles are loaded; the practical question is which stops to strip and redistribute, not how to re-plan the day
-- **Status:** PARTIALLY_MODELLED — priority tiers are protected and the absent vehicle's route is emptied, but §8.4's cheapest-insertion recovery is built for a mid-day disruption with most of the plan committed: at shift start it drops half the round that re-planning the reduced fleet keeps
 #### UC-172 — Weather event cancelling a region
 
 Snow or flooding makes an area unreachable mid-day.

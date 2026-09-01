@@ -1523,7 +1523,23 @@ is what `status` already reports about anytime plans.
 | `T-75` | todo | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; the objective reports which source decided |
 | `T-76` | todo | Route synchronisation: satellite transfer, convoy departure, hub cut-off | T-28, T-37 | FR-26, DEC-1 | Two coupled routes meet at a place and time, and the verifier checks the coupling rather than each route alone |
 | `T-77` | todo | Preemption of planned work by higher-priority arrivals | T-51, T-56 | FR-27, DYN-5 | Displaced work is re-planned and reported, never silently dropped; churn attributable to preemption is separated from ordinary churn |
-| `T-78` | todo | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-30, FR-32 | Stripping and redistributing serves at least as much as re-planning the reduced fleet, at lower churn — `UC-171`'s claim, currently false |
+| `T-78` | done | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-21, FR-30, FR-32 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry |
+
+**`UC-171`'s claim was right and the measurement was wrong**, which is worth
+recording because the backlog said the opposite. Two things were being compared
+unfairly. §8.4's cheapest-insertion recovery is built for a mid-day disruption
+with most of the day committed, and applied at shift start it had the whole
+round to place at once and dropped half of it. And the alternative it lost to --
+a free re-plan of the reduced fleet -- was being scored on a freedom the depot
+does not have, because at 05:30 the remaining vans are already packed.
+
+Loading is a commitment, and `FR-21` is how the entry says to express it:
+`committed.loading_locks` pins what is aboard a van that is coming, and
+`triggers.recover_from_absence` forbids the vans that are not and solves. On the
+fixture that recovery serves 12 of 12 rather than 6, moves 6 stops rather than
+12, leaves the objective unchanged rather than ten times worse, and asks nothing
+already loaded to move. The last of those is the guarantee; the rest is what
+stops it being a worse plan.
 
 ---
 

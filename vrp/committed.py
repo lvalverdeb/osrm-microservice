@@ -34,7 +34,7 @@ and it changes whenever either does.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from vrp.model import Lock, Problem, Route, Solution
@@ -139,6 +139,39 @@ def commit_locks(problem: Problem, solution: Solution, now: int) -> tuple[Lock, 
                               order_ids=tuple(prefix)))
     locks.append(Lock(kind="FREEZE_UNTIL", instant=now))
     return tuple(locks)
+
+
+def loading_locks(problem: Problem, solution: Solution,
+                  absent: Sequence[str] = ()) -> tuple[Lock, ...]:
+    """Pin the work already aboard each vehicle. FR-21, `UC-171`.
+
+    `commit_locks` freezes what has been *executed*. This freezes what has been
+    *loaded*, which is a commitment made earlier and just as physical: at 05:30
+    for a 06:00 departure the vans are packed, and a plan that moves an order
+    from one to another is asking two drivers to unload and repack in the yard.
+
+    `UC-171` states the consequence and it is easy to read past: "re-solving
+    from scratch. Vehicles are loaded; the practical question is which stops to
+    strip and redistribute, not how to re-plan the day." Without these locks a
+    from-scratch re-plan looks like a legitimate option and usually wins on
+    paper, because it is being scored on a freedom the depot does not have.
+
+    Args:
+        problem: the instance.
+        solution: the plan the vehicles were loaded to.
+        absent: vehicles that will not arrive. Their work is deliberately left
+            unpinned -- it is the stock sitting on a van nobody is driving, and
+            redistributing it is the whole question.
+
+    Returns:
+        One `PIN_ORDER_TO_VEHICLE` per order aboard a vehicle that is coming.
+    """
+    missing = set(absent)
+    return tuple(
+        Lock(kind="PIN_ORDER_TO_VEHICLE", order_id=step.order_id,
+             vehicle_id=route.vehicle_id)
+        for route in solution.routes if route.vehicle_id not in missing
+        for step in route.steps if step.order_id)
 
 
 def moved_since(before: Solution, after: Solution) -> dict[str, tuple[str, str | None]]:

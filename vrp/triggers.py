@@ -33,11 +33,16 @@ manager, the evaluator and a solver.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 
-from vrp.committed import commit_locks, committed_prefix, moved_since
+from vrp.committed import (
+    commit_locks,
+    committed_prefix,
+    loading_locks,
+    moved_since,
+)
 from vrp.evaluator import evaluate, route_metrics
 from vrp.model import Lock, Problem, Route, Solution
 
@@ -235,6 +240,58 @@ def reoptimise(problem: Problem, plan: Solution, trigger: Trigger, now: int,
         delta=_delta(problem, plan, after),
         locks=locks,
         locked_share=locked * FULL // max(total, 1))
+
+
+def recover_from_absence(problem: Problem, plan: Solution,
+                         absent: Sequence[str],
+                         solve: Callable[[Problem], Solution]) -> Response:
+    """Strip the vans nobody is driving and redistribute their work. `UC-171`.
+
+    A driver calling in sick at 05:30 for a 06:00 departure is not the
+    disruption `reoptimise` above is built for. That one protects *executed*
+    work and opens the affected routes to a cheapest-insertion pass, which is
+    right at 14:00 when most of the day is behind the fleet. At shift start
+    nothing is executed, so there is nothing for the freeze to protect and the
+    insertion pass has the whole round to place at once -- measured on
+    `UC-171`'s own fixture it dropped half of it.
+
+    What *is* committed at 05:30 is the loading. The vans that are coming are
+    packed, and an order moving between them is two drivers unloading and
+    repacking in the yard, which is why the entry says "the practical question
+    is which stops to strip and redistribute, not how to re-plan the day".
+
+    So the policy is exactly that, and it is expressed in locks the search
+    already honours: pin every order aboard a van that is coming, forbid the
+    vans that are not, and solve. The absent stock is the only thing free to
+    move, which is the smallest question that answers the morning.
+
+    Args:
+        problem: the instance.
+        plan: the plan the vehicles were loaded to.
+        absent: the vehicles that will not arrive.
+        solve: the engine. Injected, as `reoptimise`'s is, and a real one this
+            time: the work being placed is a whole van's round rather than a
+            single insertion.
+
+    Returns:
+        The recovered plan with its delta, and the locks that produced it -- so
+        a dispatcher can see that nothing already loaded was asked to move.
+    """
+    missing = tuple(absent)
+    if not missing:
+        raise ValueError("an absence needs an absent vehicle")
+
+    locks = loading_locks(problem, plan, absent=missing) + tuple(
+        Lock(kind="FORBID_DEPLOY", vehicle_id=vehicle_id)
+        for vehicle_id in missing)
+    stripped = replace(problem, locks=problem.locks + locks)
+    after = solve(stripped)
+
+    committed = sum(1 for lock in locks
+                    if lock.kind == "PIN_ORDER_TO_VEHICLE")
+    total = sum(1 for order in problem.orders)
+    return Response(plan=after, delta=_delta(problem, plan, after), locks=locks,
+                    locked_share=committed * FULL // max(total, 1))
 
 
 def _route_of(plan: Solution, vehicle_id: str) -> Route:
