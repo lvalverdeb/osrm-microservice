@@ -24,8 +24,6 @@ would break the build, so nobody would add one.
 
 from __future__ import annotations
 
-import pytest
-
 from vrp.bench.catalogue import (
     by_tier,
     citing,
@@ -190,14 +188,26 @@ def test_the_coverage_report_is_internally_consistent(capsys):
         "every operational scenario must fall in exactly one tier")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Phase 3 of docs/planning/VRP_SCENARIO_CORPUS_PLAN.md builds the 14 P0 "
-    "operational fixtures. Until then this gate covers the adversarial set "
-    "only. When Phase 3 lands this xpasses, which fails the suite and is the "
-    "signal to promote it to a hard assertion."))
 def test_every_p0_operational_scenario_has_a_fixture():
-    """§13.1: "P0 scenarios become seeded synthetic fixtures first"."""
+    """§13.1: "P0 scenarios become seeded synthetic fixtures first".
+
+    A strict xfail while Phase 3 was outstanding, promoted when it landed --
+    which is what the xfail existed to force.
+    """
     missing = sorted(s.id for s in by_tier(operational(SCENARIOS), "P0")
                      if s.id not in FIXTURES)
 
-    assert not missing, f"P0 scenarios with no fixture: {missing}"
+    assert not missing, (
+        f"P0 scenarios with no fixture: {missing}. P0 is \"must work at v1\", "
+        "so an operation with no executable instance is a claim nobody checks.")
+
+
+def test_every_p0_fixture_offers_the_three_sizes_13_1_asks_for():
+    """§13.1: "one per P0 scenario, at three sizes"."""
+    for scenario in by_tier(operational(SCENARIOS), "P0"):
+        build = FIXTURES[scenario.id]
+        counts = [len(build(size=size).orders) for size in ("small", "medium", "large")]
+        assert counts[0] < counts[1] < counts[2], (
+            f"{scenario.id} builds {counts} at small/medium/large. The sizes "
+            "must actually differ, or two thirds of the corpus measures the "
+            "same instance twice.")

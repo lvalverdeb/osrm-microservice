@@ -38,6 +38,13 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The P0 corpus exists at three sizes (CAT-VRP-003 §13.1). Small carries the
+# per-scenario assertions and runs on every commit; medium and large are marked
+# slow, excluded from `make test`, and run by `make corpus`. Without the marker
+# a full run of the corpus would put minutes into the loop nobody waits through.
+markers = [
+    "slow: the P0 corpus at medium and large size; run by `make corpus`",
+]
 # The repo root, so tests can import the dev-tree packages that are not part of
 # the wheel: `loadtest` (payload builders) and `parity` (the differential
 # harness). Without it pytest puts only `tests/` on sys.path.

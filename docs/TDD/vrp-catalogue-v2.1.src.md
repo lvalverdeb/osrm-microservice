@@ -909,6 +909,7 @@ Engineers to customer premises in booked slots.
 - Binds: appointment windows and skill coverage
 - Exercises: FR-04, FR-05, FR-08, FR-10, FR-16
 - Breaks: modelling technicians as depot-based. Each home is a distinct start and end, making this multi-depot even with one office
+- Status: PARTIALLY_MODELLED — home-start routing works and beats a depot-based model once the commute it omits is counted; FR-10's skills are checked by the verifier and reported at pre-flight but compiled into the search nowhere, so a plan may send gas work to an electricity-only crew and be rejected afterwards
 
 **`UC-022` Home care and domiciliary visits — P1** `[VRPTW, consistency dominant]`
 
@@ -1184,6 +1185,7 @@ Several DCs able to serve the same customers.
 - Binds: depot choice against per-depot inventory
 - Exercises: FR-31, FR-08, FR-30, FR-36
 - Breaks: nearest-depot assignment. The nearest depot may lack stock or capacity, and fixing assignment before routing forecloses the cheapest plans
+- Status: PARTIALLY_MODELLED — depot choice is open to the search rather than fixed beforehand, and a stockout is reported at pre-flight as `DEPOT_STOCKOUT` and caught by INV-13; FR-31's inventory is not a constraint the search carries, so it will draw from an empty depot and be told afterwards
 
 **`UC-135` Franchise and multi-branch service networks — P2** `[MDHVRPTW]`
 
@@ -1617,6 +1619,7 @@ Two drivers call in sick at 05:30 for a 06:00 departure.
 - Binds: reduced fleet against an already-built plan
 - Exercises: FR-30, FR-13, FR-21, FR-12
 - Breaks: re-solving from scratch. Vehicles are loaded; the practical question is which stops to strip and redistribute, not how to re-plan the day
+- Status: PARTIALLY_MODELLED — priority tiers are protected and the absent vehicle's route is emptied, but §8.4's cheapest-insertion recovery is built for a mid-day disruption with most of the plan committed: at shift start it drops half the round that re-planning the reduced fleet keeps
 
 **`UC-172` Weather event cancelling a region — P2** `[VRPTW, dynamic, network change]`
 

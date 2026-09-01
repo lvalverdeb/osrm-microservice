@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: property-soak examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: property-soak examples help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -56,6 +56,7 @@ help:
 	@echo "  examples       - Interactive menu of the example client scripts (examples/)"
 	@echo "  test           - Run the pytest suite"
 	@echo "  catalogue      - Rebuild the VRP scenario catalogue from vrp-catalogue-v2.1.src.md"
+	@echo "  corpus         - The P0 scenario corpus at all three sizes (slow)"
 	@echo "  lint           - Run ruff checks"
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
@@ -230,7 +231,14 @@ examples:
 	uv run --package osrm-api-gateway-examples examples/main.py
 
 test:
-	uv run python -m pytest tests/ -q --tb=short
+	uv run python -m pytest tests/ -q --tb=short -m "not slow"
+
+# CAT-VRP-003 §13.1 wants each P0 operation at three sizes. Small carries the
+# per-scenario assertions and runs in `make test`; medium and large are marked
+# slow and live here, because putting minutes into every commit is how a corpus
+# stops being run at all.
+corpus:  ## The P0 scenario corpus at all three sizes (CAT-VRP-003 13.1)
+	uv run python -m pytest tests/vrp/test_p0_scenarios.py -q --tb=short
 
 lint:
 	uv run ruff check .

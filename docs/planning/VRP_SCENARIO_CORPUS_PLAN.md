@@ -176,7 +176,7 @@ and citing a requirement the design document does not define.
 
 ---
 
-## 5. Phase 3 — the 14 P0 scenarios (§13.1, §13.5)
+## 5. Phase 3 — the 14 P0 scenarios (§13.1, §13.5) — **shipped**
 
 *"P0 scenarios become seeded synthetic fixtures first — one per P0 scenario, at
 three sizes."* and *"Every fixture carries its `Breaks` assertion as a named test.
@@ -209,6 +209,30 @@ The fourteen, with the assertion each one owes. This table is the phase:
 Several assert *"beats the naive answer on the same instance"*, which needs the
 naive answer computed. That is a helper, not a per-fixture burden, and it is what
 makes these tests worth their runtime.
+
+**Shipped.** Ten of the fourteen assert their `Breaks` line and pass. Four
+turned up gaps, and three of those are one defect wearing different clothes:
+
+`FR-10` skills, `FR-10` order-class incompatibility, `FR-11` site access and
+`FR-31` depot inventory are all enforced by the independent verifier and
+reported by pre-flight, and **none of them is compiled into the search**. The
+PyVRP adapter's `add_vehicle_type` carries capacity, depots, shifts, costs and
+reload limits, and nothing that makes a client ineligible for a vehicle. So the
+engine reliably detects an illegal plan it had no way to avoid building:
+`UC-019` sends gas work to an electricity-only crew, `UC-134` draws from an
+empty depot, `UC-067` loads hazardous goods beside foodstuff. Closing this is
+its own slice -- PyVRP supports it through per-profile edge sets and client
+groups, so the work is in the adapter and the domain model, not in the search.
+
+The fourth is separate. `UC-171`'s absence at shift start exposes that §8.4's
+cheapest-insertion recovery is built for a mid-day disruption with most of the
+plan committed. At shift start, where nothing is committed, it drops half the
+round: re-planning the reduced fleet from scratch serves 12 of 12 and moves 6
+stops, while the targeted response serves 6 of 12, moves all 12, and takes the
+objective from 63,736 to 644,730. Opening more neighbours does not change it.
+
+All four are strict xfails with the measurement in the reason, and all four
+entries are `PARTIALLY_MODELLED` with the gap written down.
 
 **This phase needs pytest markers, which do not exist today** — `pyproject.toml`
 declares none and `make test` is an unfiltered `pytest tests/ -q`. Add a `slow`
