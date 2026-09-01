@@ -600,6 +600,30 @@ class Solution:
     solver: dict[str, Any] | None = None
 
 
+def may_enter(vehicle: Vehicle, site: Location) -> bool:
+    """Whether this vehicle is allowed at this site at all. FR-11, §6.5.
+
+    Empty `access_classes` means unrestricted, not "admits nothing": the
+    inverse reading would make every ordinary address unservable.
+
+    **The independent verifier deliberately does not call this.** CON-1 requires
+    it to share no code with any solver, so `vrp/verify/verifier.py` states the
+    same rule again in its own words. That duplication is the point: a mistake
+    here is caught there precisely because the two were written separately, and
+    consolidating them would delete the check rather than tidy it.
+    """
+    if site.access_classes and vehicle.access_class not in site.access_classes:
+        return False
+    return not (site.max_vehicle_kg is not None
+                and vehicle.gross_weight_kg is not None
+                and vehicle.gross_weight_kg > site.max_vehicle_kg)
+
+
+def has_skills_for(vehicle: Vehicle, order: Order) -> bool:
+    """Whether this vehicle carries the qualifications the order needs. FR-10."""
+    return order.required_skills <= vehicle.skills
+
+
 def service_time(order: Order, vehicle: Vehicle, location: Location) -> int:
     """How long this vehicle takes to serve this order here. FR-05, §6.2.
 

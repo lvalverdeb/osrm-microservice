@@ -331,19 +331,24 @@ def test_uc019_home_start_technicians_are_multi_depot_even_with_one_office():
         "the commute is counted, the entry's claim would be wrong")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FR-10's skills are enforced by the verifier (INV-10) and reported by "
-    "pre-flight, and are compiled into nothing. `add_vehicle_type` carries "
-    "capacity, depots, shifts and costs; there is no mechanism making a client "
-    "ineligible for a vehicle, so the search assigns gas work to an "
-    "electricity-only crew and the plan is rejected afterwards."))
 def test_uc019_the_search_respects_which_crew_holds_which_ticket():
-    """Breaks: a qualification is a constraint on the plan, not a note on it."""
+    """Breaks: a qualification is a constraint on the plan, not a note on it.
+
+    A strict xfail until `T-72`. FR-10's skills were enforced by the verifier
+    and reported by pre-flight and compiled into nothing, so the search sent gas
+    work to an electricity-only crew and the plan was rejected afterwards.
+    Detecting a plan you had no way to avoid building is not enforcement.
+    """
     problem = FIXTURES["UC-019"]()
 
     solution = solve(problem, iterations=600, seed=0)
 
-    assert verify(problem, solution).ok
+    assert verify(problem, solution).ok, verify(problem, solution).violations
+    for route in solution.routes:
+        crew = problem.vehicle(route.vehicle_id)
+        for step in route.steps:
+            if step.order_id:
+                assert problem.order(step.order_id).required_skills <= crew.skills
 
 
 # --------------------------------------------------------------------------

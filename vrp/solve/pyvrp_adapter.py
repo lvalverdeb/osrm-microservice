@@ -26,7 +26,15 @@ from dataclasses import dataclass
 from pyvrp import Model
 from pyvrp.stop import MaxIterations
 
-from vrp.model import Problem, Route, Solution, Step, service_time
+from vrp.model import (
+    Problem,
+    Route,
+    Solution,
+    Step,
+    has_skills_for,
+    may_enter,
+    service_time,
+)
 
 # PyVRP addresses capacity dimensions positionally, so the order must be pinned
 # and used identically when compiling and when mapping back. Sorted rather than
@@ -125,6 +133,67 @@ def _bounds(window, shift_start: int, shift_end: int) -> tuple[int, int]:
     if window.hardness == "SOFT":
         return shift_start, shift_end
     return window.start, window.end
+
+
+def _eligibility_key(problem: Problem, vehicle) -> frozenset[int]:
+    """The matrix indices this vehicle may not visit. FR-10, FR-11.
+
+    Its own depots are never in the set. A vehicle barred from the yard it
+    starts in is a pre-flight problem (`NO_ELIGIBLE_VEHICLE`) and encoding it
+    here would produce an instance with no answer and no explanation.
+    """
+    forbidden: set[int] = set()
+    for order in problem.orders:
+        skilled = has_skills_for(vehicle, order)
+        for stop in order.stops:
+            site = problem.location(stop.location_id)
+            if not skilled or not may_enter(vehicle, site):
+                forbidden.add(site.matrix_index)
+    home = {vehicle.start_location_id, vehicle.ends_at, *vehicle.reload_locations}
+    forbidden -= {problem.location(name).matrix_index
+                  for name in home if name is not None}
+    return frozenset(forbidden)
+
+
+def _eligibility_profiles(problem: Problem, model: Model) -> dict:
+    """One profile per distinct eligibility set, and none when nobody is barred.
+
+    A profile carries its own full edge set, so the build cost is multiplied by
+    the number of *distinct* restrictions rather than by the fleet size -- a
+    hundred identically-qualified vans share one. Instances with no skills and
+    no site restrictions get a single profile and the edge loop they always had.
+    """
+    _refuse_ambiguous_eligibility(problem)
+    keys = {_eligibility_key(problem, vehicle) for vehicle in problem.vehicles}
+    return {key: (model.add_profile(name=f"eligibility-{index}"), key)
+            for index, key in enumerate(sorted(keys, key=sorted))}
+
+
+def _refuse_ambiguous_eligibility(problem: Problem) -> None:
+    """Refuse what a per-place encoding cannot say exactly.
+
+    PyVRP profiles restrict *places*, and several orders may share one. Where
+    two orders at the same address differ in what they need -- one wants a gas
+    ticket, the other does not -- barring the place for a vehicle bars work it
+    was entitled to do, and permitting it permits work it was not. Neither is
+    the instance the caller described, so it is refused by name rather than
+    approximated.
+    """
+    by_place: dict[str, list] = {}
+    for order in problem.orders:
+        for stop in order.stops:
+            by_place.setdefault(stop.location_id, []).append(order)
+    for location_id, orders in by_place.items():
+        if len(orders) < 2:
+            continue
+        for vehicle in problem.vehicles:
+            allowed = {has_skills_for(vehicle, order) for order in orders}
+            if len(allowed) > 1:
+                raise NotImplementedError(
+                    f"orders at {location_id} need different skills of "
+                    f"{vehicle.id}, and eligibility is compiled per place: "
+                    f"the encoding cannot admit one and bar the other. Split "
+                    f"the location, or give the orders the same requirement")
 
 
 def _single_profile(problem: Problem) -> str:
@@ -280,6 +349,9 @@ def compile_problem(problem: Problem) -> _Compiled:
             order_by_client[len(order_by_client)] = order.id
             del client
 
+    # Built before the fleet, because a vehicle type names the
+    # profile it routes on.
+    profiles = _eligibility_profiles(problem, model)
     vehicle_ids: list[str] = []
     for vehicle in problem.vehicles:
         # PyVRP spells the duration limit `shift_duration`, and both limits
@@ -311,6 +383,7 @@ def compile_problem(problem: Problem) -> _Compiled:
             limits["max_reloads"] = vehicle.max_reloads
 
         model.add_vehicle_type(
+            profile=profiles[_eligibility_key(problem, vehicle)][0],
             num_available=1,
             capacity=[vehicle.capacities.get(name, 0) for name in dimensions],
             start_depot=depots[vehicle.start_location_id],
@@ -324,25 +397,47 @@ def compile_problem(problem: Problem) -> _Compiled:
         vehicle_ids.append(vehicle.id)
 
     matrix = problem.matrix
-    for origin in ordered:
-        for destination in ordered:
-            if origin.matrix_index == destination.matrix_index:
-                continue
-            if not matrix.is_reachable(origin.matrix_index,
-                                       destination.matrix_index):
-                # MTX-5: an unreachable pair is a hard-infeasible arc, so the
-                # edge is simply absent. Adding it at any finite cost is what
-                # lets a solver route through a road that does not exist.
-                continue
-            model.add_edge(
-                handles[origin.matrix_index], handles[destination.matrix_index],
-                distance=matrix.distance(origin.matrix_index, destination.matrix_index),
-                duration=matrix.duration(origin.matrix_index, destination.matrix_index),
-            )
-    if open_sink is not None:
+    # FR-10 and FR-11 are eligibility, and eligibility is a property of the
+    # (vehicle, place) pair rather than of the plan. PyVRP expresses it with
+    # profiles: a vehicle type routes on its own edge set, and a place it may
+    # not enter simply has no edge into it. Omitting the edge is the library's
+    # own "unconnected" marker, not a large finite cost the search can trade
+    # against -- the same distinction MTX-5 makes for unreachable arcs.
+    #
+    # Before this, `add_vehicle_type` carried capacity, depots, shifts and
+    # costs and nothing that made a client ineligible, so the search assigned
+    # gas work to an electricity-only crew and the verifier rejected the plan
+    # afterwards. Detecting a plan you had no way to avoid building is not
+    # enforcement.
+    for profile, forbidden in profiles.values():
         for origin in ordered:
-            model.add_edge(handles[origin.matrix_index], sink_handle,
-                           distance=0, duration=0)
+            for destination in ordered:
+                if origin.matrix_index == destination.matrix_index:
+                    continue
+                if destination.matrix_index in forbidden:
+                    # Not reachable *for this profile*. Edges out of a
+                    # forbidden place are harmless once nothing can arrive.
+                    continue
+                if not matrix.is_reachable(origin.matrix_index,
+                                           destination.matrix_index):
+                    # MTX-5: an unreachable pair is a hard-infeasible arc, so
+                    # the edge is simply absent. Adding it at any finite cost
+                    # is what lets a solver route through a road that does not
+                    # exist.
+                    continue
+                model.add_edge(
+                    handles[origin.matrix_index],
+                    handles[destination.matrix_index],
+                    distance=matrix.distance(origin.matrix_index,
+                                             destination.matrix_index),
+                    duration=matrix.duration(origin.matrix_index,
+                                             destination.matrix_index),
+                    profile=profile,
+                )
+        if open_sink is not None:
+            for origin in ordered:
+                model.add_edge(handles[origin.matrix_index], sink_handle,
+                               distance=0, duration=0, profile=profile)
 
     return _Compiled(model=model, dimensions=dimensions,
                      order_by_client=order_by_client,

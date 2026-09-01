@@ -21,6 +21,8 @@ is worse than no skill model: it invites people to rely on it.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from vrp.diagnose import preflight
@@ -260,3 +262,116 @@ def test_an_order_declaring_incompatibility_must_have_a_class():
 def test_a_negative_weight_limit_is_refused():
     with pytest.raises(Exception, match="max_vehicle_kg"):
         restricted("C1", 1, max_vehicle_kg=-1)
+
+
+# --------------------------------------------------------------------------
+# The search, not only the verifier — T-72
+# --------------------------------------------------------------------------
+
+def _two_depot_instance(orders, vehicles):
+    """Work clustered by one depot, the awkward vehicle parked at the other.
+
+    The geometry is the point. With both vehicles at the same yard the cheapest
+    assignment is also the eligible one, so a test built that way passes whether
+    or not anything is enforced -- which is how the first version of these two
+    tests passed while eligibility was perturbed out of the adapter.
+    """
+    locations = (Location(id="D", lat=9.90, lon=-84.0, matrix_index=0),
+                 Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1),
+                 Location(id="C2", lat=9.92, lon=-84.0, matrix_index=2),
+                 Location(id="FAR", lat=10.9, lon=-84.0, matrix_index=3))
+    # Three hours each way to the far yard: expensive enough that distance
+    # always prefers the near vehicle, short enough that the round trip fits a
+    # legal day. An unreachable vehicle would make the instance infeasible
+    # rather than making the point.
+    minutes = ((0, 10, 20, 180), (10, 0, 10, 180),
+               (20, 10, 0, 180), (180, 180, 180, 0))
+    grid = tuple(tuple(cell * 60 for cell in row) for row in minutes)
+    long_day = TimeWindow(start=0, end=14 * 3600)
+    return Problem(
+        id="cmp", locations=locations, orders=orders,
+        vehicles=tuple(replace(v, shift=long_day) for v in vehicles),
+        matrix=TravelMatrix(version="c", durations=grid, distances=grid))
+
+
+def test_the_search_will_not_send_an_unskilled_vehicle():  # FR-10
+    """Every test above judges a plan someone else built. These judge the plan
+    the engine builds, which is a different question: `T-22` produced a check,
+    and a check catches a plan it had no way to avoid producing.
+
+    The tail lift is ten hours away. Distance says put everything on the near
+    van; the ticket says one of them cannot go there at all.
+    """
+    from vrp.solve.pyvrp_adapter import solve
+
+    problem = _two_depot_instance(
+        (an_order("HEAVY", "C1", required_skills=frozenset({"TAIL_LIFT"})),
+         an_order("LIGHT", "C2")),
+        (a_van("NEAR"),
+         a_van("LIFT", skills=frozenset({"TAIL_LIFT"}),
+               start_location_id="FAR", end_location_id="FAR")))
+
+    solution = solve(problem, iterations=600, seed=0)
+
+    assert verify(problem, solution).ok, verify(problem, solution).violations
+    carrier = {step.order_id: route.vehicle_id
+               for route in solution.routes for step in route.steps
+               if step.order_id}
+    assert carrier["HEAVY"] == "LIFT", (
+        "only LIFT has the tail lift, and it is twenty hours of driving away. "
+        "A cheaper plan that puts HEAVY on NEAR is one the verifier rejects "
+        "and the search should never have built")
+
+
+def test_the_search_will_not_send_a_vehicle_to_a_site_it_may_not_enter():  # FR-11
+    """Site access is the same shape of constraint as a skill: a property of
+    the (vehicle, place) pair, decided before any cost is computed.
+
+    The small van is parked ten hours away, so the artic is the cheap answer
+    everywhere. The bridge does not care.
+    """
+    from vrp.solve.pyvrp_adapter import solve
+
+    problem = _two_depot_instance(
+        (an_order("BRIDGE", "C1"), an_order("OPEN", "C2")),
+        (a_van("ARTIC", gross_weight_kg=18_000),
+         a_van("SMALL", gross_weight_kg=3_000,
+               start_location_id="FAR", end_location_id="FAR")))
+    problem = Problem(
+        id=problem.id,
+        locations=tuple(
+            Location(id=loc.id, lat=loc.lat, lon=loc.lon,
+                     matrix_index=loc.matrix_index,
+                     max_vehicle_kg=3_500 if loc.id == "C1" else None)
+            for loc in problem.locations),
+        orders=problem.orders, vehicles=problem.vehicles, matrix=problem.matrix)
+
+    solution = solve(problem, iterations=600, seed=0)
+
+    assert verify(problem, solution).ok, verify(problem, solution).violations
+    carrier = {step.order_id: route.vehicle_id
+               for route in solution.routes for step in route.steps
+               if step.order_id}
+    assert carrier["BRIDGE"] == "SMALL", (
+        "C1 takes three and a half tonnes and the artic is eighteen; a cheaper "
+        "plan is still one nobody can drive over the bridge")
+
+
+def test_eligibility_that_a_per_place_encoding_cannot_state_is_refused():
+    """Profiles restrict places, and two orders may share one.
+
+    Where they need different qualifications, barring the place bars work the
+    vehicle was entitled to do and permitting it permits work it was not.
+    Neither is the instance the caller described.
+    """
+    import pytest
+
+    from vrp.solve.pyvrp_adapter import solve
+
+    problem = instance(
+        (an_order("A", "C1", required_skills=frozenset({"TAIL_LIFT"})),
+         an_order("B", "C1")),
+        (a_van("V1"),))
+
+    with pytest.raises(NotImplementedError, match="different skills"):
+        solve(problem, iterations=100, seed=0)

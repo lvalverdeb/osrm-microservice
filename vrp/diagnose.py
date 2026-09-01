@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vrp.hos.rules import rules_for
-from vrp.model import Order, Problem, Vehicle
+from vrp.model import Order, Problem, Vehicle, may_enter
 
 # §6.5's closed vocabulary. Emitting anything outside it gives consumers a
 # string they cannot branch on.
@@ -83,7 +83,7 @@ def _eligible(problem: Problem, order: Order) -> list[Vehicle]:
     fleet = [v for v in problem.vehicles
              if order.required_skills <= v.skills
              and v.id not in forbidden
-             and _may_enter(v, site)]
+             and may_enter(v, site)]
     for lock in problem.locks:
         if lock.order_id != order.id:
             continue
@@ -123,19 +123,10 @@ def _why_none_eligible(problem: Problem, order: Order) -> str:
         return (f"{site.id} admits {sorted(site.access_classes)}; "
                 f"no vehicle is of that class")
     if site.max_vehicle_kg is not None and not any(
-            _may_enter(v, site) for v in everyone):
+            may_enter(v, site) for v in everyone):
         return (f"{site.id} takes at most {site.max_vehicle_kg} kg; "
                 f"no vehicle is light enough")
     return "no vehicle qualifies"
-
-
-def _may_enter(vehicle: Vehicle, site) -> bool:
-    """FR-11. Empty `access_classes` means unrestricted, not "admits nothing"."""
-    if site.access_classes and vehicle.access_class not in site.access_classes:
-        return False
-    return not (site.max_vehicle_kg is not None
-                and vehicle.gross_weight_kg is not None
-                and vehicle.gross_weight_kg > site.max_vehicle_kg)
 
 
 def _pinned(problem: Problem, order: Order) -> bool:
