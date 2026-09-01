@@ -10,7 +10,12 @@ import re
 import sys
 from collections import Counter, OrderedDict
 
-VARIANTS = {"TSP","CVRP","VRPTW","MDHVRPTW","PDPTW","DARP","IRP","CARP","LRP"}
+# `PATHOLOGICAL` is not a routing variant. It marks the adversarial instances of
+# §11, which are entries so that queries and coverage gates can see them, and are
+# kept out of the §2 variant audit because "is CVRP coverage adequate" is not a
+# question their count answers. Filter on it to get the operational set.
+VARIANTS = {"TSP","CVRP","VRPTW","MDHVRPTW","PDPTW","DARP","IRP","CARP","LRP",
+            "PATHOLOGICAL"}
 
 # Controlled vocabulary. The bracket tag in the authored markdown is free text;
 # these maps pin it to the closed set above so the extract is filterable.
@@ -74,7 +79,11 @@ def parse(src):
                               body, re.MULTILINE | re.DOTALL):
             fields[fm.group(1)] = " ".join(fm.group(2).split())
         variant, tags = normalise_tags(m.group(1), m.group(4))
-        reqs = sorted(set(re.findall(r'FR-(?:P?\d+)', fields.get("Exercises", ""))))
+        # The lookbehind is load-bearing: without it `NFR-04` matches as `FR-04`
+        # and an entry citing a non-functional requirement silently acquires a
+        # functional one it never mentioned.
+        reqs = sorted(set(re.findall(r'(?<![A-Za-z])FR-(?:P?\d+)',
+                                     fields.get("Exercises", ""))))
         records.append(OrderedDict(
             id=m.group(1),
             name=m.group(2).strip(),
@@ -209,11 +218,13 @@ def gen_coverage(records):
         status = "adequate" if len(rs) >= 10 else (
             "deliberately partial" if v in ("IRP", "CARP", "LRP") else "thin")
         rows.append(f"| **{v}** | {prim[v]} | {t['P0']} / {t['P1']} / {t['P2']} | {status} |")
-    rows.append("| *(adversarial, §11)* | 15 | — | n/a |")
+    adversarial = [r for r in records if r["variant"] == "PATHOLOGICAL"]
+    operational = len(records) - len(adversarial)
+    rows.append(f"| *(adversarial, §11)* | {len(adversarial)} | — | n/a |")
     rows.append("")
-    rows.append(f"Total scenarios: **{len(records)} operational + 15 adversarial = "
-                f"{len(records) + 15}**. Counts in this table are generated from the entries "
-                f"by `build_catalogue.py`; do not edit by hand.")
+    rows.append(f"Total scenarios: **{operational} operational + {len(adversarial)} "
+                f"adversarial = {len(records)}**. Counts in this table are generated from "
+                f"the entries by `build_catalogue.py`; do not edit by hand.")
     rows.append("")
     return "\n".join(rows)
 
@@ -223,7 +234,8 @@ def gen_variant_index(records):
     by = defaultdict(list)
     for r in records:
         by[r["variant"]].append(r["id"].replace("UC-", ""))
-    order = ["TSP", "CVRP", "VRPTW", "MDHVRPTW", "PDPTW", "DARP", "IRP", "CARP", "LRP"]
+    order = ["TSP", "CVRP", "VRPTW", "MDHVRPTW", "PDPTW", "DARP", "IRP", "CARP", "LRP",
+             "PATHOLOGICAL"]
     rows = ["| Variant | Scenario ids |", "|---|---|"]
     for v in order:
         if v in by:
@@ -245,6 +257,7 @@ def gen_front_matter(records):
     from collections import Counter
     c = Counter(r["variant"] for r in records)
     t = Counter(r["tier"] for r in records)
+    adversarial = c["PATHOLOGICAL"]
     return f"""---
 document_id: CAT-VRP-003
 title: Real-World Problem Catalogue for Vehicle Routing
@@ -267,8 +280,8 @@ entry_schema:
   breaks: string
   status: enum [MODELLED, PARTIALLY_MODELLED, NOT_MODELLED]
 counts:
-  operational_scenarios: {len(records)}
-  adversarial_instances: 15
+  operational_scenarios: {len(records) - adversarial}
+  adversarial_instances: {adversarial}
   by_variant: {{{', '.join(f'{k}: {v}' for k, v in sorted(c.items()))}}}
   by_tier: {{P0: {t['P0']}, P1: {t['P1']}, P2: {t['P2']}}}
 ---

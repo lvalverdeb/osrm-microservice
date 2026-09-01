@@ -1676,25 +1676,131 @@ Delivery-office round boundaries drawn on a street network.
 ## 11. Adversarial and pathological instances
 
 Not customer scenarios. These break implementations, and each has caused a production incident
-somewhere.
+somewhere. They carry the variant `PATHOLOGICAL` so they can be selected as a set, and tier `P0`
+because each states behaviour that must be right at v1. They are tiny by construction: §13 puts
+them in the fast tier, run on every commit.
 
-| ID | Instance | Required behaviour |
-|---|---|---|
-| `UC-060` | Order exceeding every vehicle's capacity | `CAPACITY_EXCEEDED` at pre-flight, not infeasible after fifteen minutes |
-| `UC-061` | Geocode on an island or pedestrian precinct | Explicit unreachable arc, never a large finite distance |
-| `UC-062` | Zero-width and inverted time windows | Zero-width is feasible-with-no-slack; inverted is a validation error. Never conflated |
-| `UC-063` | Route crossing midnight; shift crossing DST | Break timing and shift-end checks remain correct |
-| `UC-064` | Driver arriving with hours already consumed | Respects the remaining legal envelope |
-| `UC-065` | Every order in the same one-hour window | Fleet size follows window overlap; the window is never quietly relaxed |
-| `UC-066` | Totals fit, peak load does not | Rejected. The canonical capacity bug |
-| `UC-067` | Mutually incompatible but individually feasible orders | Route-level predicate, not pairwise afterthought |
-| `UC-068` | Contradictory operator locks | Minimal conflicting lock set returned; never a silent drop |
-| `UC-069` | Two hundred orders at one address | Zero-distance arcs and neighbourhood lists degrade gracefully |
-| `UC-070` | Single order, single vehicle | Milliseconds, correct trivial plan. The fastest smoke test |
-| `UC-071` | Zero available vehicles | All unassigned with `FLEET_EXHAUSTED`; `FEASIBLE` with an empty plan, not a crash |
-| `UC-072` | Matrix provider timeout mid-build | Cache fallback, `DEGRADED` label, never silent haversine |
-| `UC-073` | Antimeridian and high-latitude coordinates | No computation assumes a Euclidean plane |
-| `UC-074` | Instance at the decomposition threshold | Both code paths produce comparable objectives on the same instance |
+**`UC-060` Order exceeding every vehicle's capacity — P0** `[PATHOLOGICAL]`
+
+A single order whose quantity is larger than the capacity of every vehicle in the fleet, submitted alongside orders that are perfectly routable.
+
+- Binds: nothing at all — no vehicle exists that could carry it
+- Exercises: FR-02, FR-07, and the pre-flight diagnosis of §6.5
+- Breaks: reporting it unassigned after a full solve. The search cannot place it, so a quarter of an hour is spent proving what one comparison against the largest vehicle settles before the solver starts, and the dispatcher is handed "infeasible" instead of `CAPACITY_EXCEEDED`
+
+**`UC-061` Geocode on an island or in a pedestrian precinct — P0** `[PATHOLOGICAL]`
+
+A stop whose coordinates snap to a part of the network the fleet cannot reach — an offshore address, a pedestrianised centre, a private estate behind a barrier.
+
+- Binds: reachability, which is settled before any cost is computed
+- Exercises: MTX-4, MTX-5
+- Breaks: returning a large finite distance. A sentinel that is merely big is a number the optimiser will trade against, so the stop is planned, dispatched, and found undeliverable by a driver standing at a locked bollard
+
+**`UC-062` Zero-width and inverted time windows — P0** `[PATHOLOGICAL]`
+
+One stop whose window opens and closes at the same instant, and another whose closing time precedes its opening time.
+
+- Binds: the difference between a window with no slack and a window that cannot exist
+- Exercises: FR-04, §6.2
+- Breaks: conflating the two. Zero-width is a legitimate appointment the plan must hit exactly; inverted is a data error the caller has to repair, and answering "infeasible" to both hides a corrupt record behind a plausible routing result
+
+**`UC-063` Route crossing midnight, shift crossing a DST boundary — P0** `[PATHOLOGICAL]`
+
+A night trunk run whose duty begins before midnight and ends after it, planned across the weekend the clocks change.
+
+- Binds: elapsed time against wall-clock time, which stop agreeing twice a year
+- Exercises: FR-15, FR-16, §6.4
+- Breaks: arithmetic on local wall-clock times. An hour that repeats or never happens moves a legally mandated break by sixty minutes, and the shift-end check passes on a duty that is really an hour longer than it reads
+
+**`UC-064` Driver arriving with hours already consumed — P0** `[PATHOLOGICAL]`
+
+A driver starts the planned day having already driven part of the daily limit, carried in from a tachograph or ELD record.
+
+- Binds: the remaining legal envelope, which is not the statutory maximum
+- Exercises: FR-15, FR-16, §6.4
+- Breaks: planning from a full clock. Every duty is built against nine hours the driver does not have, so the first break falls too late and the plan is illegal before the van leaves the yard
+
+**`UC-065` Every order in the same one-hour window — P0** `[PATHOLOGICAL]`
+
+An instance in which all orders share one narrow window, so no two can be served by the same vehicle without violating it.
+
+- Binds: window overlap, which sets the fleet size directly and on its own
+- Exercises: FR-04, FR-30
+- Breaks: widening the window to fit the fleet. The true answer is that the work needs more vehicles than exist, and a solver that quietly relaxes the constraint returns a plan every stop of which is late
+
+**`UC-066` Totals fit but peak load does not — P0** `[PATHOLOGICAL]`
+
+A route whose summed quantities sit within capacity but whose running load exceeds it partway along, because pickups precede deliveries.
+
+- Binds: the maximum load along the route, never the total
+- Exercises: FR-02, FR-03, §6.1
+- Breaks: checking capacity against route totals. The vehicle is over capacity at a stop it is nominally emptying, which is the canonical production capacity bug and is invisible to every aggregate test
+
+**`UC-067` Mutually incompatible but individually feasible orders — P0** `[PATHOLOGICAL]`
+
+Two orders, each of which any vehicle may carry, that may not travel together — foodstuff against a hazardous class.
+
+- Binds: the composition of a route, not the eligibility of an order
+- Exercises: FR-10, §6.5
+- Breaks: testing compatibility per order at assignment time. Each passes alone and the pair is illegal only once both are aboard, so a per-order filter admits the combination and the violation surfaces in the verifier at the end rather than in the search
+- Status: PARTIALLY_MODELLED — the verifier and pre-flight both enforce INV-10, but the search does not: `incompatible_with` reaches neither the PyVRP adapter nor the local search, so an illegal pair is rejected after the plan is built rather than never built
+
+**`UC-068` Contradictory operator locks — P0** `[PATHOLOGICAL]`
+
+A lock set that cannot be satisfied: an order pinned to a vehicle and forbidden on it, or a pinned sequence that contradicts a pinned prefix.
+
+- Binds: which locks conflict, not merely that some do
+- Exercises: FR-21, CON-7, §6.6
+- Breaks: dropping the losing lock silently. A dispatcher who pinned an order and finds it moved has no reason to trust the next plan either, so the answer is the minimal conflicting set and a refusal to guess
+
+**`UC-069` Two hundred orders at one address — P0** `[PATHOLOGICAL]`
+
+A block delivery in which hundreds of drops share a single geocode, producing a dense square of zero-distance arcs.
+
+- Binds: service time, because travel between the drops is nil
+- Exercises: FR-05, ALG-2, MTX-8
+- Breaks: ranking neighbours by distance. Two hundred candidates tie at zero, so a granular neighbourhood degenerates into an arbitrary subset and local search explores one corner of a plateau whose shape it cannot see
+
+**`UC-070` Single order, single vehicle — P0** `[PATHOLOGICAL]`
+
+The smallest thing that is still a routing problem: one depot, one vehicle, one order.
+
+- Binds: nothing whatever — it exists in order to be trivial
+- Exercises: FR-01, NFR-02
+- Breaks: taking measurable time. This is the fastest smoke test available, and a trivial instance that consumes a search budget is reporting fixed overhead that every real instance is paying too
+
+**`UC-071` Zero available vehicles — P0** `[PATHOLOGICAL]`
+
+A well-formed instance with orders and no vehicles at all, which happens on a bank-holiday roster or after a fleet feed fails.
+
+- Binds: the empty fleet, which is a legitimate state of the world
+- Exercises: FR-30, FR-36, §6.5
+- Breaks: treating an empty fleet as an error. The correct answer is a feasible plan with no routes and every order unassigned carrying `FLEET_EXHAUSTED`, because "there is nothing to dispatch today" is a result an operator can act on and a stack trace is not
+
+**`UC-072` Matrix provider timeout mid-build — P0** `[PATHOLOGICAL]`
+
+The routing engine stops responding partway through a large matrix build, leaving some pairs fetched and the remainder missing.
+
+- Binds: what is actually known about the arcs that were never retrieved
+- Exercises: MTX-10, MTX-11, NFR-04
+- Breaks: filling the gap with straight-line distance. A silent haversine substitution yields a plan that looks ordinary and is costed against a road network that does not exist, so the fallback is either visible as `DEGRADED` or the build fails
+- Status: PARTIALLY_MODELLED — a mid-build failure propagates rather than fabricating arcs, so nothing silently substitutes haversine; the cached-matrix fallback and the `DEGRADED` label required by NFR-04 and MTX-11 are not built
+
+**`UC-073` Antimeridian and high-latitude coordinates — P0** `[PATHOLOGICAL]`
+
+Stops either side of longitude 180, and stops far enough north that a degree of longitude is a small fraction of a degree of latitude.
+
+- Binds: the coordinate system itself, before any routing decision
+- Exercises: MTX-4, MTX-11
+- Breaks: subtracting coordinates. A planar difference across the antimeridian is 359 degrees rather than one, and near the poles a Euclidean tiebreak on raw degrees ranks candidates along an axis that has stopped meaning distance
+
+**`UC-074` Instance at the decomposition threshold — P0** `[PATHOLOGICAL]`
+
+An instance sized exactly where the orchestrator stops solving whole and starts decomposing, run through both paths.
+
+- Binds: agreement between two code paths on one instance
+- Exercises: NFR-01, and the decomposition orchestrator of §7.6
+- Breaks: comparing the two paths on different instances. The threshold is the one size at which both are defined, and objectives that diverge there mean the decomposition is not solving the same problem
 
 ---
 

@@ -46,6 +46,21 @@ def _require_int(value: Any, name: str) -> None:
              f"{name} must be a whole number, got {value!r}")
 
 
+def _require_set(value: Any, name: str) -> None:
+    """A set-typed field must actually be a set. `UC-067`.
+
+    These fields are consumed with set algebra -- `order.incompatible_with &
+    carried`, `required_skills - vehicle.skills` -- so a tuple that survives
+    construction raises `TypeError` inside the verifier, a long way from the
+    caller that built it. A string is rejected separately because `frozenset`
+    accepts one and silently yields its characters.
+    """
+    _require(not isinstance(value, str),
+             f"{name} must be a set of strings, not the single string {value!r}")
+    _require(isinstance(value, (set, frozenset)),
+             f"{name} must be a set, got {type(value).__name__}")
+
+
 @dataclass(frozen=True)
 class TimeWindow:
     """A window a stop may be served in. §4.1."""
@@ -189,6 +204,8 @@ class Order:
         else:
             _require((self.pickup is None) != (self.delivery is None),
                      "a JOB needs exactly one of pickup or delivery")
+        _require_set(self.required_skills, "required_skills")
+        _require_set(self.incompatible_with, "incompatible_with")
         _require(not self.incompatible_with or self.order_class,
                  "an order declaring incompatible_with must have an "
                  "order_class, or nothing can be incompatible with it in turn")
@@ -258,6 +275,7 @@ class Vehicle:
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "vehicle id must not be empty")
+        _require_set(self.skills, "skills")
         for dimension, limit in self.capacities.items():
             _require_int(limit, f"capacities[{dimension}]")
             _require(limit >= 0, f"capacities[{dimension}] must not be negative")

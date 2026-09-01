@@ -80,11 +80,40 @@ class SubProblem:
 # --------------------------------------------------------------------------
 
 def _position(problem: Problem, order_id: str) -> tuple[float, float]:
-    """A stop's coordinates, in the matrix's own units."""
+    """A stop's coordinates as `(lon, lat)` degrees."""
     order = problem.order(order_id)
     stop = order.delivery or order.pickup
     location = problem.location(stop.location_id)
     return location.lon, location.lat
+
+
+def _planar(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Project `(lon, lat)` degrees onto a local plane. `UC-073`.
+
+    Two assumptions are wrong in raw degrees and both change the answer here.
+
+    Longitude wraps: a cluster straddling the antimeridian averages to a
+    centroid on the far side of the planet, so the sweep below measures angles
+    from a point 180 degrees away and cuts the instance by which side of the
+    dateline a stop fell on rather than by geography. Longitudes are unwrapped
+    around the first point, so 179.95 and -179.95 become neighbours 0.1 apart.
+
+    And a degree of longitude is not a degree of distance: it shrinks with
+    `cos(latitude)`, to half by 60 degrees north. Without the scaling a sweep
+    over a Nordic depot produces wedges stretched east-west, which is not what
+    the demand cut below assumes it is cutting.
+
+    A local plane is enough. Sub-problem membership does not need geodesics --
+    real travel comes from the matrix, and this only has to keep neighbours
+    adjacent.
+    """
+    if not points:
+        return []
+    reference_lon = points[0][0]
+    mean_lat = sum(lat for _, lat in points) / len(points)
+    scale = math.cos(math.radians(mean_lat))
+    return [(((lon - reference_lon + 180.0) % 360.0 - 180.0) * scale, lat)
+            for lon, lat in points]
 
 
 def _window_key(problem: Problem, order_id: str) -> int:
@@ -110,12 +139,12 @@ def _sweep(problem: Problem, order_ids: list[str]) -> list[str]:
     demand-balanced cut below stay spatially coherent: cutting a sweep produces
     wedges, cutting an arbitrary order produces confetti.
     """
-    points = [_position(problem, order_id) for order_id in order_ids]
+    points = _planar([_position(problem, order_id) for order_id in order_ids])
     cx = sum(x for x, _ in points) / len(points)
     cy = sum(y for _, y in points) / len(points)
-    return sorted(order_ids,
-                  key=lambda o: (math.atan2(_position(problem, o)[1] - cy,
-                                            _position(problem, o)[0] - cx), o))
+    angles = {order_id: math.atan2(y - cy, x - cx)
+              for order_id, (x, y) in zip(order_ids, points)}
+    return sorted(order_ids, key=lambda o: (angles[o], o))
 
 
 def _cut_by_demand(problem: Problem, ordered: list[str],

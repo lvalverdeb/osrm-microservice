@@ -526,8 +526,31 @@ def _pyvrp_version() -> str:
         return "unknown"
 
 
+def _nothing_to_dispatch(problem: Problem, solver: dict) -> Solution:
+    """The empty fleet, answered rather than raised. `UC-071`.
+
+    A bank-holiday roster or a failed fleet feed produces a well-formed problem
+    with no vehicles in it. That is a state of the world, not a malformed
+    request: the answer is a feasible plan with no routes and every order
+    unassigned with a reason an operator can act on. Compiling it instead took
+    `max()` over an empty fleet and raised `ValueError`, which reaches a
+    dispatcher as a 500 and says nothing about the roster.
+    """
+    return Solution(
+        problem_id=problem.id, routes=(),
+        unassigned=tuple(
+            {"order_id": order.id, "reason_code": "FLEET_EXHAUSTED",
+             "explanation": "no vehicles are available in this planning run"}
+            for order in problem.orders),
+        objective_breakdown={}, status="FEASIBLE", solver=solver or None)
+
+
 def solve(problem: Problem, iterations: int = 500, seed: int = 0) -> Solution:
     """Compile, solve, and map back. Deterministic for a given seed (CON-4)."""
+    record = {"solver": f"pyvrp:{_pyvrp_version()}", "seed": seed,
+              "iterations": iterations, "matrix_version": problem.matrix.version}
+    if not problem.vehicles:
+        return _nothing_to_dispatch(problem, record)
     compiled = compile_problem(problem)
     result = compiled.model.solve(stop=MaxIterations(iterations), seed=seed,
                                   display=False)
@@ -535,6 +558,4 @@ def solve(problem: Problem, iterations: int = 500, seed: int = 0) -> Solution:
                         feasible=result.is_feasible(),
                         # CON-4's replay record: everything needed to reproduce
                         # this exact plan, written down rather than remembered.
-                        solver={"solver": f"pyvrp:{_pyvrp_version()}",
-                                "seed": seed, "iterations": iterations,
-                                "matrix_version": problem.matrix.version})
+                        solver=record)
