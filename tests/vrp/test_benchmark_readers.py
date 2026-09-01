@@ -32,16 +32,27 @@ from vrp.verify import verify
 
 INSTANCES = Path("benchmarks/instances")
 ALL_FILES = sorted(p for p in INSTANCES.glob("*")
-                   if p.suffix in (".vrp", ".txt"))
+                   if p.suffix in (".vrp", ".txt", ".tsp"))
 
 pytestmark = pytest.mark.skipif(
     not ALL_FILES, reason="benchmark instances not present")
 
 
 @pytest.mark.parametrize("path", ALL_FILES, ids=lambda p: p.stem)
-def test_every_shipped_instance_reads(path: Path):
-    """All of them, so a reader tuned to one dialect cannot pass."""
-    benchmark = read_benchmark(path)
+def test_every_shipped_instance_reads_or_is_refused_by_name(path: Path):
+    """All of them, so a reader tuned to one dialect cannot pass.
+
+    "Reads" is not the only correct outcome. An instance using a feature this
+    mapping has nowhere to put must be refused *and say which feature* -- what
+    is forbidden is the third case, where the section is dropped and the file
+    maps cleanly onto a different problem.
+    """
+    try:
+        benchmark = read_benchmark(path)
+    except NotImplementedError as refusal:
+        assert len(str(refusal)) > 60, (
+            f"{path.name} was refused without saying enough to act on")
+        return
 
     assert isinstance(benchmark, Benchmark)
     assert benchmark.problem.orders, "an instance with no orders is not one"
@@ -63,7 +74,15 @@ def test_the_matrix_is_consistent_with_the_coordinates(path: Path):
     `Location`s: benchmark points are not geographic and are deliberately not
     stored as latitudes.
     """
-    benchmark = read_benchmark(path)
+    import vrplib
+    if str(vrplib.read_instance(str(path)).get("edge_weight_type")) != "EUC_2D":
+        pytest.skip("arc costs are stated explicitly; any coordinates beside "
+                    "them are decorative and need not agree with them")
+
+    try:
+        benchmark = read_benchmark(path)
+    except NotImplementedError:
+        pytest.skip("instance is refused by the mapping; see the sweep above")
     matrix = benchmark.problem.matrix
     points = benchmark.coordinates
     if not points:
@@ -162,3 +181,99 @@ def test_the_gap_calculation_is_the_one_section_11_3_reports():
     assert gap_percent(final := 386, 375) == pytest.approx((final - 375) / 375 * 100)
     with pytest.raises(ValueError, match="positive"):
         gap_percent(100, 0)
+
+
+# --------------------------------------------------------------------------
+# The variants §13.3 asks for an anchor apiece — T-06's remainder
+# --------------------------------------------------------------------------
+
+def test_a_tsp_instance_reads_as_one_tour_over_every_city():
+    """`CAT-VRP-003` §13.3 wants each variant section related to a public set,
+    and §5 (TSP) had no anchor: the catalogue's largest new section in v2.0 was
+    being measured against nothing.
+
+    A TSPLIB file declares no capacity and no demands, which is not a defect in
+    the file. The reader has to carry that through rather than inventing a
+    limit nobody stated.
+    """
+    benchmark = read_benchmark(INSTANCES / "pr107.tsp")
+
+    assert benchmark.kind == "TSP"
+    assert len(benchmark.problem.orders) == 106, "107 cities, one of them the start"
+    assert benchmark.vehicles_available == 1
+    assert benchmark.best_known is None, (
+        "pr107's optimum is famous and is not in the file; §11.3's rule is that "
+        "it is read or it is absent, never transcribed")
+    demanded = {q for order in benchmark.problem.orders
+                for q in order.quantities.values()}
+    assert demanded == {0}, "a TSP city demands nothing"
+
+
+def test_a_multi_depot_instance_keeps_every_depot_a_depot():
+    """The MDHVRPTW anchor. 29 catalogue scenarios are multi-depot, and the
+    reader turned every depot but the first into a customer with no demand --
+    an instance one stop larger than the one on disk, with a route starting in
+    the wrong place."""
+    benchmark = read_benchmark(INSTANCES / "OkSmallMultipleDepots.txt")
+    problem = benchmark.problem
+
+    depots = {vehicle.start_location_id for vehicle in problem.vehicles}
+    assert len(depots) == 2, f"the file declares two depots; got {sorted(depots)}"
+    assert len(problem.orders) == 3, "three customers, and two depots that are not"
+    assert {v.start_location_id for v in problem.vehicles} == \
+           {v.end_location_id for v in problem.vehicles}
+
+    # VEHICLES_DEPOT_SECTION says which vehicle belongs where: 1 and 2 at the
+    # first depot, 3 at the second.
+    homes = [v.start_location_id for v in problem.vehicles]
+    assert homes[0] == homes[1] != homes[2]
+
+
+def test_a_site_dependent_instance_is_refused_by_name():
+    """PR01 is site-dependent: `VEHICLES_ALLOWED_CLIENTS_SECTION` says which
+    vehicle may serve which customer. Reading it and dropping that section
+    would produce a plan that looks fine and answers a different question, so
+    the mapping refuses and says which feature it refused."""
+    with pytest.raises(NotImplementedError, match="allowed clients|site-dependent"):
+        read_benchmark(INSTANCES / "PR01.vrp")
+
+
+def test_the_tsp_anchor_is_solved_and_verified_as_one_tour():
+    """§13.3: "Each variant section contributes at least one benchmark-
+    comparable fixture so public benchmark performance and production
+    performance can be related." §5's sixteen TSP scenarios had none.
+
+    The optimum is not asserted here. `best_known` is None because pr107 does
+    not state it, and asserting a number this file never carried would be the
+    transcription §11.3 forbids -- see benchmarks/instances/README.md for the
+    measured value and where the published one comes from.
+    """
+    from vrp.solve.pyvrp_adapter import solve
+
+    benchmark = read_benchmark(INSTANCES / "pr107.tsp")
+    solution = solve(benchmark.problem, iterations=2_000, seed=0)
+
+    assert len([r for r in solution.routes
+                if any(s.order_id for s in r.steps)]) == 1, "a TSP is one tour"
+    visited = {s.order_id for r in solution.routes for s in r.steps if s.order_id}
+    assert visited == {o.id for o in benchmark.problem.orders}
+    assert verify(benchmark.problem, solution).ok
+
+
+def test_the_multi_depot_anchor_starts_each_vehicle_at_its_own_depot():
+    """The MDHVRPTW anchor solved rather than merely parsed: a reader that
+    produces the right shape and a solver that ignores it would still leave
+    29 catalogue scenarios unevidenced."""
+    from vrp.solve.pyvrp_adapter import solve
+
+    benchmark = read_benchmark(INSTANCES / "OkSmallMultipleDepots.txt")
+    problem = benchmark.problem
+    solution = solve(problem, iterations=2_000, seed=0)
+
+    assert verify(problem, solution).ok
+    for route in solution.routes:
+        if not route.steps:
+            continue
+        home = problem.vehicle(route.vehicle_id).start_location_id
+        assert route.steps[0].location_id == home
+        assert route.steps[-1].location_id == home

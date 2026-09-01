@@ -242,7 +242,7 @@ default run.
 
 ---
 
-## 6. Phase 4 — one benchmark-comparable fixture per variant (§13.3)
+## 6. Phase 4 — one benchmark-comparable fixture per variant (§13.3) — **shipped**
 
 *"so public benchmark performance and production performance can be related."*
 
@@ -260,6 +260,33 @@ the catalogue's four:
 Both go through `vrp/benchmarks.py`'s existing mapping and the `T-16` gate. Respect
 §11.3's objective-convention rule: comparing our objective to a published BKS
 under a different convention is a reporting defect, not a result.
+
+**Shipped**, and the shape differed from the sketch in two ways.
+
+TSPLIB needed no reader work at all — `pr107.tsp` already parsed, and solves to
+**44,303**, which is TSPLIB's published optimum for it. That number lives in
+`benchmarks/instances/README.md` as prose with its source and deliberately not
+in code: the file does not state an optimum, so `read_benchmark` reports
+`best_known=None` and a test pins that. A registry of hand-typed best-known
+values is a registry of typos.
+
+Cordeau proper is too large to vendor, and PyVRP's MIT-licensed copy of `PR01`
+turns out to be site-dependent rather than multi-depot. So the MDHVRPTW anchor
+is `OkSmallMultipleDepots.txt`, and reading it found a real defect: the mapping
+took `raw["depot"][0]` and made **every other depot a customer** — demand zero,
+so nothing complained, and the instance silently grew a stop while its vehicles
+all started in the wrong place. Twenty-nine catalogue scenarios are multi-depot
+and none of them would have caught it.
+
+`PR01` is vendored anyway, to be refused. `read_benchmark` now raises naming
+`VEHICLES_ALLOWED_CLIENTS_SECTION` rather than dropping it, and the sweep over
+shipped instances asserts "reads, or is refused with a reason long enough to act
+on" — because an instance that parses cleanly into a *different* problem is
+worse than one that will not parse.
+
+Also fixed: per-vehicle `CAPACITY_SECTION` and `VEHICLES_MAX_DURATION_SECTION`
+raised a numpy `TypeError` from inside `int()`, naming neither the file nor the
+field.
 
 ---
 

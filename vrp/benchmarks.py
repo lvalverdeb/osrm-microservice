@@ -121,21 +121,33 @@ def read_benchmark(path: str | Path, *, vehicles: int | None = None) -> Benchmar
             f"{path.name} gives no edge weights; only explicit or EUC_2D "
             f"matrices are mapped, not geographic or lower-triangular forms")
 
+    if "vehicles_allowed_clients" in raw:
+        raise NotImplementedError(
+            f"{path.name} is site-dependent: VEHICLES_ALLOWED_CLIENTS_SECTION "
+            f"says which vehicle may serve which customer, and this mapping "
+            f"has nowhere to put it. Reading it and dropping the section would "
+            f"produce a plan that looks fine and answers a different problem")
+
     matrix_values = [[round(float(cell)) for cell in row] for row in raw["edge_weight"]]
     size = len(matrix_values)
-    depot_index = int(raw["depot"][0]) if "depot" in raw else 0
+    # Every depot the file declares, not merely the first. A Cordeau-style
+    # multi-depot instance lists several, and taking one made the rest
+    # customers -- demand zero, so nothing complained, and the instance
+    # silently grew a stop while its vehicles all started in the wrong place.
+    depot_indices = ([int(i) for i in raw["depot"]] if "depot" in raw else [0])
+    depot_id_of = {index: ("DEPOT" if rank == 0 else f"DEPOT{rank + 1}")
+                   for rank, index in enumerate(depot_indices)}
 
     coordinates = raw.get("node_coord")
     locations = tuple(
-        Location(id="DEPOT" if i == depot_index else f"C{i}",
-                 lat=0.0, lon=0.0, matrix_index=i)
+        Location(id=depot_id_of.get(i, f"C{i}"), lat=0.0, lon=0.0, matrix_index=i)
         for i in range(size)
     )
     planar = tuple((float(x), float(y)) for x, y in coordinates) \
         if coordinates is not None else ()
 
     windows = raw.get("time_window")
-    horizon = (int(windows[depot_index][1]) if windows is not None
+    horizon = (int(windows[depot_indices[0]][1]) if windows is not None
                else UNBOUNDED_DAY)
     shift = TimeWindow(start=0, end=horizon)
 
@@ -144,7 +156,7 @@ def read_benchmark(path: str | Path, *, vehicles: int | None = None) -> Benchmar
 
     orders = []
     for i in range(size):
-        if i == depot_index:
+        if i in depot_id_of:
             continue
         window = (TimeWindow(start=int(windows[i][0]), end=int(windows[i][1]))
                   if windows is not None else shift)
@@ -157,10 +169,16 @@ def read_benchmark(path: str | Path, *, vehicles: int | None = None) -> Benchmar
                               service_fixed=per_stop)))
 
     fleet_size = vehicles or int(raw.get("vehicles", 0)) or len(orders)
-    capacity = int(raw.get("capacity", 0))
     fleet = tuple(
-        Vehicle(id=f"V{n}", capacities={"demand": capacity}, shift=shift,
-                start_location_id="DEPOT", end_location_id="DEPOT")
+        Vehicle(id=f"V{n}",
+                capacities={"demand": _per_vehicle(raw, "capacity", n - 1, 0)},
+                shift=shift,
+                max_distance=None,
+                max_duration=_per_vehicle(raw, "vehicles_max_duration", n - 1,
+                                          None),
+                start_location_id=(home := _home_of(raw, depot_indices,
+                                                    depot_id_of, n - 1)),
+                end_location_id=home)
         for n in range(1, fleet_size + 1)
     )
 
@@ -185,6 +203,41 @@ def read_benchmark(path: str | Path, *, vehicles: int | None = None) -> Benchmar
         vehicles_available=fleet_size,
         coordinates=planar,
     )
+
+
+def _per_vehicle(raw: dict, key: str, index: int, default):
+    """A field a file may state once for the fleet or once per vehicle.
+
+    VRPLIB writes `CAPACITY: 10` for a homogeneous fleet and a
+    `CAPACITY_SECTION` of one row per vehicle for a heterogeneous one. Reading
+    the second as the first raised a numpy TypeError from inside `int()`,
+    which named neither the file nor the field.
+    """
+    value = raw.get(key)
+    if value is None:
+        return default
+    if hasattr(value, "__len__"):
+        return int(value[index])
+    return int(value)
+
+
+def _home_of(raw: dict, depot_indices: list[int], depot_id_of: dict[int, str],
+             vehicle: int) -> str:
+    """Which depot a vehicle starts and ends at.
+
+    `VEHICLES_DEPOT_SECTION` names one per vehicle, in the file's own 1-based
+    node numbering. Absent, every vehicle works from the first depot, which is
+    what a single-depot instance means.
+    """
+    assigned = raw.get("vehicles_depot")
+    if assigned is None:
+        return depot_id_of[depot_indices[0]]
+    node = int(assigned[vehicle]) - 1
+    if node not in depot_id_of:
+        raise NotImplementedError(
+            f"VEHICLES_DEPOT_SECTION sends vehicle {vehicle + 1} to node "
+            f"{node + 1}, which DEPOT_SECTION does not list as a depot")
+    return depot_id_of[node]
 
 
 def gap_percent(cost: int, best_known: int) -> float:
