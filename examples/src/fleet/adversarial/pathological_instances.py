@@ -62,6 +62,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from vrp.bench import fixtures
+from vrp.bench.fixtures import FIXTURES
 from vrp.decompose import partition
 from vrp.diagnose import preflight
 from vrp.hos import EU_561, DriverState
@@ -69,61 +71,14 @@ from vrp.hos.schedule import schedule_route
 from vrp.locks import minimal_conflict
 from vrp.model import (
     UNREACHABLE,
-    Location,
-    Lock,
-    Order,
-    Problem,
-    StopSpec,
     TimeWindow,
-    TravelMatrix,
     ValidationError,
-    Vehicle,
 )
 from vrp.solve.pyvrp_adapter import solve
 from vrp.verify import verify
 
-DAY = TimeWindow(start=0, end=12 * 3600)
-HOUR = 3600
-
-
-# --------------------------------------------------------------------------
-# Builders. Deliberately minimal: the instance should fit on the screen beside
-# the answer it produces.
-# --------------------------------------------------------------------------
-
-def grid(size: int, *, leg: int = 600, cut: set = frozenset()) -> TravelMatrix:
-    rows = []
-    for i in range(size):
-        rows.append(tuple(
-            UNREACHABLE if (i, j) in cut or (j, i) in cut
-            else (0 if i == j else abs(i - j) * leg)
-            for j in range(size)))
-    return TravelMatrix(version="adv", durations=tuple(rows), distances=tuple(rows))
-
-
-def sites(count: int) -> tuple[Location, ...]:
-    return tuple(Location(id="D" if i == 0 else f"C{i}",
-                          lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                 for i in range(count))
-
-
-def drop(order_id: str, stop: str, *, windows=(DAY,), service=60, **qty) -> Order:
-    return Order(id=order_id, kind="JOB", quantities=qty or {"kg": 1},
-                 delivery=StopSpec(location_id=stop, time_windows=windows,
-                                   service_fixed=service))
-
-
-def van(vehicle_id="V1", **kwargs) -> Vehicle:
-    base = {"capacities": {"kg": 100}, "shift": DAY,
-            "start_location_id": "D", "end_location_id": "D"}
-    return Vehicle(id=vehicle_id, **{**base, **kwargs})
-
-
-def instance(orders, vehicles, *, matrix=None, locks=()) -> Problem:
-    locations = sites(len(orders) + 1)
-    return Problem(id="adv", locations=locations, orders=tuple(orders),
-                   vehicles=tuple(vehicles), locks=tuple(locks),
-                   matrix=matrix or grid(len(locations)))
+DAY = fixtures.DAY
+HOUR = fixtures.HOUR
 
 
 def served(solution) -> set[str]:
@@ -151,16 +106,14 @@ def refused_before_the_search() -> None:
           "knows only that it failed.")
 
     case("UC-060", "an order no vehicle can lift")
-    problem = instance((drop("PALLET", "C1", kg=10_000), drop("PARCEL", "C2", kg=1)),
-                       (van(capacities={"kg": 100}),))
+    problem = FIXTURES["UC-060"]()
     findings = preflight(problem)
     print(f"      PALLET  -> {findings['PALLET'].code}")
     print(f"      PARCEL  -> {'no finding' if 'PARCEL' not in findings else '?'}"
           "   (a routable order is not swept up with it)")
 
     case("UC-061", "a stop on an island, or behind a bollard")
-    problem = instance((drop("ISLAND", "C1"),), (van(),),
-                       matrix=grid(2, cut={(0, 1)}))
+    problem = FIXTURES["UC-061"]()
     print(f"      unreachable arc sentinel = {UNREACHABLE}, which is outside "
           "any real cost")
     print(f"      ISLAND  -> {preflight(problem)['ISLAND'].code}")
@@ -169,7 +122,7 @@ def refused_before_the_search() -> None:
           "locked.")
 
     case("UC-071", "a fleet that does not exist")
-    problem = instance((drop("O1", "C1"), drop("O2", "C2")), ())
+    problem = FIXTURES["UC-071"]()
     solution = solve(problem, iterations=100, seed=0)
     codes = {row["reason_code"] for row in solution.unassigned}
     print(f"      status={solution.status}  routes={len(solution.routes)}  "
@@ -186,8 +139,7 @@ def broken_against_tight() -> None:
     heading("2.", "Broken data against merely tight data")
 
     case("UC-062", "zero-width and inverted windows are not the same thing")
-    noon = TimeWindow(start=6 * HOUR, end=6 * HOUR)
-    problem = instance((drop("APPT", "C1", windows=(noon,)),), (van(),))
+    problem = FIXTURES["UC-062"]()
     solution = solve(problem, iterations=200, seed=0)
     print(f"      zero-width [06:00, 06:00] -> served={sorted(served(solution))}, "
           f"verified={verify(problem, solution).ok}")
@@ -199,9 +151,7 @@ def broken_against_tight() -> None:
     print("      go and fix. Answering \"infeasible\" to both loses that.")
 
     case("UC-068", "locks that contradict each other")
-    locks = (Lock(kind="PIN_ORDER_TO_VEHICLE", order_id="O1", vehicle_id="V1"),
-             Lock(kind="FORBID_ORDER_ON_VEHICLE", order_id="O1", vehicle_id="V1"))
-    problem = instance((drop("O1", "C1"),), (van("V1"), van("V2")), locks=locks)
+    problem = FIXTURES["UC-068"]()
     conflict = minimal_conflict(problem)
     print("      two vehicles, so neither lock conflicts alone; the pair does")
     for lock in conflict:
@@ -218,13 +168,7 @@ def the_clock() -> None:
     heading("3.", "The clock")
 
     case("UC-063", "a duty that runs past midnight")
-    shift = TimeWindow(start=20 * HOUR, end=30 * HOUR)
-    evening = TimeWindow(start=20 * HOUR, end=22 * HOUR)
-    after = TimeWindow(start=25 * HOUR, end=26 * HOUR)
-    problem = Problem(id="night", locations=sites(3),
-                      orders=(drop("EVENING", "C1", windows=(evening,)),
-                              drop("SMALLHOURS", "C2", windows=(after,))),
-                      vehicles=(van(shift=shift),), matrix=grid(3))
+    problem = FIXTURES["UC-063"]()
     solution = solve(problem, iterations=300, seed=0)
     # `arrival` is when the van pulls up; `start_service` is when the window
     # lets it work. The gap is the wait, and it is the second number that has
@@ -239,13 +183,7 @@ def the_clock() -> None:
     print("      repeated or missing DST hour cannot be represented at all.")
 
     case("UC-064", "a driver who is already four hours into the limit")
-    long_day = TimeWindow(start=0, end=14 * HOUR)
-    far = TravelMatrix(version="far", durations=((0, 4 * HOUR), (4 * HOUR, 0)),
-                       distances=((0, 100_000), (100_000, 0)))
-    problem = Problem(id="hos", locations=sites(2),
-                      orders=(drop("O1", "C1", windows=(long_day,)),),
-                      vehicles=(van(shift=long_day, hos_rules="EU-561"),),
-                      matrix=far)
+    problem = FIXTURES["UC-064"]()
     for label, carried in (("rested", None),
                            ("4h already driven",
                             DriverState(drive_used=4 * HOUR, duty_used=4 * HOUR,
@@ -262,13 +200,8 @@ def the_clock() -> None:
     print("      van leaves the yard.")
 
     case("UC-065", "everything due in the same hour")
-    hour = TimeWindow(start=8 * HOUR, end=9 * HOUR)
-    orders = tuple(drop(f"O{i}", f"C{i}", windows=(hour,)) for i in (1, 2, 3))
-    spread = grid(4, leg=HOUR)
-    for label, fleet in (("one van", (van("V1"),)),
-                         ("three vans", tuple(van(f"V{i}") for i in (1, 2, 3)))):
-        problem = Problem(id=label, locations=sites(4), orders=orders,
-                          vehicles=fleet, matrix=spread)
+    for label, count in (("one van", 1), ("three vans", 3)):
+        problem = fixtures.uc065_one_hour_for_everything(vehicles=count)
         solution = solve(problem, iterations=400, seed=0)
         print(f"      {label:11s} -> status={solution.status:10s} "
               f"served={len(served(solution))}/3")
@@ -285,20 +218,11 @@ def what_the_totals_hide() -> None:
     heading("4.", "What the totals hide")
 
     case("UC-066", "a load that fits on paper and not in the van")
-    morning = TimeWindow(start=8 * HOUR, end=9 * HOUR)
-    afternoon = TimeWindow(start=14 * HOUR, end=15 * HOUR)
-    shift = TimeWindow(start=7 * HOUR, end=17 * HOUR)
-    orders = (Order(id="COLLECT", kind="JOB", quantities={"kg": 80},
-                    pickup=StopSpec(location_id="C2", time_windows=(morning,),
-                                    service_fixed=60)),
-              drop("DELIVER", "C1", windows=(afternoon,), kg=60))
     print("      capacity 100kg;  deliveries total 60kg;  pickups total 80kg")
     print("      both totals fit, and the windows force the pickup first, so a")
     print("      shared route carries 60 out and collects 80 on top: 140kg.")
-    for label, fleet in (("one van", (van(shift=shift),)),
-                         ("two vans", (van("V1", shift=shift),
-                                       van("V2", shift=shift)))):
-        problem = instance(orders, fleet)
+    for label, count in (("one van", 1), ("two vans", 2)):
+        problem = fixtures.uc066_peak_load_beyond_capacity(vehicles=count)
         solution = solve(problem, iterations=400, seed=0)
         print(f"      {label:9s} -> status={solution.status:10s} "
               f"served={len(served(solution))}/2")
@@ -306,16 +230,7 @@ def what_the_totals_hide() -> None:
     print("      a classic production bug\". The peak is the binding number.")
 
     case("UC-067", "two orders, each legal alone")
-    food = Order(id="FOOD", kind="JOB", quantities={"kg": 1},
-                 delivery=StopSpec(location_id="C1", time_windows=(DAY,),
-                                   service_fixed=60),
-                 order_class="FOODSTUFF")
-    hazard = Order(id="HAZ", kind="JOB", quantities={"kg": 1},
-                   delivery=StopSpec(location_id="C2", time_windows=(DAY,),
-                                     service_fixed=60),
-                   order_class="HAZARDOUS",
-                   incompatible_with=frozenset({"FOODSTUFF"}))
-    problem = instance((food, hazard), (van("V1"), van("V2")))
+    problem = FIXTURES["UC-067"]()
     print(f"      pre-flight: {'clean' if not preflight(problem) else 'flagged'} "
           "-- each order is servable on its own")
     solution = solve(problem, iterations=400, seed=0)
@@ -339,11 +254,7 @@ def degeneracy_and_scale() -> None:
     heading("5.", "Degeneracy and scale")
 
     case("UC-069", "two hundred drops at one door")
-    block = (Location(id="D", lat=9.9, lon=-84.0, matrix_index=0),
-             Location(id="BLOCK", lat=9.91, lon=-84.0, matrix_index=1))
-    orders = tuple(drop(f"O{i}", "BLOCK", service=30, kg=1) for i in range(200))
-    problem = Problem(id="block", locations=block, orders=orders,
-                      vehicles=(van(capacities={"kg": 1_000}),), matrix=grid(2))
+    problem = FIXTURES["UC-069"]()
     solution = solve(problem, iterations=200, seed=0)
     print(f"      served {len(served(solution))}/200, "
           f"verified={verify(problem, solution).ok}")
@@ -352,7 +263,7 @@ def degeneracy_and_scale() -> None:
     print("      time is the only thing left that varies.")
 
     case("UC-070", "the smallest thing that is still a routing problem")
-    problem = instance((drop("O1", "C1"),), (van(),))
+    problem = FIXTURES["UC-070"]()
     solution = solve(problem, iterations=1, seed=0)
     print(f"      one iteration -> "
           f"{[s.type for s in solution.routes[0].steps]}")
@@ -398,23 +309,7 @@ def _hhmm(seconds: int) -> str:
 
 
 def _ring_partition(centre_lon: float) -> list[list[int]]:
-    import math
-
-    count, lat, radius = 8, 10.0, 0.1
-    points = [(lat + radius * math.sin(2 * math.pi * k / count),
-               ((centre_lon + radius * math.cos(2 * math.pi * k / count) + 180)
-                % 360) - 180)
-              for k in range(count)]
-    locations = ((Location(id="D", lat=lat,
-                           lon=((centre_lon + 180) % 360) - 180, matrix_index=0),)
-                 + tuple(Location(id=f"C{k + 1}", lat=plat, lon=plon,
-                                  matrix_index=k + 1)
-                         for k, (plat, plon) in enumerate(points)))
-    orders = tuple(drop(f"O{k + 1}", f"C{k + 1}", kg=1) for k in range(count))
-    problem = Problem(id="ring", locations=locations, orders=orders,
-                      vehicles=tuple(van(f"V{i}", capacities={"kg": 10})
-                                     for i in (1, 2)),
-                      matrix=grid(count + 1, leg=100))
+    problem = fixtures.uc073_ring_across_the_antimeridian(centre_lon=centre_lon)
     return sorted(sorted(int(o[1:]) for o in cluster.order_ids)
                   for cluster in partition(problem, target_size=4, seed=0))
 

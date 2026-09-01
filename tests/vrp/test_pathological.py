@@ -24,6 +24,8 @@ import math
 
 import pytest
 
+from vrp.bench import fixtures
+from vrp.bench.fixtures import FIXTURES
 from vrp.decompose import solve_decomposed
 from vrp.diagnose import preflight
 from vrp.evaluator import evaluate
@@ -32,75 +34,17 @@ from vrp.hos.schedule import schedule_route
 from vrp.locks import minimal_conflict
 from vrp.model import (
     UNREACHABLE,
-    Location,
-    Lock,
     Order,
-    Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     ValidationError,
-    Vehicle,
 )
 from vrp.osrm import Snap
 from vrp.solve.pyvrp_adapter import solve
 from vrp.verify import verify
 
-DAY = TimeWindow(start=0, end=12 * 3600)
-
-
-# --------------------------------------------------------------------------
-# Builders. Tiny by construction: every instance below is a handful of stops.
-# --------------------------------------------------------------------------
-
-def grid(size: int, *, leg: int = 600, unreachable: set[tuple[int, int]] = frozenset()
-         ) -> TravelMatrix:
-    """A uniform matrix, optionally with explicit unreachable arcs (MTX-5)."""
-    rows = []
-    for i in range(size):
-        row = []
-        for j in range(size):
-            if (i, j) in unreachable or (j, i) in unreachable:
-                row.append(UNREACHABLE)
-            else:
-                row.append(0 if i == j else abs(i - j) * leg)
-        rows.append(tuple(row))
-    return TravelMatrix(version="path-v1", durations=tuple(rows),
-                        distances=tuple(rows))
-
-
-def sites(count: int, *, lat: float = 9.9, lon: float = -84.0,
-          step: float = 0.01) -> tuple[Location, ...]:
-    return tuple(Location(id="D" if i == 0 else f"C{i}",
-                          lat=lat + i * step, lon=lon, matrix_index=i)
-                 for i in range(count))
-
-
-def drop(order_id: str, stop: str, *, windows: tuple[TimeWindow, ...] = (DAY,),
-         service: int = 60, **quantities) -> Order:
-    return Order(id=order_id, kind="JOB", quantities=quantities or {"kg": 1},
-                 delivery=StopSpec(location_id=stop, time_windows=windows,
-                                   service_fixed=service))
-
-
-def collect(order_id: str, stop: str, **quantities) -> Order:
-    return Order(id=order_id, kind="JOB", quantities=quantities,
-                 pickup=StopSpec(location_id=stop, time_windows=(DAY,),
-                                 service_fixed=60))
-
-
-def van(vehicle_id: str = "V1", **kwargs) -> Vehicle:
-    defaults = {"capacities": {"kg": 100}, "shift": DAY,
-                "start_location_id": "D", "end_location_id": "D"}
-    return Vehicle(id=vehicle_id, **{**defaults, **kwargs})
-
-
-def instance(orders, vehicles, *, locations=None, matrix=None,
-             locks=()) -> Problem:
-    locations = locations or sites(len(orders) + 1)
-    return Problem(id="path", locations=locations, orders=tuple(orders),
-                   vehicles=tuple(vehicles), locks=tuple(locks),
-                   matrix=matrix or grid(len(locations)))
+DAY = fixtures.DAY
+HOUR = fixtures.HOUR
 
 
 def assignment_of(solution) -> dict[str, list[str]]:
@@ -122,13 +66,12 @@ def test_uc060_an_unliftable_order_is_named_at_preflight_not_after_a_solve():
     The search cannot place it, so a quarter of an hour goes on proving what one
     comparison against the largest vehicle settles before the solver starts.
     """
-    problem = instance((drop("BIG", "C1", kg=10_000), drop("O2", "C2", kg=1)),
-                       (van(capacities={"kg": 100}),))
+    problem = FIXTURES["UC-060"]()
 
     findings = preflight(problem)
 
-    assert findings["BIG"].code == "CAPACITY_EXCEEDED"
-    assert "O2" not in findings, "a routable order must not be swept up with it"
+    assert findings["PALLET"].code == "CAPACITY_EXCEEDED"
+    assert "PARCEL" not in findings, "a routable order must not be swept up with it"
 
 
 # --------------------------------------------------------------------------
@@ -145,8 +88,7 @@ def test_uc061_an_unreachable_stop_is_a_sentinel_not_a_large_number():
         "the sentinel must be outside the range of any real cost, or a "
         "minimising search will treat an unreachable arc as an expensive one")
 
-    problem = instance((drop("ISLAND", "C1"),), (van(),),
-                       matrix=grid(2, unreachable={(0, 1)}))
+    problem = FIXTURES["UC-061"]()
 
     assert preflight(problem)["ISLAND"].code == "TIME_WINDOW_UNREACHABLE"
 
@@ -158,8 +100,7 @@ def test_uc061_an_unreachable_stop_is_a_sentinel_not_a_large_number():
 def test_uc062_a_zero_width_window_is_an_appointment_not_an_error():
     """Breaks: conflating the two. Zero-width is a legitimate appointment the
     plan must hit exactly."""
-    noon = TimeWindow(start=6 * 3600, end=6 * 3600)
-    problem = instance((drop("APPT", "C1", windows=(noon,)),), (van(),))
+    problem = FIXTURES["UC-062"]()
 
     solution = solve(problem, iterations=200, seed=0)
 
@@ -186,23 +127,18 @@ def test_uc063_a_duty_crossing_midnight_is_measured_in_elapsed_seconds():
     missing DST hour cannot be represented. That is why this passes, and it is
     worth pinning: the first field typed as a local time re-opens the bug.
     """
-    night = TimeWindow(start=20 * 3600, end=30 * 3600)   # 20:00 to 06:00 next day
-    # The second stop is due after midnight, so the duty has to cross it: a
-    # planner that wrapped at 86,400 would find no legal arrival at all.
-    after_midnight = TimeWindow(start=25 * 3600, end=26 * 3600)
-    problem = Problem(
-        id="night", locations=sites(3),
-        orders=(drop("O1", "C1", windows=(night,)),
-                drop("O2", "C2", windows=(after_midnight,))),
-        vehicles=(van(shift=night),), matrix=grid(3))
+    problem = FIXTURES["UC-063"]()
 
     solution = solve(problem, iterations=300, seed=0)
 
-    assert served(solution) == {"O1", "O2"}
+    assert served(solution) == {"EVENING", "SMALLHOURS"}
     report = verify(problem, solution)
     assert report.ok, report.violations
-    arrivals = {s.order_id: s.arrival for s in solution.routes[0].steps if s.order_id}
-    assert arrivals["O2"] > 24 * 3600, "the stop after midnight is served after it"
+    # `arrival` is when the van pulls up; `start_service` is when the window
+    # lets it work, and it is the second that has to be allowed past 86,400.
+    service = {s.order_id: s.start_service
+               for s in solution.routes[0].steps if s.order_id}
+    assert service["SMALLHOURS"] > 24 * HOUR
 
 
 # --------------------------------------------------------------------------
@@ -215,14 +151,7 @@ def test_uc064_a_partly_spent_clock_binds_before_the_statutory_maximum():
     Every duty is built against nine hours the driver does not have, so the
     first break falls too late and the plan is illegal before the van leaves.
     """
-    long_day = TimeWindow(start=0, end=14 * 3600)
-    far = TravelMatrix(version="far",
-                       durations=((0, 4 * 3600), (4 * 3600, 0)),
-                       distances=((0, 100_000), (100_000, 0)))
-    problem = Problem(id="hos", locations=sites(2),
-                      orders=(drop("O1", "C1", windows=(long_day,)),),
-                      vehicles=(van(shift=long_day, hos_rules="EU-561"),),
-                      matrix=far)
+    problem = FIXTURES["UC-064"]()
 
     fresh = schedule_route(problem, "V1", ["O1"], EU_561)
     spent = schedule_route(problem, "V1", ["O1"], EU_561,
@@ -256,16 +185,8 @@ def test_uc065_window_overlap_sets_the_fleet_size_and_the_window_is_not_relaxed(
     solver that quietly relaxes the constraint returns a plan every stop of
     which is late.
     """
-    hour = TimeWindow(start=8 * 3600, end=9 * 3600)
-    # Three stops an hour apart from each other, all due inside the same hour.
-    far = grid(4, leg=3_600)
-    orders = tuple(drop(f"O{i}", f"C{i}", windows=(hour,)) for i in (1, 2, 3))
-
-    one_van = Problem(id="one", locations=sites(4), orders=orders,
-                      vehicles=(van("V1"),), matrix=far)
-    three_vans = Problem(id="three", locations=sites(4), orders=orders,
-                         vehicles=tuple(van(f"V{i}") for i in (1, 2, 3)),
-                         matrix=far)
+    one_van = fixtures.uc065_one_hour_for_everything(vehicles=1)
+    three_vans = fixtures.uc065_one_hour_for_everything(vehicles=3)
 
     scarce = solve(one_van, iterations=400, seed=0)
     ample = solve(three_vans, iterations=400, seed=0)
@@ -292,20 +213,11 @@ def test_uc066_a_route_within_its_totals_is_rejected_on_peak_load():
     # Deliveries total 60 and pickups total 80, both inside a 100kg van. The
     # windows force the pickup first, so a shared route carries 60 outbound and
     # collects 80 on top of it: 140 at C2, which no total ever shows.
-    morning = TimeWindow(start=8 * 3600, end=9 * 3600)
-    afternoon = TimeWindow(start=14 * 3600, end=15 * 3600)
-    shift = TimeWindow(start=7 * 3600, end=17 * 3600)
-    orders = (Order(id="PICK", kind="JOB", quantities={"kg": 80},
-                    pickup=StopSpec(location_id="C2", time_windows=(morning,),
-                                    service_fixed=60)),
-              drop("DROP", "C1", windows=(afternoon,), kg=60))
+    one = fixtures.uc066_peak_load_beyond_capacity(vehicles=1)
+    two = fixtures.uc066_peak_load_beyond_capacity(vehicles=2)
 
-    one = instance(orders, (van(capacities={"kg": 100}, shift=shift),))
-    two = instance(orders, (van("V1", capacities={"kg": 100}, shift=shift),
-                            van("V2", capacities={"kg": 100}, shift=shift)))
-
-    assert sum(o.quantities["kg"] for o in orders if o.pickup) <= 100
-    assert sum(o.quantities["kg"] for o in orders if o.delivery) <= 100
+    assert sum(o.quantities["kg"] for o in one.orders if o.pickup) <= 100
+    assert sum(o.quantities["kg"] for o in one.orders if o.delivery) <= 100
 
     shared = solve(one, iterations=400, seed=0)
     assert not (shared.status == "FEASIBLE" and len(served(shared)) == 2), (
@@ -327,16 +239,7 @@ def test_uc067_incompatibility_is_a_property_of_the_route_not_of_the_order():
 
     Each passes alone and the pair is illegal only once both are aboard.
     """
-    food = Order(id="FOOD", kind="JOB", quantities={"kg": 1},
-                 delivery=StopSpec(location_id="C1", time_windows=(DAY,),
-                                   service_fixed=60),
-                 order_class="FOODSTUFF")
-    hazard = Order(id="HAZ", kind="JOB", quantities={"kg": 1},
-                   delivery=StopSpec(location_id="C2", time_windows=(DAY,),
-                                     service_fixed=60),
-                   order_class="HAZARDOUS",
-                   incompatible_with=frozenset({"FOODSTUFF"}))
-    problem = instance((food, hazard), (van("V1"), van("V2")))
+    problem = FIXTURES["UC-067"]()
 
     assert preflight(problem) == {}, "each order is servable on its own"
 
@@ -368,16 +271,7 @@ def test_uc067_incompatibility_is_a_property_of_the_route_not_of_the_order():
 def test_uc067_the_search_itself_does_not_know_about_incompatibility():
     """Breaks: the pair is illegal only once both are aboard, so nothing that
     filters per order can prevent it — only the search can."""
-    food = Order(id="FOOD", kind="JOB", quantities={"kg": 1},
-                 delivery=StopSpec(location_id="C1", time_windows=(DAY,),
-                                   service_fixed=60),
-                 order_class="FOODSTUFF")
-    hazard = Order(id="HAZ", kind="JOB", quantities={"kg": 1},
-                   delivery=StopSpec(location_id="C2", time_windows=(DAY,),
-                                     service_fixed=60),
-                   order_class="HAZARDOUS",
-                   incompatible_with=frozenset({"FOODSTUFF"}))
-    problem = instance((food, hazard), (van("V1"), van("V2")))
+    problem = FIXTURES["UC-067"]()
 
     solution = solve(problem, iterations=400, seed=0)
 
@@ -395,12 +289,11 @@ def test_uc068_contradictory_locks_return_the_minimal_conflicting_set():
     A dispatcher who pinned an order and finds it moved has no reason to trust
     the next plan either.
     """
-    locks = (Lock(kind="PIN_ORDER_TO_VEHICLE", order_id="O1", vehicle_id="V1"),
-             Lock(kind="FORBID_ORDER_ON_VEHICLE", order_id="O1", vehicle_id="V1"))
     # Two vehicles, so neither lock is a conflict on its own: the forbid alone
     # simply sends the order to V2. Only the pair is contradictory, which is
     # what makes this a test of minimality rather than of detection.
-    problem = instance((drop("O1", "C1"),), (van("V1"), van("V2")), locks=locks)
+    problem = FIXTURES["UC-068"]()
+    locks = problem.locks
 
     conflict = minimal_conflict(problem)
 
@@ -419,11 +312,7 @@ def test_uc069_two_hundred_drops_at_one_geocode_do_not_degenerate():
     Two hundred candidates tie at zero, so a granular neighbourhood degenerates
     into an arbitrary subset and local search explores one corner of a plateau.
     """
-    block = (Location(id="D", lat=9.9, lon=-84.0, matrix_index=0),
-             Location(id="BLOCK", lat=9.91, lon=-84.0, matrix_index=1))
-    orders = tuple(drop(f"O{i}", "BLOCK", service=30, kg=1) for i in range(200))
-    problem = Problem(id="block", locations=block, orders=orders,
-                      vehicles=(van(capacities={"kg": 1_000}),), matrix=grid(2))
+    problem = FIXTURES["UC-069"]()
 
     solution = solve(problem, iterations=200, seed=0)
 
@@ -438,7 +327,7 @@ def test_uc069_two_hundred_drops_at_one_geocode_do_not_degenerate():
 def test_uc070_the_trivial_instance_is_solved_trivially():
     """Breaks: taking measurable time. A trivial instance that consumes a search
     budget is reporting fixed overhead every real instance also pays."""
-    problem = instance((drop("O1", "C1"),), (van(),))
+    problem = FIXTURES["UC-070"]()
 
     solution = solve(problem, iterations=1, seed=0)
 
@@ -458,7 +347,7 @@ def test_uc071_an_empty_fleet_is_a_result_not_a_crash():
     "There is nothing to dispatch today" is a result an operator can act on and
     a stack trace is not.
     """
-    problem = instance((drop("O1", "C1"), drop("O2", "C2")), ())
+    problem = FIXTURES["UC-071"]()
 
     solution = solve(problem, iterations=100, seed=0)
 
@@ -542,33 +431,13 @@ def test_uc073_a_spatial_partition_does_not_assume_a_euclidean_plane():
 
 
 def _ring_clusters(centre_lon: float) -> list[list[int]]:
-    """Partition a ring of eight stops, reported as their positions on it."""
+    """Partition the ring, reported as the positions its stops occupy on it."""
     from vrp.decompose import partition
 
-    count = 8
-    lat, radius = 10.0, 0.1
-    points = [(lat + radius * math.sin(2 * math.pi * k / count),
-               _wrap(centre_lon + radius * math.cos(2 * math.pi * k / count)))
-              for k in range(count)]
-    locations = ((Location(id="D", lat=lat, lon=_wrap(centre_lon),
-                           matrix_index=0),)
-                 + tuple(Location(id=f"C{k + 1}", lat=plat, lon=plon,
-                                  matrix_index=k + 1)
-                         for k, (plat, plon) in enumerate(points)))
-    orders = tuple(drop(f"O{k + 1}", f"C{k + 1}", kg=1) for k in range(count))
-    problem = Problem(id=f"ring{centre_lon:.0f}", locations=locations,
-                      orders=orders,
-                      vehicles=tuple(van(f"V{i}", capacities={"kg": 10})
-                                     for i in (1, 2)),
-                      matrix=grid(count + 1, leg=100))
-
+    problem = fixtures.uc073_ring_across_the_antimeridian(centre_lon=centre_lon)
     clusters = partition(problem, target_size=4, seed=0)
     return sorted(sorted(int(order_id[1:]) for order_id in cluster.order_ids)
                   for cluster in clusters)
-
-
-def _wrap(lon: float) -> float:
-    return (lon + 180.0) % 360.0 - 180.0
 
 
 # --------------------------------------------------------------------------
@@ -581,11 +450,7 @@ def test_uc074_both_paths_agree_at_the_size_where_they_both_apply():
     The threshold is the one size at which both are defined, and objectives that
     diverge there mean the decomposition is not solving the same problem.
     """
-    orders = tuple(drop(f"O{i}", f"C{i}", kg=5) for i in range(1, 25))
-    problem = Problem(id="threshold", locations=sites(25), orders=orders,
-                      vehicles=tuple(van(f"V{i}", capacities={"kg": 60})
-                                     for i in range(1, 5)),
-                      matrix=grid(25, leg=300))
+    problem = FIXTURES["UC-074"]()
 
     whole = solve(problem, iterations=600, seed=0)
     split = solve_decomposed(problem, target_size=8, seed=0)

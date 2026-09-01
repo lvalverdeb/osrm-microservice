@@ -125,7 +125,7 @@ tests exist; every failure is either fixed or has a written `status_note`.
 
 ---
 
-## 4. Phase 2 — the loader and the coverage gate (§13.6)
+## 4. Phase 2 — the loader and the coverage gate (§13.6) — **shipped**
 
 *"The coverage matrix is regenerated in CI from requirement tags on fixtures, so a
 requirement landing without a scenario is reported rather than passing unnoticed."*
@@ -154,6 +154,25 @@ fail and which merely report is the whole design of the gate:
 
 **Acceptance:** the gate is red until Phase 1's fixtures are registered, then green
 for the right reason; deleting a fixture or an entry turns it red.
+
+**Shipped**, and one thing landed differently from the sketch above. Assertion 1
+covers the adversarial set only; P0 operational coverage is a strict xfail until
+Phase 3 registers those fourteen. A gate that is red for months is a gate people
+learn to ignore, and the strict xfail is self-correcting — the moment Phase 3
+lands it xpasses, the suite fails, and that is the signal to promote it.
+
+Two additions the sketch did not have. `UC-072`'s subject is the matrix build
+rather than a routing instance, so there is nothing for a `Problem` builder to
+return; `NOT_AN_INSTANCE` names it with the reason, on the same principle as
+`diagnose.UNIMPLEMENTED`. And §0.5's fourth query — "which requirements have no
+scenario", a set-difference against `SDD-VRP-001` §3 — runs in both directions,
+so a dangling citation and an unevidenced requirement are separate assertions
+with separate messages. The unevidenced set is asserted equal to `{FR-32}`,
+which is what §0.6 documents and declines to settle.
+
+The three duplicate copies of the fifteen instances — registry, tests, example —
+are now one. Perturbation-checked three ways: removing a fixture, orphaning one,
+and citing a requirement the design document does not define.
 
 ---
 
