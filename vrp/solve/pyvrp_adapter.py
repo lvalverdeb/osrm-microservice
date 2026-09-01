@@ -163,10 +163,47 @@ def _eligibility_profiles(problem: Problem, model: Model) -> dict:
     hundred identically-qualified vans share one. Instances with no skills and
     no site restrictions get a single profile and the edge loop they always had.
     """
+    _refuse_order_incompatibility(problem)
     _refuse_ambiguous_eligibility(problem)
     keys = {_eligibility_key(problem, vehicle) for vehicle in problem.vehicles}
     return {key: (model.add_profile(name=f"eligibility-{index}"), key)
             for index, key in enumerate(sorted(keys, key=sorted))}
+
+
+def _refuse_order_incompatibility(problem: Problem) -> None:
+    """Refuse an instance whose orders may not share a route. FR-10, §6.5.
+
+    Incompatibility is a predicate over a route's *composition*: each order is
+    legal alone and the pair is illegal only once both are aboard. Nothing in
+    PyVRP says that. Profiles restrict which places a vehicle may visit, which
+    is a different shape of constraint, and splitting a vehicle into one type
+    per order class would let the search deploy both and plan two vans where
+    the depot has one.
+
+    So this is refused rather than approximated. Until `T-72` the search simply
+    did not know: it loaded a hazardous class beside foodstuff, reported
+    `FEASIBLE`, and the independent verifier rejected the plan afterwards on
+    `INV-10`. A refusal names the constraint that cannot be honoured; a plan
+    that violates it names nothing and looks like an answer.
+
+    Only a conflict that could actually arise is refused. An order declaring
+    itself incompatible with a class no other order in the instance carries
+    constrains nothing, and refusing that would be refusing arithmetic.
+    """
+    classes = {order.order_class for order in problem.orders if order.order_class}
+    binding = sorted(
+        f"{order.id} ({order.order_class}) excludes "
+        f"{sorted(order.incompatible_with & classes - {order.order_class})}"
+        for order in problem.orders
+        if order.incompatible_with & classes - {order.order_class or ""})
+    if binding:
+        raise NotImplementedError(
+            "order-class incompatibility is a constraint on which orders may "
+            "share a route, and this adapter has no way to express it: "
+            f"{'; '.join(binding)}. The verifier checks INV-10 and pre-flight "
+            "reports INCOMPATIBLE_ONLY, but a plan violating it would be built "
+            "before either noticed. Separate the classes into different "
+            "planning runs until T-72 carries this into the search")
 
 
 def _refuse_ambiguous_eligibility(problem: Problem) -> None:

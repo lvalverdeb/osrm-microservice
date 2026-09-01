@@ -2027,7 +2027,7 @@ Two orders, each of which any vehicle may carry, that may not travel together �
 - **Binds:** the composition of a route, not the eligibility of an order
 - **Exercises:** FR-10, §6.5
 - **Breaks:** testing compatibility per order at assignment time. Each passes alone and the pair is illegal only once both are aboard, so a per-order filter admits the combination and the violation surfaces in the verifier at the end rather than in the search
-- **Status:** PARTIALLY_MODELLED — the verifier and pre-flight both enforce INV-10, but the search does not: `incompatible_with` reaches neither the PyVRP adapter nor the local search, so an illegal pair is rejected after the plan is built rather than never built
+- **Status:** PARTIALLY_MODELLED — the engine refuses an instance whose orders may not share a route, naming the pair, rather than planning one that violates INV-10 and letting the verifier catch it afterwards; refusing is honest and is not support, because a route's composition is a predicate no PyVRP construct states and the search still cannot plan around it
 #### UC-068 — Contradictory operator locks
 
 A lock set that cannot be satisfied: an order pinned to a vehicle and forbidden on it, or a pinned sequence that contradicts a pinned prefix.

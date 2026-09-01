@@ -1503,14 +1503,25 @@ so an instance where two orders at one address need different qualifications is
 refused by name rather than approximated.
 
 Order-class incompatibility (`FR-10`) and depot inventory (`FR-31`) are not
-per-vehicle and have no PyVRP encoding. Incompatibility is a predicate over a
-route's *composition*; splitting a vehicle into one type per class would let the
-search use both and plan two vans where one exists. Inventory is a global limit
-across routes, and `DEC-1` already says where that belongs -- "enforced
-globally, never per cluster", beside the dock schedule the orchestrator owns.
-The likely shape is a depot-allocation step producing an order-to-depot map that
-profiles then enforce, which makes `FR-31` a decision taken before the search
-rather than a constraint inside it. Neither is started.
+per-vehicle and have no PyVRP encoding.
+
+Incompatibility is a predicate over a route's *composition*; splitting a vehicle
+into one type per class would let the search deploy both and plan two vans where
+the depot has one. **Both adapters now refuse such an instance and name the
+conflicting orders**, which is a decision rather than a deferral: an engine that
+returns a plan violating a constraint it was given looks like it answered, and
+the verifier rejecting that plan afterwards helps nobody who has already
+dispatched it. Refusing is honest and is not support -- the entry stays
+`PARTIALLY_MODELLED`, and a strict xfail holds the goal of planning around it.
+Only a conflict that could arise is refused; an order excluding a class no other
+order carries constrains nothing.
+
+Inventory is a global limit across routes, and `DEC-1` already says where that
+belongs -- "enforced globally, never per cluster", beside the dock schedule the
+orchestrator owns. The likely shape is a depot-allocation step producing an
+order-to-depot map that the eligibility profiles above then enforce, which makes
+`FR-31` a decision taken before the search rather than a constraint inside it.
+Not started.
 | `T-73` | todo | Multi-period horizon: visit frequency, permitted-day patterns, interval compliance | T-47 | FR-23, §12.2 | A visit-frequency instance plans a horizon, not seven days; compliance measured against the interval and reported per order |
 | `T-74` | todo | Maximum ride time from pickup to delivery, for passengers and for perishable goods | T-20 | FR-24 | Li & Lim PDPTW still passes; a ride-time-bounded instance never exceeds the bound, and the bound is distinguishable from a delivery window |
 | `T-75` | todo | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; the objective reports which source decided |

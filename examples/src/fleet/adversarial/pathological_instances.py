@@ -233,17 +233,19 @@ def what_the_totals_hide() -> None:
     problem = FIXTURES["UC-067"]()
     print(f"      pre-flight: {'clean' if not preflight(problem) else 'flagged'} "
           "-- each order is servable on its own")
-    solution = solve(problem, iterations=400, seed=0)
-    together = [r.vehicle_id for r in solution.routes
-                if {"FOOD", "HAZ"} <= {s.order_id for s in r.steps if s.order_id}]
-    report = verify(problem, solution)
-    print(f"      solver:     loaded them together on {together or 'no vehicle'}")
-    print(f"      verifier:   {[v.invariant for v in report.violations] or 'clean'}")
-    print("      INCOMPLETE. T-22 built order-class incompatibility as a check,")
-    print("      not as a constraint: `incompatible_with` reaches neither the")
-    print("      PyVRP adapter nor the local search, so the plan is rejected")
-    print("      after it is built rather than never built. UC-067 is recorded")
-    print("      PARTIALLY_MODELLED for exactly this.")
+    try:
+        solve(problem, iterations=400, seed=0)
+        print("      solver:     returned a plan")
+    except NotImplementedError as refusal:
+        named = str(refusal).split(": ", 1)[1].split(".")[0]
+        print(f"      solver:     refused -- {named}")
+    print("      A route's composition is a predicate no PyVRP construct states,")
+    print("      so the engine declines rather than planning around it. Until")
+    print("      T-72 it built the plan, reported FEASIBLE, and left INV-10 to")
+    print("      catch it — a plan that violates a constraint looks like an")
+    print("      answer, and a refusal names what it cannot honour.")
+    print("      INCOMPLETE by design: UC-067 stays PARTIALLY_MODELLED, because")
+    print("      refusing is honest and is not the same as support.")
 
 
 # --------------------------------------------------------------------------
@@ -325,9 +327,11 @@ def main() -> int:
     not_a_plane()
     print(f"\n{'=' * 72}")
     print("Thirteen of the fifteen behave as the catalogue requires. UC-067 and")
-    print("UC-072 do not, are marked PARTIALLY_MODELLED there, and are pinned")
-    print("with strict xfail in tests/vrp/test_pathological.py so that closing")
-    print("either gap fails the suite until the catalogue is updated too.")
+    print("UC-072 do not, and they fall short in different ways: UC-067 declines")
+    print("an instance it cannot plan honestly, UC-072 lacks a fallback it is")
+    print("specified to have. Both are PARTIALLY_MODELLED in the catalogue and")
+    print("pinned with strict xfail in tests/vrp/test_pathological.py, so that")
+    print("closing either gap fails the suite until the catalogue is updated too.")
     return 0
 
 

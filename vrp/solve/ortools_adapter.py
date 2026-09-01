@@ -54,6 +54,14 @@ def _refuse(problem: Problem) -> None:
         if len(stop.time_windows) > 1:
             raise NotImplementedError(
                 _UNSUPPORTED.format(what="multiple time windows"))
+    classes = {order.order_class for order in problem.orders if order.order_class}
+    if any(order.incompatible_with & classes - {order.order_class or ""}
+           for order in problem.orders):
+        # Expressible here with more work -- OR-Tools can constrain vehicle
+        # variables pairwise -- but this adapter does not, and the PyVRP one
+        # refuses it too, so neither engine may quietly drop it.
+        raise NotImplementedError(
+            _UNSUPPORTED.format(what="order-class incompatibility"))
     if any(vehicle.open_route for vehicle in problem.vehicles):
         raise NotImplementedError(_UNSUPPORTED.format(what="open routes"))
     if any(vehicle.max_reloads for vehicle in problem.vehicles):

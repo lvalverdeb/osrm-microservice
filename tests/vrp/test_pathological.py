@@ -234,10 +234,12 @@ def test_uc066_a_route_within_its_totals_is_rejected_on_peak_load():
 # UC-067 — mutually incompatible but individually feasible orders
 # --------------------------------------------------------------------------
 
-def test_uc067_incompatibility_is_a_property_of_the_route_not_of_the_order():
+def test_uc067_each_order_is_servable_alone_which_is_what_makes_this_hard():
     """Breaks: testing compatibility per order at assignment time.
 
-    Each passes alone and the pair is illegal only once both are aboard.
+    Neither order is a problem. That is the entry's whole content: a per-order
+    filter sees two ordinary deliveries, and the illegality exists only in the
+    pair.
     """
     problem = FIXTURES["UC-067"]()
 
@@ -251,30 +253,63 @@ def test_uc067_incompatibility_is_a_property_of_the_route_not_of_the_order():
               delivery=StopSpec(location_id="C1", time_windows=(DAY,)),
               order_class="HAZARDOUS", incompatible_with=("FOODSTUFF",))
 
-    solution = solve(problem, iterations=400, seed=0)
 
-    assert served(solution) == {"FOOD", "HAZ"}
-    violations = verify(problem, solution).violations
-    assert all(v.invariant == "INV-10" for v in violations), violations
-    assert violations, (
-        "if the search has learned the constraint, this instance is now clean "
-        "and test_uc067_the_search_itself_does_not_know_about_incompatibility "
-        "should be un-expected-failed along with UC-067's catalogue status")
+def test_uc067_a_pair_that_may_not_share_a_route_is_refused_not_mis_planned():
+    """Breaks: the pair is illegal only once both are aboard, so nothing that
+    filters per order can prevent it — only the search can, and this one
+    cannot.
+
+    Before `T-72` the engine loaded the hazardous class beside the foodstuff,
+    reported FEASIBLE, and the verifier rejected the plan on INV-10 afterwards.
+    A refusal names the constraint it cannot honour. A plan that violates it
+    names nothing and looks like an answer, which is the worse of the two by
+    some distance.
+    """
+    problem = FIXTURES["UC-067"]()
+
+    with pytest.raises(NotImplementedError, match="share a route") as refusal:
+        solve(problem, iterations=400, seed=0)
+
+    message = str(refusal.value)
+    assert "FOOD" in message and "HAZ" in message, (
+        "the refusal has to name the orders in conflict; a dispatcher cannot "
+        "act on 'this instance is unsupported'")
+
+
+def test_uc067_an_incompatibility_that_cannot_arise_is_not_refused():
+    """Refusing arithmetic is its own defect.
+
+    An order declaring itself incompatible with a class no other order in the
+    instance carries constrains nothing, and an engine that declined it would
+    be refusing to plan a perfectly ordinary day.
+    """
+    lonely = Order(id="HAZ", kind="JOB", quantities={"kg": 1},
+                   delivery=StopSpec(location_id="C1", time_windows=(DAY,),
+                                     service_fixed=60),
+                   order_class="HAZARDOUS",
+                   incompatible_with=frozenset({"FOODSTUFF"}))
+    problem = fixtures.instance("lonely", (lonely,), (fixtures.van(),))
+
+    solution = solve(problem, iterations=200, seed=0)
+
+    assert served(solution) == {"HAZ"}
+    assert verify(problem, solution).ok
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "T-22 built order-class incompatibility as a check, not as a constraint: "
-    "INV-10 lives in the verifier and in pre-flight, and neither the PyVRP "
-    "adapter nor the local search knows about `incompatible_with`. So the "
-    "search happily loads a hazardous class alongside foodstuff and the plan is "
-    "rejected after the fact. `UC-067` is PARTIALLY_MODELLED for this reason."))
-def test_uc067_the_search_itself_does_not_know_about_incompatibility():
-    """Breaks: the pair is illegal only once both are aboard, so nothing that
-    filters per order can prevent it — only the search can."""
+    "T-72's remaining half. Incompatibility is a predicate over a route's "
+    "composition, and PyVRP has no way to state one: splitting a vehicle into "
+    "one type per order class would let the search deploy both and plan two "
+    "vans where the depot has one. The adapter refuses the instance rather "
+    "than planning around it, which is honest and is not the same as support. "
+    "UC-067 stays PARTIALLY_MODELLED until the search can carry it."))
+def test_uc067_the_search_plans_around_incompatibility_rather_than_declining():
+    """Breaks: a route's composition is a constraint, not a report."""
     problem = FIXTURES["UC-067"]()
 
     solution = solve(problem, iterations=400, seed=0)
 
+    assert verify(problem, solution).ok
     for sequence in assignment_of(solution).values():
         assert not {"FOOD", "HAZ"} <= set(sequence)
 
