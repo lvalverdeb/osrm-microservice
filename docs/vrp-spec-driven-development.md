@@ -1490,38 +1490,34 @@ constraints the engine already claims to enforce and does not.
 
 | ID | Status | Task | Deps | Satisfies | Definition of done |
 |---|---|---|---|---|---|
-| `T-72` | part | **[GATE]** Compile eligibility into the search: skills, order-class incompatibility, site access, depot inventory | T-12, T-22, T-45 | FR-10, FR-11, FR-31, INV-10, INV-13 | No plan is published that the verifier then rejects on a constraint the model declared |
+| `T-72` | done | **[GATE]** Compile eligibility into the search: skills, order-class incompatibility, site access, depot inventory | T-12, T-22, T-45 | FR-10, FR-11, FR-31, INV-10, INV-13 | No plan is published that the verifier then rejects on a constraint the model declared |
 
-**`T-72` is two constraints in and two to go**, and the two halves are different
-problems rather than the same problem twice.
+**`T-72`'s four constraints came out as three mechanisms**, because they are not
+four instances of one problem.
 
-Skills (`FR-10`) and site access (`FR-11`) are properties of a *(vehicle, place)*
-pair, which PyVRP expresses with profiles: a vehicle type routes on its own edge
-set and a place it may not enter has no edge into it. Both are compiled and
-`UC-019`'s xfail is promoted. The encoding restricts places rather than clients,
-so an instance where two orders at one address need different qualifications is
-refused by name rather than approximated.
+Skills (`FR-10`), site access (`FR-11`) and operator locks (`FR-21`) are all
+properties of a *(vehicle, order)* pair, which PyVRP expresses with profiles: a
+vehicle type routes on its own edge set, and a place it may not enter has no
+edge into it. Locks were the surprise -- `FR-21` was checked by `INV-8` and
+diagnosed by pre-flight and reached no solve path at all, so a dispatcher's pin
+was advice. The encoding restricts places rather than orders, so an instance
+where two orders at one address differ in what a vehicle may do is refused
+rather than approximated.
 
-Order-class incompatibility (`FR-10`) and depot inventory (`FR-31`) are not
-per-vehicle and have no PyVRP encoding.
+Order-class incompatibility (`FR-10`) is a predicate over a route's
+*composition* and has no PyVRP encoding; splitting a vehicle into one type per
+class would let the search deploy both and plan two vans where the depot has
+one. Both adapters refuse it and name the conflict. Refusing is honest and is
+not support: a strict xfail holds the goal.
 
-Incompatibility is a predicate over a route's *composition*; splitting a vehicle
-into one type per class would let the search deploy both and plan two vans where
-the depot has one. **Both adapters now refuse such an instance and name the
-conflicting orders**, which is a decision rather than a deferral: an engine that
-returns a plan violating a constraint it was given looks like it answered, and
-the verifier rejecting that plan afterwards helps nobody who has already
-dispatched it. Refusing is honest and is not support -- the entry stays
-`PARTIALLY_MODELLED`, and a strict xfail holds the goal of planning around it.
-Only a conflict that could arise is refused; an order excluding a class no other
-order carries constrains nothing.
+Depot inventory (`FR-31`) is a limit shared across routes, and `DEC-1` puts
+those in the orchestrator. `vrp/depots.py` solves, finds the over-draw, withdraws
+the marginal work from that depot as `FORBID_ORDER_ON_VEHICLE` locks, and solves
+again -- so the search keeps choosing the depot, which is what §7.8 requires and
+what `UC-134` warns that a pre-assignment would forfeit. `SolveService` runs it
+once before a job finishes; an intermediate incumbent may still over-draw, which
+is what `status` already reports about anytime plans.
 
-Inventory is a global limit across routes, and `DEC-1` already says where that
-belongs -- "enforced globally, never per cluster", beside the dock schedule the
-orchestrator owns. The likely shape is a depot-allocation step producing an
-order-to-depot map that the eligibility profiles above then enforce, which makes
-`FR-31` a decision taken before the search rather than a constraint inside it.
-Not started.
 | `T-73` | todo | Multi-period horizon: visit frequency, permitted-day patterns, interval compliance | T-47 | FR-23, §12.2 | A visit-frequency instance plans a horizon, not seven days; compliance measured against the interval and reported per order |
 | `T-74` | todo | Maximum ride time from pickup to delivery, for passengers and for perishable goods | T-20 | FR-24 | Li & Lim PDPTW still passes; a ride-time-bounded instance never exceeds the bound, and the bound is distinguishable from a delivery window |
 | `T-75` | todo | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; the objective reports which source decided |

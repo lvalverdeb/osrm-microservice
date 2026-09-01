@@ -69,6 +69,7 @@ from vrp.adherence import ExecutedRoute
 from vrp.bench import fixtures
 from vrp.bench.fixtures import FIXTURES
 from vrp.committed import moved_since
+from vrp.depots import drawn_per_depot, over_drawn, solve_within_inventory
 from vrp.evaluator import evaluate
 from vrp.solve.pyvrp_adapter import solve
 from vrp.triggers import Trigger, reoptimise
@@ -298,17 +299,22 @@ def many_origins() -> None:
         "physically partitioned. Each compartment is its own dimension.")
 
     case("UC-134", "regional distribution: overlapping depot catchments")
-    problem, solution = plan_for("UC-134")
-    stock = {loc.id: loc.inventory for loc in problem.locations if loc.inventory is not None}
-    breaches = [v.invariant for v in verify(problem, solution).violations]
-    say(f"depot stock: {stock}",
-        f"depots used: {sorted({problem.vehicle(r.vehicle_id).start_location_id for r in solution.routes if any(s.order_id for s in r.steps)})}",
-        "Depot choice is part of the optimisation rather than fixed beforehand:",
-        "the nearest depot may have nothing in it, and assigning first",
-        "forecloses the cheapest plans.",
-        "", f"INCOMPLETE. The verifier reports {sorted(set(breaches))}: FR-31's",
-        "inventory is a check, not a constraint, so the search drew from the",
-        "empty depot and was told afterwards.")
+    problem = FIXTURES["UC-134"]()
+    stock = {loc.id: loc.inventory for loc in problem.locations
+             if loc.inventory is not None}
+    single = solve(problem, iterations=600, seed=0)
+    loop, planned = solve_within_inventory(
+        problem, lambda p: solve(p, iterations=600, seed=0))
+    say(f"depot stock:      {stock}",
+        f"one pass drew:    {drawn_per_depot(problem, single)}  "
+        f"(over by {over_drawn(problem, single)})",
+        f"within inventory: {drawn_per_depot(planned, loop)}  "
+        f"serving {len(served(loop))}/{len(problem.orders)}",
+        f"withdrawals recorded as {len(planned.locks)} FR-21 locks",
+        "The nearest depot may have nothing in it. Assigning orders to depots",
+        "first would fix that and forfeit the cheapest plans, which is the",
+        "entry's other half, so the search keeps choosing: only the choices no",
+        "depot can honour are withdrawn, and it chooses again.")
 
 
 # --------------------------------------------------------------------------
@@ -392,13 +398,13 @@ def main() -> int:
     many_origins()
     the_day_happens()
     print(f"\n{'=' * 74}")
-    print("Ten of the fourteen behave as the catalogue requires. UC-019, UC-134")
-    print("and UC-067 are the same defect: skills, order-class incompatibility,")
-    print("site access and depot inventory are enforced by the verifier and")
-    print("reported by pre-flight, and compiled into the search nowhere. UC-171")
-    print("is separate, and is about which recovery §8.4 reaches for. All four")
-    print("are PARTIALLY_MODELLED in the catalogue and pinned with strict xfail")
-    print("in tests/vrp/test_p0_scenarios.py.")
+    print("Thirteen of the fourteen behave as the catalogue requires.")
+    print("UC-019 and UC-134 joined them with T-72, which compiled skills, site")
+    print("access and operator locks into the search and made depot inventory a")
+    print("constraint the plan is held to rather than a note the verifier makes")
+    print("afterwards. UC-171 is the one left, and it is a different question:")
+    print("not what the engine may do, but which recovery §8.4 reaches for when")
+    print("a driver does not arrive.")
     print(f"\nInstances: vrp/bench/fixtures.py, three sizes each "
           f"({', '.join(f'{k}={v}' for k, v in fixtures.SIZES.items())} stops; "
           f"single-tour and appointment-day operations scale within a duty).")

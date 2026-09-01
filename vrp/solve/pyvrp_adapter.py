@@ -135,8 +135,36 @@ def _bounds(window, shift_start: int, shift_end: int) -> tuple[int, int]:
     return window.start, window.end
 
 
+def _may_serve(problem: Problem, vehicle, order) -> bool:
+    """Whether this vehicle is allowed this order at all. FR-10, FR-11, FR-21.
+
+    Three sources of the same answer, and the operator's is not the weakest:
+    a qualification, a site restriction, and a lock a dispatcher set by hand.
+    `vrp.diagnose` asks the same question to decide `NO_ELIGIBLE_VEHICLE` and
+    `LOCK_CONFLICT`; asking it differently here would let the search build what
+    pre-flight had already called impossible.
+    """
+    if not has_skills_for(vehicle, order):
+        return False
+    if any(not may_enter(vehicle, problem.location(stop.location_id))
+           for stop in order.stops):
+        return False
+    for lock in problem.locks:
+        if lock.kind == "FORBID_DEPLOY" and lock.vehicle_id == vehicle.id:
+            return False
+        if lock.order_id != order.id:
+            continue
+        if lock.kind == "PIN_ORDER_TO_VEHICLE" and lock.vehicle_id != vehicle.id:
+            return False
+        if lock.kind == "FORBID_ORDER_ON_VEHICLE" and lock.vehicle_id == vehicle.id:
+            return False
+        if lock.kind == "PIN_DEPOT" and vehicle.start_location_id != lock.depot_id:
+            return False
+    return True
+
+
 def _eligibility_key(problem: Problem, vehicle) -> frozenset[int]:
-    """The matrix indices this vehicle may not visit. FR-10, FR-11.
+    """The matrix indices this vehicle may not visit. FR-10, FR-11, FR-21.
 
     Its own depots are never in the set. A vehicle barred from the yard it
     starts in is a pre-flight problem (`NO_ELIGIBLE_VEHICLE`) and encoding it
@@ -144,10 +172,10 @@ def _eligibility_key(problem: Problem, vehicle) -> frozenset[int]:
     """
     forbidden: set[int] = set()
     for order in problem.orders:
-        skilled = has_skills_for(vehicle, order)
+        allowed = _may_serve(problem, vehicle, order)
         for stop in order.stops:
             site = problem.location(stop.location_id)
-            if not skilled or not may_enter(vehicle, site):
+            if not allowed:
                 forbidden.add(site.matrix_index)
     home = {vehicle.start_location_id, vehicle.ends_at, *vehicle.reload_locations}
     forbidden -= {problem.location(name).matrix_index
@@ -224,13 +252,14 @@ def _refuse_ambiguous_eligibility(problem: Problem) -> None:
         if len(orders) < 2:
             continue
         for vehicle in problem.vehicles:
-            allowed = {has_skills_for(vehicle, order) for order in orders}
+            allowed = {_may_serve(problem, vehicle, order) for order in orders}
             if len(allowed) > 1:
                 raise NotImplementedError(
-                    f"orders at {location_id} need different skills of "
-                    f"{vehicle.id}, and eligibility is compiled per place: "
-                    f"the encoding cannot admit one and bar the other. Split "
-                    f"the location, or give the orders the same requirement")
+                    f"orders at {location_id} differ in whether {vehicle.id} "
+                    f"may serve them -- a skill, a site restriction or a lock "
+                    f"-- and eligibility is compiled per place: the encoding "
+                    f"cannot admit one and bar the other. Split the location, "
+                    f"or make the orders agree")
 
 
 def _single_profile(problem: Problem) -> str:

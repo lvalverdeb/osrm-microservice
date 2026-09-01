@@ -360,9 +360,10 @@ def test_the_search_will_not_send_a_vehicle_to_a_site_it_may_not_enter():  # FR-
 def test_eligibility_that_a_per_place_encoding_cannot_state_is_refused():
     """Profiles restrict places, and two orders may share one.
 
-    Where they need different qualifications, barring the place bars work the
-    vehicle was entitled to do and permitting it permits work it was not.
-    Neither is the instance the caller described.
+    Where they differ in what the vehicle may do -- a skill, a site
+    restriction, or an operator lock -- barring the place bars work the vehicle
+    was entitled to do and permitting it permits work it was not. Neither is
+    the instance the caller described.
     """
     import pytest
 
@@ -373,5 +374,5 @@ def test_eligibility_that_a_per_place_encoding_cannot_state_is_refused():
          an_order("B", "C1")),
         (a_van("V1"),))
 
-    with pytest.raises(NotImplementedError, match="different skills"):
+    with pytest.raises(NotImplementedError, match="differ in whether"):
         solve(problem, iterations=100, seed=0)

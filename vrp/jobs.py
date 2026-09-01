@@ -46,6 +46,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 
+from vrp.depots import over_drawn, solve_within_inventory
 from vrp.diagnose import Finding, preflight
 from vrp.model import Problem, Solution
 
@@ -246,6 +247,20 @@ class SolveService:
                 with job.lock:
                     job.incumbent = solution
 
+            # INV-13 is a limit shared across routes, and PyVRP has no
+            # construct for one: the chunk loop above can only produce a plan
+            # that draws more from a depot than it holds. An *incumbent* may
+            # already be infeasible -- that is what `status` reports and what
+            # anytime means -- but the plan a job finishes with may not be, so
+            # the withdrawal loop runs once here rather than inside the chunks,
+            # where it would recompile the model and throw away the warm start.
+            if not job.cancelled.is_set() and over_drawn(job.problem, solution):
+                solution, _planned = solve_within_inventory(
+                    job.problem,
+                    lambda instance: _single_pass(instance, job))
+                with job.lock:
+                    job.incumbent = solution
+
             with job.lock:
                 if not job.cancelled.is_set():
                     job.status = JobStatus.DONE
@@ -253,3 +268,14 @@ class SolveService:
             with job.lock:
                 job.status = JobStatus.FAILED
                 job.error = f"{type(failure).__name__}: {failure}"
+
+
+def _single_pass(problem: Problem, job) -> Solution:
+    """One cold solve at the job's own budget, for the withdrawal loop.
+
+    Cold rather than warm-started: each round changes the locks, so the model
+    is a different one and the previous best is not a solution to it.
+    """
+    from vrp.solve.pyvrp_adapter import solve
+
+    return solve(problem, iterations=job.iterations, seed=job.seed)

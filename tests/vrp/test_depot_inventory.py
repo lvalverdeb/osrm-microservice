@@ -268,3 +268,89 @@ def _with_pallets(problem: Problem) -> Problem:
     orders = tuple(replace(order, quantities={**order.quantities, "pallets": 1})
                    for order in problem.orders)
     return replace(problem, orders=orders)
+
+
+# --------------------------------------------------------------------------
+# Enforced in the plan, not only reported about it — T-72
+# --------------------------------------------------------------------------
+
+def _two_depots(stock_at_d: int, stock_at_d2: int, orders: int = 6) -> Problem:
+    """Work in the middle, two depots either side, one of them short."""
+    locations = ((Location(id="D", lat=9.9, lon=-84.00, matrix_index=0,
+                           inventory={"kg": stock_at_d}),
+                  Location(id="D2", lat=9.9, lon=-84.20, matrix_index=1,
+                           inventory={"kg": stock_at_d2}))
+                 + tuple(Location(id=f"C{i}", lat=9.9, lon=-84.10,
+                                  matrix_index=2 + i)
+                         for i in range(orders)))
+    size = len(locations)
+    grid = tuple(tuple(0 if i == j else 600 for j in range(size))
+                 for i in range(size))
+    return Problem(
+        id="inv", locations=locations,
+        orders=tuple(Order(id=f"O{i}", kind="JOB", quantities={"kg": 10},
+                           delivery=StopSpec(location_id=f"C{i}",
+                                             time_windows=(DAY,),
+                                             service_fixed=60))
+                     for i in range(orders)),
+        vehicles=tuple(Vehicle(id=f"V{n}", capacities={"kg": 60}, shift=DAY,
+                               start_location_id=depot, end_location_id=depot)
+                       for n, depot in enumerate(("D", "D2"), start=1)),
+        matrix=TravelMatrix(version="inv", durations=grid, distances=grid))
+
+
+def test_work_moves_off_a_depot_that_cannot_supply_it():
+    """DEC-1: "depot inventory... MUST be enforced globally, never per
+    cluster". The whole round fits, but not out of one yard."""
+    from vrp.depots import drawn_per_depot, over_drawn, solve_within_inventory
+    from vrp.solve.pyvrp_adapter import solve
+
+    problem = _two_depots(stock_at_d=20, stock_at_d2=100)
+
+    solution, planned = solve_within_inventory(
+        problem, lambda p: solve(p, iterations=400, seed=0))
+
+    drawn = drawn_per_depot(planned, solution)
+    assert not over_drawn(planned, solution), drawn
+    assert drawn.get("D", {}).get("kg", 0) <= 20
+    assert verify(planned, solution).ok
+
+
+def test_a_round_that_no_depot_can_supply_is_not_silently_shrunk():
+    """Where the stock genuinely is not there, the loop runs out rather than
+    quietly returning a smaller day. Pre-flight's `DEPOT_STOCKOUT` is the
+    honest report, and it runs before any of this."""
+    import pytest
+
+    from vrp.depots import solve_within_inventory
+    from vrp.solve.pyvrp_adapter import solve
+
+    problem = _two_depots(stock_at_d=10, stock_at_d2=10)
+
+    with pytest.raises(RuntimeError, match="supply more than they hold"):
+        solve_within_inventory(problem,
+                               lambda p: solve(p, iterations=200, seed=0),
+                               max_rounds=3)
+
+
+def test_the_withdrawal_protects_the_work_that_was_declared_to_matter():
+    """§5.1's order of business, reused: the lowest tier goes first."""
+    from dataclasses import replace
+
+    from vrp.depots import solve_within_inventory
+    from vrp.solve.pyvrp_adapter import solve
+
+    problem = _two_depots(stock_at_d=20, stock_at_d2=100)
+    tiered = replace(problem, orders=tuple(
+        replace(order, priority_tier=0 if index < 2 else 2)
+        for index, order in enumerate(problem.orders)))
+
+    _solution, planned = solve_within_inventory(
+        tiered, lambda p: solve(p, iterations=400, seed=0))
+
+    withdrawn = {lock.order_id for lock in planned.locks}
+    protected = {o.id for o in tiered.orders if o.priority_tier == 0}
+    assert not (withdrawn & protected) or withdrawn >= {
+        o.id for o in tiered.orders if o.priority_tier == 2}, (
+        f"tier-0 work {sorted(withdrawn & protected)} was withdrawn while "
+        "tier-2 work stayed on the depot that could not supply it")

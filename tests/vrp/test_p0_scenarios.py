@@ -35,6 +35,7 @@ import pytest
 from vrp.adherence import ExecutedRoute
 from vrp.bench.fixtures import FIXTURES
 from vrp.committed import commit_locks, moved_since
+from vrp.depots import drawn_per_depot, over_drawn, solve_within_inventory
 from vrp.evaluator import evaluate
 from vrp.model import Route, Solution
 from vrp.solve.pyvrp_adapter import solve
@@ -397,37 +398,45 @@ def _plan_from(problem, assignment) -> Solution:
 # UC-134 — regional distribution with overlapping depot catchments
 # --------------------------------------------------------------------------
 
-def test_uc134_a_stockout_at_the_nearest_depot_is_detected():
-    """Breaks: nearest-depot assignment. The nearest depot may lack stock."""
+def test_uc134_a_single_pass_solve_draws_from_a_depot_with_nothing_in_it():
+    """Why the loop below exists. `solve` is the adapter, and PyVRP has no
+    construct for a limit shared across routes: two vans each taking ten from a
+    fifteen-unit depot are individually beyond reproach."""
     problem = FIXTURES["UC-134"]()
     empty = [loc.id for loc in problem.locations
              if loc.inventory is not None and not any(loc.inventory.values())]
     assert empty == ["D"], "the fixture's point is a depot with nothing in it"
 
     solution = solve(problem, iterations=600, seed=0)
-    report = verify(problem, solution)
 
-    assert served(solution) == {o.id for o in problem.orders}
-    assert any(v.invariant == "INV-13" for v in report.violations), (
-        "the search drew from an empty depot and INV-13 is what noticed. If "
-        "this stops failing, the search has learned about inventory and "
-        "test_uc134_the_search_chooses_a_depot_that_can_supply should be "
-        "promoted along with UC-134's catalogue status")
+    assert drawn_per_depot(problem, solution).get("D"), (
+        "a single pass draws from D because nothing stops it; if this ever "
+        "stops being true the adapter has learned about inventory and "
+        "vrp/depots.py is no longer the only thing enforcing it")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "FR-31's depot inventory is enforced by the verifier (INV-13) and reported "
-    "by pre-flight as DEPOT_STOCKOUT, and reaches the search nowhere. DEC-1 "
-    "says inventory MUST be enforced globally; the decomposition orchestrator "
-    "says so in its docstring and enforces only the dock schedule."))
 def test_uc134_the_search_chooses_a_depot_that_can_supply():
-    """Breaks: fixing assignment before routing forecloses the cheapest plans —
-    and drawing from an empty depot is not a plan at all."""
+    """Breaks: nearest-depot assignment. The nearest depot may lack stock, and
+    fixing assignment before routing forecloses the cheapest plans.
+
+    A strict xfail until `T-72`. The answer is not a depot-allocation step --
+    that is the foreclosure the entry warns about, and §7.8 requires allocation
+    "solved *jointly* with routing". The search keeps choosing; only choices no
+    depot can honour are withdrawn, as `FR-21` locks, and it chooses again.
+    """
     problem = FIXTURES["UC-134"]()
 
-    solution = solve(problem, iterations=600, seed=0)
+    solution, planned = solve_within_inventory(
+        problem, lambda p: solve(p, iterations=600, seed=0))
 
-    assert verify(problem, solution).ok
+    assert not over_drawn(planned, solution), drawn_per_depot(planned, solution)
+    assert verify(planned, solution).ok, verify(planned, solution).violations
+    assert served(solution) == {o.id for o in problem.orders}, (
+        "the stocked depots can supply the whole round; withdrawing work from "
+        "the empty one must move it, not drop it")
+    assert planned.locks, (
+        "the withdrawal is recorded as FR-21 locks, so a dispatcher can see "
+        "why an order went where it did and INV-8 can check it")
 
 
 # --------------------------------------------------------------------------

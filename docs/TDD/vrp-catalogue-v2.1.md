@@ -1362,7 +1362,6 @@ Several DCs able to serve the same customers.
 - **Binds:** depot choice against per-depot inventory
 - **Exercises:** FR-31, FR-08, FR-30, FR-36
 - **Breaks:** nearest-depot assignment. The nearest depot may lack stock or capacity, and fixing assignment before routing forecloses the cheapest plans
-- **Status:** PARTIALLY_MODELLED — depot choice is open to the search rather than fixed beforehand, and a stockout is reported at pre-flight as `DEPOT_STOCKOUT` and caught by INV-13; FR-31's inventory is not a constraint the search carries, so it will draw from an empty depot and be told afterwards
 #### UC-135 — Franchise and multi-branch service networks
 
 Independent branches with their own vehicles and territories.
