@@ -36,16 +36,25 @@ EXAMPLES_SRC = PROJECT_ROOT / "examples" / "src"
 
 
 def discover_examples():
+    """Group every runnable script by the directory it sits in.
+
+    The walk is recursive because the tree stopped being flat: `fleet` alone has
+    six sub-directories, and listing only its top level hid 31 of the 51
+    examples -- including every rich-VRP, allocation and dynamic-dispatch one.
+    An example nobody can find from the menu is documentation, not a demo.
+    """
     examples = {}
-    for category_dir in sorted(EXAMPLES_SRC.iterdir()):
-        if not category_dir.is_dir():
+    for script in sorted(EXAMPLES_SRC.rglob("*.py")):
+        if script.name.startswith("_") or "__pycache__" in script.parts:
             continue
-        scripts = sorted(
-            f for f in category_dir.iterdir()
-            if f.suffix == ".py" and not f.name.startswith("_")
-        )
-        if scripts:
-            examples[category_dir.name] = scripts
+        # Every example lives in a category directory. What sits loose at the
+        # top of src/ is shared machinery -- config.py -- and running it does
+        # nothing. The old one-level walk excluded it by accident; this does it
+        # on purpose.
+        if script.parent == EXAMPLES_SRC:
+            continue
+        category = script.parent.relative_to(EXAMPLES_SRC).as_posix()
+        examples.setdefault(category, []).append(script)
     return examples
 
 

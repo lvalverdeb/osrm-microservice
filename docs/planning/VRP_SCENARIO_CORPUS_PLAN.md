@@ -255,6 +255,29 @@ Two smaller items belong here:
 
 ---
 
+## 7a. Every phase ships an example, not only tests
+
+A test proves the engine is right; it does not show anyone what the thing is
+for. Each phase therefore ships a runnable example alongside its tests, under
+`examples/src/fleet/`, and a phase is not finished until it exists.
+
+A `UC-nnn` entry is a real operation, so the example is the *solution to that
+operation*, shown running — which is a different artefact from an `E-xx` example
+demonstrating a requirement.
+
+Phase 1 shipped `examples/src/fleet/adversarial/pathological_instances.py`: all
+fifteen instances, six themes, offline. Offline is a deliberate departure from
+the house convention of driving examples off the Costa Rica dataset, because
+§13.2 requires these instances to be "hand-built and tiny" — wiring in the
+gateway would contradict the catalogue and slow the thing down.
+
+Writing it exposed a separate defect. `examples/main.py` walked only one level
+of `examples/src/`, so 31 of the 51 examples — every rich-VRP, allocation,
+dynamic-dispatch and learning one — never appeared in the menu. The walk is now
+recursive.
+
+---
+
 ## 8. Order, and why it is this order
 
 1. **Phase 1** — 15 tiny tests, no machinery, immediate defects. Also makes the
