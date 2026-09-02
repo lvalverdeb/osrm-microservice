@@ -46,6 +46,41 @@ def _require_int(value: Any, name: str) -> None:
              f"{name} must be a whole number, got {value!r}")
 
 
+# FR-25's three sources, most binding first. The order is the requirement: a
+# legal obligation outranks a contract, and a contract outranks a preference
+# somebody paid for. Ranked here rather than in a solver so every consumer --
+# the search, the objective, the explanation -- agrees about precedence.
+PRIORITY_SOURCES: tuple[str, ...] = ("STATUTORY", "SLA", "COMMERCIAL")
+
+
+def precedence(order) -> tuple[int, int]:
+    """How this order ranks: its tier, then what put it there. FR-13, FR-25.
+
+    `FR-13`'s tiers remain the mechanism and this is what fills them, so the
+    tier still decides first and the source only separates orders that would
+    otherwise be indistinguishable. Lower is more protected, matching
+    `priority_tier`'s own convention and `objective.Tier`'s.
+    """
+    return (order.priority_tier, PRIORITY_SOURCES.index(order.priority_source))
+
+
+def sla_window(reported_at: int, respond_within: int,
+               opens_at: int = 0) -> TimeWindow:
+    """The window an SLA implies. FR-25, `UC-116`.
+
+    `UC-116` breaks on "fixed windows. The window is derived from the fault
+    timestamp plus the SLA, so it is computed at intake and differs per order."
+    Two faults of the same severity reported an hour apart are due an hour
+    apart, and writing one window for both is how a four-hour response target
+    becomes a five-hour one for half the estate.
+    """
+    _require_int(reported_at, "reported_at")
+    _require_int(respond_within, "respond_within")
+    _require(respond_within > 0, "an SLA response target must be positive")
+    return TimeWindow(start=max(opens_at, reported_at),
+                      end=reported_at + respond_within)
+
+
 def _require_set(value: Any, name: str) -> None:
     """A set-typed field must actually be a set. `UC-067`.
 
@@ -189,6 +224,14 @@ class Order:
     # "foodstuff must not share a compartment with hazardous goods" is a
     # statement about kinds, and §6.5 requires incremental class-count tracking
     # per route precisely because pairwise checking is quadratic per move.
+    # FR-25: what fills a priority tier, kept apart from the tier itself.
+    # §12.2 recommended the split and `UC-117` says why in one line: "Three
+    # tiers with different clocks are three different constraints, not three
+    # weights on one." They are ordered differently (statutory outranks a
+    # contract, which outranks a commercial preference), they expire
+    # differently (an SLA clock runs from an intake timestamp; an obligation
+    # does not run at all), and only one of them is negotiable.
+    priority_source: str = "COMMERCIAL"
     order_class: str | None = None
     incompatible_with: frozenset[str] = frozenset()
 
@@ -204,6 +247,18 @@ class Order:
         else:
             _require((self.pickup is None) != (self.delivery is None),
                      "a JOB needs exactly one of pickup or delivery")
+        _require(self.priority_source in PRIORITY_SOURCES,
+                 f"unknown priority source {self.priority_source!r}; "
+                 f"§12.2 names {', '.join(PRIORITY_SOURCES)}")
+        # `UC-046`: under a universal service obligation "no address may be
+        # declined, so the drop-the-unprofitable-stop behaviour that helps
+        # elsewhere is prohibited". A prize is the price at which declining is
+        # acceptable, so a statutory order carrying one is a contradiction
+        # written down -- and a quiet one, because the solver would simply
+        # take the money.
+        _require(self.priority_source != "STATUTORY" or self.prize == 0,
+                 "a STATUTORY order may not carry a prize: a prize is the "
+                 "price at which declining is acceptable, and there is none")
         _require_set(self.required_skills, "required_skills")
         _require_set(self.incompatible_with, "incompatible_with")
         _require(not self.incompatible_with or self.order_class,

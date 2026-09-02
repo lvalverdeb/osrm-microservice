@@ -31,9 +31,13 @@ from vrp.model import (
     TimeWindow,
     TravelMatrix,
     Vehicle,
+    precedence,
 )
 from vrp.solve.pyvrp_adapter import solve
 from vrp.verify import verify
+
+# `precedence`'s second element for an ordinary commercial order.
+COMMERCIAL = 2
 
 DAY = TimeWindow(start=0, end=12 * 3600)
 
@@ -168,8 +172,8 @@ def test_no_prize_is_large_enough_to_invert_the_tiers():
               an_order("TIER5", "C2", kg=60, prize=10 ** 15, priority_tier=5))
     bonuses = tier_bonuses(instance(orders, capacity=60, stops=2))
 
-    protected = orders[0].prize + bonuses[orders[0].priority_tier]
-    tempting = orders[1].prize + bonuses[orders[1].priority_tier]
+    protected = orders[0].prize + bonuses[precedence(orders[0])]
+    tempting = orders[1].prize + bonuses[precedence(orders[1])]
     assert protected > tempting, (
         f"a 10^15 prize on tier 5 outranked tier 1: {tempting} >= {protected}")
 
@@ -182,7 +186,8 @@ def test_the_tier_ordering_holds_at_every_magnitude():
         orders = (an_order("HIGH", "C1", kg=1, prize=1, priority_tier=1),
                   an_order("LOW", "C2", kg=1, prize=magnitude, priority_tier=4))
         bonuses = tier_bonuses(instance(orders, capacity=100, stops=2))
-        assert (1 + bonuses[1]) > (magnitude + bonuses[4]), magnitude
+        assert (1 + bonuses[(1, COMMERCIAL)]) > (magnitude + bonuses[(4, COMMERCIAL)]), \
+            magnitude
 
 
 def test_the_solver_declines_the_low_tier_within_pyvrp_s_working_range():
@@ -216,3 +221,105 @@ def test_within_a_tier_the_prize_decides():
     solution = solve(problem, iterations=600, seed=0)
 
     assert dropped(solution) == {"POOR"}, dropped(solution)
+
+
+# --------------------------------------------------------------------------
+# What fills a tier is not the tier — FR-25, T-75
+# --------------------------------------------------------------------------
+
+def test_three_orders_equal_on_tier_are_ordered_by_what_put_them_there():
+    """FR-25: commercial priority, an SLA clock and a statutory obligation are
+    "separate attributes, not one tier number: they are ordered differently,
+    they expire differently, and only one of them is negotiable".
+
+    `UC-117` is the operation: "Three tiers with different clocks are three
+    different constraints, not three weights on one." Before this, the only way
+    to say a legal duty outranked a paid preference was to give it a lower
+    tier, which made the two indistinguishable in the plan that came back.
+    """
+    from vrp.model import precedence
+
+    same_tier = [an_order(f"O{i}", "C1", kg=1, priority_tier=2,
+                          priority_source=source)
+                 for i, source in enumerate(("COMMERCIAL", "SLA", "STATUTORY"))]
+
+    by_protection = sorted(same_tier, key=precedence)
+
+    assert [o.priority_source for o in by_protection] == [
+        "STATUTORY", "SLA", "COMMERCIAL"], (
+        "a legal obligation outranks a contract, and a contract outranks a "
+        "preference somebody paid for")
+
+
+def test_the_bonus_that_protects_a_tier_also_separates_its_sources():
+    """FR-13's lexicographic protection, applied to FR-25's split.
+
+    The tier still decides first -- FR-25 says "`FR-13`'s tiers remain the
+    mechanism" -- and the source only separates orders the tier cannot tell
+    apart.
+    """
+    from vrp.model import precedence
+    from vrp.solve.pyvrp_adapter import tier_bonuses
+
+    problem = instance(tuple(
+        an_order(f"O{i}", "C1", kg=1, priority_tier=tier,
+                 priority_source=source,
+                 prize=0 if source == "STATUTORY" else 500)
+        for i, (tier, source) in enumerate(
+            ((1, "COMMERCIAL"), (2, "STATUTORY"), (2, "SLA"), (2, "COMMERCIAL")))),
+        capacity=100, stops=1)
+    bonuses = tier_bonuses(problem)
+    worth = {o.id: o.prize + bonuses[precedence(o)] for o in problem.orders}
+
+    assert worth["O0"] > worth["O1"], (
+        "tier 1 outranks every source on tier 2; the split refines the tier "
+        "rather than replacing it")
+    assert worth["O1"] > worth["O2"] > worth["O3"], (
+        "and within tier 2 the statutory obligation outranks the SLA, which "
+        "outranks the commercial preference")
+
+
+def test_a_statutory_obligation_may_not_be_declined_at_any_price():
+    """`UC-046`: under a universal service obligation "no address may be
+    declined, so the drop-the-unprofitable-stop behaviour that helps elsewhere
+    is prohibited"."""
+    import pytest
+
+    from vrp.model import ValidationError
+    from vrp.solve.pyvrp_adapter import _is_required
+
+    obliged = an_order("USO", "C1", kg=1, priority_tier=3,
+                       priority_source="STATUTORY")
+    paid_for = an_order("PAID", "C1", kg=1, priority_tier=3, prize=10_000)
+
+    # The chain, in the order it actually runs: the model refuses to put a
+    # price on a statutory duty, and an order with no price is one the solver
+    # may not decline. The obligation is carried by the invariant rather than
+    # by a special case in the adapter -- an earlier version had both, and the
+    # special case enforced nothing because the invariant had already run.
+    with pytest.raises(ValidationError, match="may not carry a prize"):
+        an_order("BOTH", "C1", kg=1, priority_source="STATUTORY", prize=1)
+
+    assert obliged.prize == 0, "there is no price, because none may be set"
+    assert _is_required(obliged), (
+        "and an order with no price is one the solver may not decline, at any "
+        "tier. Before FR-25 the only way to say this was to claim the address "
+        "was tier 0, which conflates a legal duty with the top commercial one")
+    assert not _is_required(paid_for), "a prize is a price, and this one has one"
+
+
+def test_an_sla_window_is_computed_from_when_the_fault_was_reported():
+    """`UC-116` breaks on "fixed windows. The window is derived from the fault
+    timestamp plus the SLA, so it is computed at intake and differs per
+    order"."""
+    from vrp.model import sla_window
+
+    four_hours = 4 * 3600
+    morning = sla_window(reported_at=8 * 3600, respond_within=four_hours)
+    afternoon = sla_window(reported_at=14 * 3600, respond_within=four_hours)
+
+    assert morning.end == 12 * 3600 and afternoon.end == 18 * 3600
+    assert morning.end != afternoon.end, (
+        "two faults of one severity reported six hours apart are due six hours "
+        "apart; one window for both turns a four-hour target into a ten-hour "
+        "one for half the estate")

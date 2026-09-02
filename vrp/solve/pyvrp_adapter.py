@@ -33,6 +33,7 @@ from vrp.model import (
     Step,
     has_skills_for,
     may_enter,
+    precedence,
     service_time,
 )
 
@@ -74,11 +75,19 @@ def shift_end_of(problem: Problem) -> int:
 
 
 def _is_required(order) -> bool:
-    """Whether the solver may decline this order at all. FR-12, §4.1.
+    """Whether the solver may decline this order at all. FR-12, FR-25, §4.1.
 
     Tier 0 is must-serve whatever it is worth. Everything else is declinable
     once it carries a prize -- an order with no prize has no price at which
     declining is acceptable, so the solver must place it or report infeasible.
+
+    A statutory obligation needs no clause of its own here, and adding one was
+    a mistake worth recording: `Order` refuses a `STATUTORY` order that carries
+    a prize, so every such order reaches this function prizeless and the second
+    test below already covers it. The extra condition read like enforcement and
+    enforced nothing -- perturbing it away changed no result, which is how it
+    was caught. `UC-046`'s "no address may be declined" is carried by the model
+    invariant, where a contradiction belongs, rather than by a solver detail.
     """
     return order.priority_tier == 0 or order.prize == 0
 
@@ -101,14 +110,16 @@ def tier_bonuses(problem: Problem) -> dict[int, int]:
     int64; the same overflow ceiling §5.1 flags for staged optimisation applies
     here, and is not yet guarded.
     """
-    by_tier: dict[int, list[int]] = {}
+    by_tier: dict[tuple[int, int], list[int]] = {}
     for order in problem.orders:
-        by_tier.setdefault(order.priority_tier, []).append(order.prize)
+        by_tier.setdefault(precedence(order), []).append(order.prize)
 
-    bonuses: dict[int, int] = {}
+    bonuses: dict[tuple[int, int], int] = {}
     beneath = 0
-    # Least important tier first: each tier must outrank the total of all the
-    # ones below it, so the totals accumulate upwards.
+    # Least protected first: each rank must outrank the total of everything
+    # below it, so the totals accumulate upwards. The key is (tier, source),
+    # so a statutory order outranks an SLA one on the same tier and an SLA
+    # one outranks a commercial one -- FR-25's ordering, priced.
     for tier in sorted(by_tier, reverse=True):
         bonuses[tier] = beneath
         beneath += sum(prize + beneath for prize in by_tier[tier]) + 1
@@ -350,7 +361,7 @@ def compile_problem(problem: Problem) -> _Compiled:
                 delivery_service_duration=service_time(
                     order, problem.vehicles[0], drop),
                 amount=[order.quantities.get(name, 0) for name in dimensions],
-                prize=order.prize + bonuses[order.priority_tier],
+                prize=order.prize + bonuses[precedence(order)],
                 required=_is_required(order),
                 name=order.id,
             )
@@ -402,7 +413,7 @@ def compile_problem(problem: Problem) -> _Compiled:
                 tw_early=early,
                 tw_late=late,
                 release_time=order.release_time,
-                prize=order.prize + bonuses[order.priority_tier],
+                prize=order.prize + bonuses[precedence(order)],
                 # FR-12 and FR-13 together. A prize makes an order declinable,
                 # but §4.1 defines tier 0 as must-serve, so a prize on a tier-0
                 # order must not quietly make it optional -- which is what
