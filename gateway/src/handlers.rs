@@ -74,7 +74,7 @@ fn finish<T>(parsed: crate::error::Parsed<T>,
 
 #[utoipa::path(
     post,
-    path = "/route",
+    path = "/v1/route",
     tag = "Routing",
     request_body = RouteRequest,
     responses(
@@ -96,7 +96,7 @@ pub async fn route(State(state): State<AppState>, body: Bytes) -> Result<Respons
 
 #[utoipa::path(
     post,
-    path = "/matrix",
+    path = "/v1/matrix",
     tag = "Routing",
     description = "Note a constraint this schema cannot express: `sources` x \
 `destinations` must not exceed MATRIX_MAX_CELLS, counting an omitted or empty \
@@ -120,7 +120,7 @@ pub async fn matrix(State(state): State<AppState>, body: Bytes) -> Result<Respon
 /// The same upstream call as `/matrix`, reshaped into a node-link graph.
 #[utoipa::path(
     post,
-    path = "/matrix-graph",
+    path = "/v1/matrix-graph",
     tag = "Routing",
     description = "Note a constraint this schema cannot express: `sources` x \
 `destinations` must not exceed MATRIX_MAX_CELLS, counting an omitted or empty \
@@ -235,7 +235,7 @@ fn build_graph(data: &Value, request: &MatrixRequest) -> Result<Value, OsrmError
 
 #[utoipa::path(
     post,
-    path = "/match",
+    path = "/v1/match",
     tag = "Routing",
     request_body = MatchRequest,
     responses(
@@ -256,7 +256,7 @@ pub async fn match_trace(State(state): State<AppState>, body: Bytes)
 
 #[utoipa::path(
     post,
-    path = "/trip",
+    path = "/v1/trip",
     tag = "Routing",
     request_body = TripRequest,
     responses(
@@ -276,7 +276,7 @@ pub async fn trip(State(state): State<AppState>, body: Bytes) -> Result<Response
 
 #[utoipa::path(
     post,
-    path = "/nearest",
+    path = "/v1/nearest",
     tag = "Routing",
     request_body = NearestRequest,
     responses(
@@ -297,7 +297,7 @@ pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Respo
 /// Vector tiles: raw protobuf, no cache, no retry.
 #[utoipa::path(
     get,
-    path = "/tile/{profile}/{z}/{x}/{y}",
+    path = "/v1/tile/{profile}/{z}/{x}/{y}",
     tag = "Routing",
     params(
         ("profile" = String, Path, description = "Routing profile"),
@@ -613,7 +613,7 @@ fn accept_vrp(state: &AppState, body: &[u8]) -> Result<VrpRequest, ApiError> {
 /// Allocate stops to depots, then solve one TSP per vehicle load.
 #[utoipa::path(
     post,
-    path = "/vrp",
+    path = "/v1/vrp",
     tag = "Optimisation",
     request_body = VrpRequest,
     responses(
@@ -674,7 +674,7 @@ fn as_solve_failure(error: impl Into<ApiError>) -> ApiError {
 /// The allocation phase alone, with caller IDs mapped back on.
 #[utoipa::path(
     post,
-    path = "/vrp/allocate",
+    path = "/v1/vrp/allocate",
     tag = "Optimisation",
     request_body = VrpRequest,
     responses(

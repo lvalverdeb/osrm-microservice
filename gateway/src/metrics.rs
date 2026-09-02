@@ -216,15 +216,25 @@ pub fn handler_label(path: &str, metrics_endpoint: &str) -> String {
     if path == metrics_endpoint {
         return path.to_string();
     }
+    // NFR-10/T-90: `/v1/route` gets its own label rather than being folded
+    // into `/route`. The rate limiter folds them -- one endpoint, one
+    // allowance -- but the whole purpose of the deprecation window is watching
+    // unversioned traffic fall to zero before the sunset, and a dashboard that
+    // could not tell the two apart could not say when it was safe.
+    let (prefix, path) = match crate::version::strip_served_version(path) {
+        stripped if stripped != path => (crate::version::PREFIX, stripped),
+        _ => ("", path),
+    };
     match path {
         "/route" | "/matrix" | "/matrix-graph" | "/match" | "/trip" | "/nearest"
         | "/vrp" | "/vrp/allocate" | "/health" | "/ready" | "/metrics"
         // Labelled by path in Python too; collapsing them into `other` mixed
         // doc traffic in with genuinely unrouted requests.
-        | "/docs" | "/redoc" | "/openapi.json" => path.to_string(),
+        | "/docs" | "/redoc" | "/openapi.json" => format!("{prefix}{path}"),
         // The route template FastAPI registered carried the suffix, and the
         // label is the join key for any dashboard spanning the two.
-        _ if path.starts_with("/tile/") => "/tile/{profile}/{z}/{x}/{y}.mvt".to_string(),
+        _ if path.starts_with("/tile/") =>
+            format!("{prefix}/tile/{{profile}}/{{z}}/{{x}}/{{y}}.mvt"),
         // `should_group_untemplated` is on by default in the instrumentator,
         // and its bucket is spelled `none`; `other` matched no existing query.
         _ => "none".to_string(),
@@ -296,5 +306,44 @@ mod tests {
         let text = metrics.encode();
         assert!(text.contains("# HELP cache_lookups_total"));
         assert!(text.contains("# TYPE cache_lookups_total counter"));
+    }
+}
+
+#[cfg(test)]
+mod version_label_tests {
+    use super::*;
+
+    /// NFR-10/T-90. The rate limiter folds the two spellings into one bucket;
+    /// the metrics deliberately do not, because the deprecation window is over
+    /// when unversioned traffic reaches zero and nothing else can say that.
+    #[test]
+    fn the_two_spellings_get_different_labels() {
+        assert_eq!(handler_label("/route", "/metrics"), "/route");
+        assert_eq!(handler_label("/v1/route", "/metrics"), "/v1/route");
+    }
+
+    #[test]
+    fn every_labelled_endpoint_keeps_its_shape_under_the_prefix() {
+        for path in ["/route", "/matrix", "/matrix-graph", "/match", "/trip",
+                     "/nearest", "/vrp", "/vrp/allocate", "/openapi.json"] {
+            assert_eq!(handler_label(&format!("/v1{path}"), "/metrics"),
+                       format!("/v1{path}"), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_versioned_tile_keeps_the_templated_label() {
+        assert_eq!(handler_label("/v1/tile/driving/12/100/200.mvt", "/metrics"),
+                   "/v1/tile/{profile}/{z}/{x}/{y}.mvt");
+        assert_eq!(handler_label("/tile/driving/12/100/200.mvt", "/metrics"),
+                   "/tile/{profile}/{z}/{x}/{y}.mvt");
+    }
+
+    /// An unrouted path must not become a label just because it is versioned;
+    /// `none` is the bucket for anything the gateway does not serve.
+    #[test]
+    fn an_unrouted_versioned_path_is_still_none() {
+        assert_eq!(handler_label("/v1/nonsense", "/metrics"), "none");
+        assert_eq!(handler_label("/v2/route", "/metrics"), "none");
     }
 }

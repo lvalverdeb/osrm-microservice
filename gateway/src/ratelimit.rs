@@ -428,12 +428,29 @@ impl Limits {
         })
     }
 
+    /// Every endpoint limited, for tests that check path coverage rather than
+    /// the limits themselves.
+    #[cfg(test)]
+    pub fn everything_limited_for_tests() -> Self {
+        let limit = Limit::parse("600/minute");
+        Self {
+            route: limit, matrix: limit, match_trace: limit, trip: limit,
+            nearest: limit, tile: limit, vrp: limit,
+        }
+    }
+
     /// The limit for a request path, with the bucket label to key it on.
     ///
     /// The label matters for `/tile`, whose path carries the tile coordinates:
     /// keying on the raw path would give every tile its own allowance, where
     /// slowapi keys on the route function and gives them one between them.
     pub fn for_path(&self, path: &str) -> Option<(&'static str, Limit)> {
+        // NFR-10/T-90: `/v1/route` is `/route`, and shares its allowance. A
+        // separate bucket per spelling would double every client's quota for
+        // the cost of alternating the prefix, and no bucket at all -- which is
+        // what exact matching gave before the prefix was stripped here -- would
+        // serve the same handler unlimited.
+        let path = crate::version::strip_served_version(path);
         let (label, limit) = match path {
             "/route" => ("route", self.route),
             "/matrix" => ("matrix", self.matrix),
@@ -529,5 +546,48 @@ mod limits_tests {
         assert_eq!(limits().for_path("/vrp/allocate").unwrap().0, "vrp-allocate");
         assert_eq!(limits().for_path("/vrp").unwrap().1,
                    limits().for_path("/vrp/allocate").unwrap().1);
+    }
+
+    // ---------------------------------------------------------------- NFR-10
+    // T-90 serves every endpoint under `/v1` as well as at the root. Both
+    // spellings reach the same handler, so every path-keyed decision has to
+    // agree about that -- and this is the one where disagreeing is a hole
+    // rather than an inconsistency.
+
+    /// The bug this exists to prevent: `for_path` matched exact strings, so
+    /// routing `/v1/route` without touching it would have served the same
+    /// handler with no limit at all.
+    #[test]
+    fn a_versioned_path_is_limited_at_all() {
+        assert!(limits().for_path("/v1/route").is_some(),
+                "/v1/route has no bucket, so the versioned surface is unlimited");
+    }
+
+    /// One allowance between them. Separate buckets would hand any client
+    /// twice its quota for the cost of alternating the prefix.
+    #[test]
+    fn both_spellings_of_an_endpoint_share_one_bucket() {
+        for path in ["/route", "/matrix", "/matrix-graph", "/match", "/trip",
+                     "/nearest", "/vrp", "/vrp/allocate",
+                     "/tile/driving/12/100/200.mvt"] {
+            let plain = limits().for_path(path);
+            let versioned = limits().for_path(&format!("/v1{path}"));
+            assert_eq!(plain.map(|(label, _)| label),
+                       versioned.map(|(label, _)| label),
+                       "{path} and /v1{path} are not the same bucket");
+            assert_eq!(plain.map(|(_, limit)| limit),
+                       versioned.map(|(_, limit)| limit), "{path}");
+        }
+    }
+
+    /// A version the gateway does not serve must not borrow v1's allowance,
+    /// and the unlimited paths stay unlimited under the prefix.
+    #[test]
+    fn only_the_version_that_is_served_gets_the_buckets() {
+        assert!(limits().for_path("/v2/route").is_none(),
+                "an unserved version borrowed v1's bucket");
+        assert!(limits().for_path("/v1/health").is_none());
+        assert!(limits().for_path("/v1/nonsense").is_none());
+        assert!(limits().for_path("/v1").is_none());
     }
 }

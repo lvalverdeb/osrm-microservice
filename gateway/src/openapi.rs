@@ -86,7 +86,42 @@ pub fn document(vrp_max_stops: usize) -> String {
     if let Some(stops) = doc.pointer_mut("/components/schemas/VrpRequest/properties/stops") {
         stops["maxItems"] = serde_json::json!(vrp_max_stops);
     }
+    add_deprecated_aliases(&mut doc);
     serde_json::to_string_pretty(&doc).unwrap_or_default()
+}
+
+/// Document the unversioned paths too, marked deprecated. NFR-10, T-90.
+///
+/// The handlers declare `/v1/...`, which is the surface to integrate against.
+/// The root paths still serve for the deprecation window, and a document that
+/// omitted them would tell an existing integrator their working endpoint does
+/// not exist -- while one that listed them as equals would give a new client no
+/// reason to prefer the version that is not going away. `deprecated: true` is
+/// the distinction, and it is what a generator reads to emit a warning.
+///
+/// Derived from the versioned entries rather than written out, so an endpoint
+/// cannot be documented under one spelling and not the other.
+fn add_deprecated_aliases(doc: &mut serde_json::Value) {
+    let Some(paths) = doc["paths"].as_object().cloned() else {
+        return;
+    };
+    let Some(target) = doc["paths"].as_object_mut() else {
+        return;
+    };
+    for (path, item) in paths {
+        let Some(rest) = path.strip_prefix(crate::version::PREFIX) else {
+            continue;
+        };
+        let mut alias = item.clone();
+        if let Some(operations) = alias.as_object_mut() {
+            for (_, operation) in operations.iter_mut() {
+                if let Some(operation) = operation.as_object_mut() {
+                    operation.insert("deprecated".into(), serde_json::json!(true));
+                }
+            }
+        }
+        target.insert(rest.to_string(), alias);
+    }
 }
 
 #[cfg(test)]
@@ -104,12 +139,45 @@ mod tests {
     fn every_served_path_is_documented() {
         let doc = doc();
         let paths = doc["paths"].as_object().expect("paths object");
-        for expected in ["/route", "/matrix", "/matrix-graph", "/match", "/trip", "/nearest",
-                         "/vrp", "/vrp/allocate", "/health", "/ready", "/metrics"] {
+        for expected in ["/v1/route", "/v1/matrix", "/v1/matrix-graph", "/v1/match",
+                         "/v1/trip", "/v1/nearest", "/v1/vrp", "/v1/vrp/allocate",
+                         "/health", "/ready", "/metrics"] {
             assert!(paths.contains_key(expected), "{expected} is missing from the document");
         }
         // The tile path is templated, so it is matched by prefix.
-        assert!(paths.keys().any(|p| p.starts_with("/tile/")), "no tile path documented");
+        assert!(paths.keys().any(|p| p.starts_with("/v1/tile/")), "no tile path documented");
+    }
+
+    /// NFR-10/T-90. Both spellings are documented, and only one of them tells a
+    /// generator to warn.
+    #[test]
+    fn the_unversioned_paths_are_documented_as_deprecated() {
+        let doc = doc();
+        let paths = doc["paths"].as_object().expect("paths object");
+        for path in ["/route", "/matrix", "/vrp", "/vrp/allocate"] {
+            let item = paths.get(path).unwrap_or_else(|| panic!("{path} undocumented"));
+            assert_eq!(item["post"]["deprecated"], serde_json::json!(true), "{path}");
+            assert_eq!(paths[&format!("/v1{path}")]["post"].get("deprecated"), None,
+                       "/v1{path} is marked deprecated; it is the successor");
+        }
+    }
+
+    /// The aliases are derived, so nothing can be served under one spelling and
+    /// documented under only the other.
+    #[test]
+    fn every_versioned_path_has_an_alias_and_nothing_else_does() {
+        let doc = doc();
+        let paths = doc["paths"].as_object().expect("paths object");
+        for path in paths.keys() {
+            if let Some(rest) = path.strip_prefix("/v1") {
+                assert!(paths.contains_key(rest), "{path} has no deprecated alias");
+            }
+        }
+        // The probes are unversioned by design and must not have gained a twin.
+        for path in ["/health", "/ready", "/metrics"] {
+            assert!(!paths.contains_key(&format!("/v1{path}")),
+                    "/v1{path} was documented; the probes are not versioned");
+        }
     }
 
     #[test]
@@ -134,7 +202,7 @@ mod tests {
     #[test]
     fn endpoints_reference_their_request_bodies() {
         let doc = doc();
-        let body = &doc["paths"]["/route"]["post"]["requestBody"]["content"]
+        let body = &doc["paths"]["/v1/route"]["post"]["requestBody"]["content"]
             ["application/json"]["schema"]["$ref"];
         assert_eq!(body.as_str(), Some("#/components/schemas/RouteRequest"));
     }

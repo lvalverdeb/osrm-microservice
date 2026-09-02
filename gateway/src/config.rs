@@ -164,6 +164,18 @@ settings! {
     // --- VRP chunk fan-out ---
     vrp_chunk_concurrency: usize = "VRP_CHUNK_CONCURRENCY" / "4",
 
+    // --- API versioning (NFR-10) ---
+    /// When the unversioned paths stop being served, as an HTTP-date.
+    ///
+    /// NFR-10 requires a deprecation window, and a window needs an end somebody
+    /// has committed to. Empty means none has been set: the unversioned surface
+    /// still announces itself as deprecated and still points at its successor,
+    /// but no `Sunset` header is sent, because inventing a date here would be
+    /// this gateway making a promise on an operator's behalf.
+    ///
+    /// Example: `Sun, 01 Mar 2026 00:00:00 GMT`.
+    api_sunset: String = "API_SUNSET" / "",
+
     // --- Metrics ---
     metrics_endpoint: String = "METRICS_ENDPOINT" / "/metrics",
 

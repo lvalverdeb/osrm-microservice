@@ -17,6 +17,7 @@ mod pyfloat;
 mod ratelimit;
 mod redis_cache;
 mod telemetry;
+mod version;
 mod vrp;
 
 use std::sync::Arc;
@@ -25,7 +26,7 @@ use std::time::Duration;
 use std::net::SocketAddr;
 
 use axum::extract::{ConnectInfo, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -119,7 +120,14 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn router(state: AppState, metrics_path: &str) -> Router {
+/// The endpoints `NFR-10` versions: everything a client integrates against.
+///
+/// `/health`, `/ready` and the metrics scrape are deliberately not here. They
+/// are an operator's contract with its own orchestrator, not a public API, and
+/// versioning them would break every liveness probe and Prometheus job for a
+/// promise nobody asked for. The docs endpoints stay unversioned for the same
+/// reason a directory is not one of the things it lists.
+fn data_plane() -> Router<AppState> {
     Router::new()
         .route("/route", post(handlers::route))
         .route("/matrix", post(handlers::matrix))
@@ -131,6 +139,15 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         .route("/vrp/allocate", post(handlers::vrp_allocate))
         // The final segment arrives as `{y}.mvt`; the handler strips the suffix.
         .route("/tile/{profile}/{z}/{x}/{y}", get(handlers::tile))
+}
+
+fn router(state: AppState, metrics_path: &str) -> Router {
+    Router::new()
+        // NFR-10, §9.4: the versioned surface, which is the one to integrate
+        // against. Served from the same `data_plane()` as the deprecated root
+        // paths rather than a copy, so the two cannot drift.
+        .nest(version::PREFIX, data_plane())
+        .merge(data_plane())
         .route("/health", get(handlers::health))
         .route("/ready", get(handlers::ready))
         .route(metrics_path, get(handlers::metrics))
@@ -143,6 +160,11 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         // parsing `detail` got nothing to parse.
         .fallback(handlers::not_found)
         .method_not_allowed_fallback(handlers::method_not_allowed)
+        // Outermost of the response-shaping layers, so it sees the finished
+        // response whatever produced it -- including a 404 from the fallback,
+        // which is still a request on the deprecated spelling and still worth
+        // telling a client about.
+        .layer(middleware::from_fn_with_state(state.clone(), announce_deprecation))
         .layer(middleware::from_fn(require_json_body))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), observe))
@@ -150,6 +172,42 @@ fn router(state: AppState, metrics_path: &str) -> Router {
         // and reports it as the 500 it became.
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(panic_response))
         .with_state(state)
+}
+
+/// Tell a client on the deprecated unversioned surface where its endpoint went.
+///
+/// NFR-10 asks for "a deprecation window", and a window that nothing announces
+/// is one every integrator discovers the day it closes. `Deprecation: true` and
+/// a `Link` to the successor are sent on every unversioned response; `Sunset`
+/// only when `API_SUNSET` names a date, because committing an operator to one
+/// they did not choose is worse than sending no date at all.
+///
+/// The versioned surface carries none of these: a client that migrated must not
+/// keep being told to migrate.
+async fn announce_deprecation(State(state): State<AppState>,
+                              request: axum::extract::Request,
+                              next: Next) -> Response {
+    let path = request.uri().path().to_string();
+    let mut response = next.run(request).await;
+    if !version::is_unversioned(&path) || !version::has_versioned_successor(&path) {
+        return response;
+    }
+    let headers = response.headers_mut();
+    // RFC 9745 for the flag, RFC 8288 for the pointer, RFC 8594 for the date.
+    // Header values are built from a path this gateway routed and a setting an
+    // operator wrote; a malformed one is dropped rather than made fatal, since
+    // a working response with no advisory beats a 500 with one.
+    headers.insert("deprecation", HeaderValue::from_static("true"));
+    if let Ok(value) = HeaderValue::from_str(
+        &format!("<{}{}>; rel=\"successor-version\"", version::PREFIX, path)) {
+        headers.insert("link", value);
+    }
+    if !state.settings.api_sunset.is_empty() {
+        if let Ok(value) = HeaderValue::from_str(&state.settings.api_sunset) {
+            headers.insert("sunset", value);
+        }
+    }
+    response
 }
 
 /// Count every request and time it.
