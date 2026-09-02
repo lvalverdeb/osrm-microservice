@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.3 |
+| Version | 1.4 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -101,6 +101,46 @@ Prefer a mature, maintained, well-tested open-source solver core over a bespoke 
 bespoke core is justified only when a documented constraint cannot be expressed in any candidate
 engine and the business impact is quantified (§7.4). Compute is cheap; a proprietary metaheuristic
 that only one departed engineer understood is not.
+
+### CON-11 — A constraint the search cannot carry is refused, never assumed
+
+> **PROPOSED — not yet in force.** §17.1 requires sign-off from engineering, operations and
+> compliance before any change to this section binds. Until that is recorded in the amendment log,
+> this states a practice the implementation already follows; it does not yet bind anything, and
+> nothing may cite `CON-11` as authority for a review decision.
+
+Every constraint reaches the plan through four steps, in this order, and the third is the one
+that goes wrong:
+
+1. **The domain model carries it**, in the layer that owns the invariant.
+2. **The independent verifier checks it exactly**, per CON-1.
+3. **The search is told whatever can be said soundly** — which is often less than the constraint,
+   and sometimes nothing at all.
+4. **What cannot be said is refused by name**, naming the feature and what it would take.
+
+Step 3 is a *sound approximation or nothing*. An encoding that admits a violating plan is not a
+partial implementation of the constraint; it is the constraint's absence wearing its name. Where
+the engine offers no sound encoding, two answers are permitted and a third is not:
+
+- **A loop in the orchestrator** — solve, measure, narrow, solve again — for constraints that span
+  routes, which DEC-1 already places there. `vrp/depots.py` and `vrp/synchronise.py` are the shape.
+- **A refusal**, naming the instance's feature and the reason.
+- **Never a plan that violates it.** An engine that returns a plan breaking a constraint it was
+  given has answered a different question and said nothing about the difference.
+
+**Failure mode if omitted.** The system reliably detects illegal plans it had no way to avoid
+building. That is not a safety net; it is a defect that looks like one, because every part of it
+reports success: the model accepted the constraint, the search returned a plan, and only the
+verifier — after the fact, and after a dispatcher has seen it — objects. `T-72` found four
+constraints in exactly that state (skills, order-class incompatibility, site access, depot
+inventory), `T-76` found operator locks in it as well, and none of them was a missing check. Every
+one had a check. What each lacked was any way for the search to avoid the plan the check would
+reject.
+
+**Why it is constitutional rather than a plan detail.** The choice recurs for every constraint the
+platform adds, the wrong answer is invisible in testing that only checks plans, and the cost lands
+on operations rather than engineering. `T-72`–`T-78` each rediscovered it independently; the rule
+exists so the next one does not.
 
 ---
 
@@ -1374,9 +1414,9 @@ all learning.
 Each task lists dependencies, the requirements it satisfies, and a definition of done. Tasks marked
 **[GATE]** block the next slice.
 
-**Status — 50 of 61 done**, verified against the repository on 2026-09-01 (839 tests passing, CI green
-on `a70a341`). `T-72`–`T-78` are Slice 7, written in this edit from what the
-scenario corpus found; none is started. `done` means the task's artefacts exist, are tested and are on `main`; where a
+**Status — 57 of 61 done**, verified against the repository on 2026-09-02 (889 tests passing, CI
+green on `eb67694`). Slice 7 is complete: `T-72`–`T-78` all landed, and with them every requirement
+in §3 has an implementation as well as an operation behind it. `done` means the task's artefacts exist, are tested and are on `main`; where a
 definition of done has a half that needs people or production, the commit says which half is owed
 rather than counting the proxy. `blocked` and `optional` are the four that remain:
 
@@ -1716,6 +1756,7 @@ Methodology:
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
 | 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
+| 1.4 | Drafted `CON-11`, which states how a constraint reaches the plan: the model carries it, the verifier checks it exactly, the search is told whatever can be said soundly, and what cannot be said is refused by name rather than assumed. **Proposed, not in force** — §17.1 requires sign-off from engineering, operations and compliance before a §1 change binds, and that has not been recorded. Written from Slice 7, where the same choice was made independently seven times and where `T-72` and `T-76` between them found five constraints that were checked by the verifier and compiled into the search nowhere. No requirement, task or identifier was changed. | `T-72`, `T-73`, `T-74`, `T-75`, `T-76`, `T-77`, `T-78` |
 | 1.3 | Corrected the slice labels in §3.4's `Delivered by` column. Two rows cited a task from the wrong slice: VRPTW listed `T-23` under Slice 1 and PDPTW listed `T-13` under Slice 2, where §13 places them in Slice 2 and Slice 1 respectively. Both classes genuinely span two slices, so each task now carries its own slice rather than one label covering both. No task, requirement or composition changed — only the labels naming where each already sits. | `T-13`, `T-23` |
 
 *End of document.*

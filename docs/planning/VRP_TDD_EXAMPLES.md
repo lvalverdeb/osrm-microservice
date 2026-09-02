@@ -8,9 +8,11 @@ Companion to [VRP_SDD_FIT_GAP.md](VRP_SDD_FIT_GAP.md), which measures how far
 today's implementation is from the specification. This document is the route
 from one to the other.
 
-**Status — 50 of 61 examples done**, verified against the repository on
-2026-09-01 (839 tests passing, CI green on `a70a341`). The seven added in §11a
-are Slice 7's, and none is started. Every row below is marked
+**Status — 57 of 61 examples done**, verified against the repository on
+2026-09-02 (889 tests passing, CI green on `eb67694`). Slice 7's seven all
+landed. Two of them do not have the file §11a first named for them, and the
+rows say where they went instead rather than claiming a path that does not
+exist. Every row below is marked
 `**Done.**`, `**Blocked**` or `**Not built**` in its *Passes when* column.
 
 The authority on task status is the backlog in
@@ -358,13 +360,13 @@ written first and fails.
 
 | Ex | Where | Task | Requirement | Level | Passes when |
 |---|---|---|---|---|---|
-| `E-72` | `examples/src/fleet/rich/eligibility.py` | `T-72` | FR-10, FR-11, FR-31 | L1 | A plan the verifier would reject on skills, order class, site access or depot stock is never built in the first place. **Not built** |
+| `E-72` | `examples/src/fleet/p0/must_work_at_v1.py` (`UC-019`, `UC-134`) | `T-72` | FR-10, FR-11, FR-31 | L1 | A plan the verifier would reject on skills, site access or depot stock is never built in the first place; class incompatibility is refused instead, and `examples/src/fleet/adversarial/pathological_instances.py` shows that half. **Done.** No `eligibility.py`: the demonstration is two operations, and it reads better beside the others than alone |
 | `E-73` | `examples/src/fleet/rich/multi_period.py` | `T-73` | FR-23 | L2 | A clustered schedule and a spread one both make four visits; only one keeps the interval, and an unkeepable contract is refused rather than reported. **Done.** |
 | `E-74` | `examples/src/fleet/rich/ride_time.py` | `T-74` | FR-24 | L2 | A shipment's time aboard is bounded independently of its delivery window; the search is told a sound deadline and the verifier measures the journey exactly. **Done.** |
 | `E-75` | `examples/src/fleet/rich/priority_sources.py` | `T-75` | FR-25 | L1 | Three orders equal on tier are ordered by source; a statutory duty cannot be priced; an SLA window is computed from the fault timestamp. **Done.** |
 | `E-76` | `examples/src/fleet/rich/synchronisation.py` | `T-76` | FR-26 | L2 | A plain solve leaves the bike departing before the lorry arrives; the loop holds it until the handover is done, and the half no window can express is refused by name. **Done.** |
 | `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work, what it displaced is named, and with room the displaced work is re-planned rather than dropped. **Done.** |
-| `E-78` | `examples/src/fleet/dynamic/absent_driver.py` | `T-78` | FR-30, FR-32 | L2 | Stripping and redistributing beats replanning the reduced fleet — `UC-171`'s claim, which today is false and pinned as an xfail. **Not built** |
+| `E-78` | `examples/src/fleet/p0/must_work_at_v1.py` (`UC-171`) | `T-78` | FR-21, FR-30, FR-32 | L2 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry. **Done.** No `absent_driver.py`: `UC-171` is a P0 operation and belongs with the other thirteen. The claim was never false — the measurement was, because a free re-plan was being scored on a freedom the depot does not have |
 
 ---
 
