@@ -1533,7 +1533,22 @@ the window's opening instead of at the earliest reachable pickup made ordinary
 instances infeasible, because the van still has to drive there.
 | `T-75` | done | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; a statutory obligation cannot be priced; an SLA window is derived at intake |
 | `T-76` | todo | Route synchronisation: satellite transfer, convoy departure, hub cut-off | T-28, T-37 | FR-26, DEC-1 | Two coupled routes meet at a place and time, and the verifier checks the coupling rather than each route alone |
-| `T-77` | todo | Preemption of planned work by higher-priority arrivals | T-51, T-56 | FR-27, DYN-5 | Displaced work is re-planned and reported, never silently dropped; churn attributable to preemption is separated from ordinary churn |
+| `T-77` | done | Preemption of planned work by higher-priority arrivals | T-51, T-56, T-75 | FR-27, DYN-5 | Displaced work is re-planned and reported, never silently dropped; churn attributable to preemption is separated from ordinary churn |
+
+**`T-77` turned out to be mostly a reporting task**, which is worth recording
+because it looked like a search one. Whose slot an emergency takes is already
+decided: `FR-13`'s tiers and `FR-25`'s sources say what may be given up for
+what, and `T-75` priced them, so `preempt` pins the executed work and lets the
+objective choose. A preemption picking its own victims would be a second,
+quieter priority scheme competing with the declared one.
+
+What was missing was the answer. `Delta.moved` reports a reassignment and an
+abandonment identically, with `None` standing in for "no vehicle", so a plan
+moving three stops between drivers and a plan giving up on three customers were
+equally stable by the only measure anyone had. `reassigned` and `displaced`
+separate them, and displaced work is reported as `PREEMPTED` naming what took
+the slot -- while work that was never planned keeps its own reason, because the
+round was already larger than the van and the emergency did not cause that.
 | `T-78` | done | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-21, FR-30, FR-32 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry |
 
 **`UC-171`'s claim was right and the measurement was wrong**, which is worth

@@ -100,8 +100,39 @@ class Delta:
 
     @property
     def churn(self) -> int:
-        """Stops that changed vehicle. §8.3's stability measure."""
+        """Stops the plan no longer holds where it did. §8.3's stability measure.
+
+        The sum of the two below, and kept as one number because that is what
+        §8.3's churn/cost curve is swept against. Read `reassigned` and
+        `displaced` when the question is what actually happened to a customer:
+        one of them changes which driver arrives, the other means nobody does.
+        """
         return len(self.moved)
+
+    @property
+    def reassigned(self) -> dict[str, str]:
+        """Stops that changed driver and are still being done. FR-27.
+
+        Ordinary churn: a customer is told a different van, which costs
+        dispatcher trust and nothing else.
+        """
+        return {order_id: now for order_id, (_was, now) in self.moved.items()
+                if now is not None}
+
+    @property
+    def displaced(self) -> tuple[str, ...]:
+        """Stops the plan no longer serves at all. FR-27.
+
+        Not churn in the same sense, and the distinction is the point of
+        `T-77`: `moved` reports both with `None` standing in for "no vehicle",
+        so a response that counted them together said a plan reshuffling three
+        stops and a plan abandoning three were equally stable. `UC-044`'s gas
+        escape displaces planned work by design, and what it displaced has to
+        be legible as a separate fact.
+        """
+        return tuple(sorted(order_id
+                            for order_id, (_was, now) in self.moved.items()
+                            if now is None))
 
 
 @dataclass(frozen=True)
@@ -240,6 +271,93 @@ def reoptimise(problem: Problem, plan: Solution, trigger: Trigger, now: int,
         delta=_delta(problem, plan, after),
         locks=locks,
         locked_share=locked * FULL // max(total, 1))
+
+
+def preempt(problem: Problem, plan: Solution, arriving: str, now: int,
+            solve: Callable[[Problem], Solution]) -> Response:
+    """Let urgent work displace planned work that has not been done yet. FR-27.
+
+    `UC-044` is the operation: "A P1 gas escape preempts work already in
+    progress, requiring the plan to be interruptible mid-route." The arriving
+    job is not an insertion looking for slack -- if there is no slack it takes
+    somebody else's, and the question is whose.
+
+    That question is already answered. `FR-13`'s tiers and `FR-25`'s sources
+    say what may be given up for what, and `T-75` priced them so a protected
+    order outranks everything beneath it. So this does not choose: it pins what
+    has been executed, leaves the rest open, requires the arriving order, and
+    lets the objective decide. A preemption that picked its own victims would
+    be a second, quieter priority scheme competing with the declared one.
+
+    What it does own is the reporting. `FR-27` requires displaced work to be
+    "re-planned rather than silently dropped", and the delta separates the two
+    outcomes: `reassigned` is a customer told a different van, `displaced` is a
+    customer told nobody is coming. Before `T-77` both arrived as one number.
+
+    Args:
+        problem: the instance, with the arriving order among its orders.
+        plan: the plan as it stands.
+        arriving: the urgent order's id.
+        now: the instant; everything executed by then is immovable.
+        solve: the engine. A real one -- displacement is a choice between
+            orders, which a cheapest-insertion pass cannot make: it either
+            finds room or gives up, and giving up is how an urgent job gets
+            quietly dropped instead of a routine one.
+
+    Returns:
+        The plan, its delta, and the locks that held the executed work.
+
+    Raises:
+        ValueError: if the arriving order is not in the problem, or is already
+            planned -- preemption is about work that has just appeared, and a
+            re-optimisation of work already placed is `reoptimise`.
+    """
+    if arriving not in {order.id for order in problem.orders}:
+        raise ValueError(f"{arriving} is not an order in this problem")
+    if any(step.order_id == arriving
+           for route in plan.routes for step in route.steps):
+        raise ValueError(
+            f"{arriving} is already planned; preemption is for work that has "
+            "just arrived, and moving placed work is what reoptimise does")
+
+    locks = commit_locks(problem, plan, now)
+    after = solve(replace(problem, locks=problem.locks + locks))
+
+    served = {step.order_id for route in after.routes
+              for step in route.steps if step.order_id}
+    if arriving not in served:
+        raise RuntimeError(
+            f"{arriving} arrived urgent and was not planned. Either it is "
+            "declinable -- check its tier, source and prize -- or no vehicle "
+            "is eligible for it, which pre-flight reports before any of this")
+
+    delta = _delta(problem, plan, after)
+    total = sum(1 for route in plan.routes for step in route.steps
+                if step.order_id)
+    executed = sum(len(lock.order_ids) for lock in locks
+                   if lock.kind == "FIX_ROUTE_PREFIX")
+    return Response(plan=_report_displaced(problem, after, delta, arriving),
+                    delta=delta, locks=locks,
+                    locked_share=executed * FULL // max(total, 1))
+
+
+def _report_displaced(problem: Problem, after: Solution, delta: Delta,
+                      arriving: str) -> Solution:
+    """Say who was displaced and by what, rather than leaving a gap.
+
+    `FR-27`: displaced work is "re-planned rather than silently dropped". Where
+    it could not be re-planned, the plan has to name it -- an order that simply
+    stops appearing is the silent drop the requirement forbids.
+    """
+    displaced = set(delta.displaced)
+    if not displaced:
+        return after
+    return replace(after, unassigned=tuple(
+        {**row,
+         **({"reason_code": "PREEMPTED",
+             "explanation": f"displaced by {arriving}, which outranks it"}
+            if row["order_id"] in displaced else {})}
+        for row in after.unassigned))
 
 
 def recover_from_absence(problem: Problem, plan: Solution,
