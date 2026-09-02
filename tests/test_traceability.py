@@ -177,12 +177,22 @@ def test_every_example_marked_done_points_at_a_file_that_exists():
 
 
 def test_no_module_claims_a_task_that_has_not_landed():
-    """A docstring citing an unstarted task reads as provenance and is a
-    forward reference nobody will come back to correct."""
+    """A module whose provenance line cites an unlanded task is claiming to
+    implement something nobody has built.
+
+    Scoped to that line rather than the whole docstring: a module saying
+    "fitting real profiles is `T-63`, which needs telematics" tells a reader
+    where the missing half went, and flagging it would train people to delete
+    the most useful sentence in the file."""
     status = dict(re.findall(r'^\| `(T-\d+)` \| (\w+) \|', _text(SDD), re.MULTILINE))
     claims = []
     for path in SOURCES:
-        head = _text(path)[:2000]
+        # The provenance line only -- this repository writes it in the first
+        # few lines of the module docstring ("landed for E-40/T-40"). A task
+        # named further down is usually the opposite of a claim: it says where
+        # the *missing* half lives, which is exactly what a reader needs, and
+        # an earlier version of this check reported that as a defect.
+        head = "\n".join(_text(path).splitlines()[:4])
         for task in sorted(set(re.findall(r'\bT-\d+\b', head))):
             if status.get(task) not in (None, "done"):
                 claims.append(f"{path.relative_to(REPO)}: {task} is "

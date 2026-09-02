@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.6 |
+| Version | 1.7 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -1432,21 +1432,31 @@ all learning.
 Each task lists dependencies, the requirements it satisfies, and a definition of done. Tasks marked
 **[GATE]** block the next slice.
 
-**Status — 58 of 62 done**, verified against the repository on 2026-09-02 (901 tests passing, CI
-green on `bc476f5`). `T-72`–`T-79` all landed; `T-79` was filed and closed after a traceability
-audit found `NFR-04` defined and owned by nobody. The four that remain are blocked on data or
-hardware, not effort. `done` means the task's artefacts exist, are tested and are on `main`; where a
+**Status — 60 of 64 done**, verified against the repository on 2026-09-02 (912 tests passing, CI
+green on `2928a30`). `T-40` was unblocked by separating its construction from its data and turns
+out to have been buildable all along; `T-80` and `T-81` were filed in the same edit. Every blocked
+row now names the specific thing that would unblock it, so the claim can be checked rather than
+inherited. `done` means the task's artefacts exist, are tested and are on `main`; where a
 definition of done has a half that needs people or production, the commit says which half is owed
 rather than counting the proxy. `blocked` and `optional` are the four that remain:
 
 | ID | Why it is open |
 |---|---|
-| `T-40` | `osrm-routed` exposes no departure-time parameter, so there is nothing to fit FIFO speed profiles against. Inventing profiles would make its FIFO property test prove nothing about real travel. |
-| `T-63` | Depends on `T-40`. A fitted speed multiplier would have no consumer. |
+| `T-63` | **Unblocks when** executed routes carry enough arc timings to fit per-bucket multipliers against free flow. `ExecutedRoute` already records a departure and an arrival per stop, which is the observation §12.2 needs; what is missing is volume, not shape. Same category as `T-61` and `T-62`'s owed halves. |
+| `T-80` | **Unblocks when** `T-63` produces profiles worth planning against. Wiring the construction into route evaluation before that would trade §7.5's O(1) concatenation for arithmetic about a congestion nobody measured. |
 | `T-41` | `COULD` priority, and this backlog's own note says it is the only task with no data source in the current stack: no charger locations, no charging curves. |
 | `T-67` | Optional accelerator profile. Needs GPU hardware not present in this environment; the CPU path is unaffected either way. |
 
-None of the four is blocked on effort. A status column goes stale the moment somebody forgets to
+**`T-40`'s row used to read** "`osrm-routed` exposes no departure-time parameter, so there is
+nothing to fit FIFO speed profiles against". That conflated two jobs. OSRM cannot *serve*
+time-dependent travel, which is true and permanent; but §12.2 fits multipliers *against* the
+engine's free-flow assumptions from observed traces, so OSRM's lack of a departure-time parameter
+was never what stood in the way. And `T-40`'s own definition of done — a FIFO property test and the
+filter's false-negative rate — asks about the construction, not about anybody's traffic. The
+construction is `vrp/timedependent.py` and needed no data at all. `T-63` waited on `T-40` and
+`T-40` waited on `T-63`'s data, and neither was waiting on the outside world.
+
+None of the remaining four is blocked on effort. A status column goes stale the moment somebody forgets to
 update it, so it carries the date and the commit it was checked against — a marker that cannot be
 dated is one nobody can trust.
 
@@ -1501,7 +1511,7 @@ dated is one nobody can trust.
 | `T-37` | done | Decomposition orchestrator: adaptive cluster-first + POPMUSIC sub-problem re-optimisation + cross-boundary pruned local search | T-36 | §7.6, NFR-01 | 10k-stop instance within 60 min; DEC-1…DEC-3 verified |
 | `T-38` | done | Set-partitioning polish over the generated route pool | T-36 | ALG-6 | Never worse than the best pooled trajectory on any frozen-corpus instance, with the mean recovery reported; ALG-6's ≥ 0.5% demonstrated separately where its premise holds (see the measurement note under ALG-6) |
 | `T-39` | done | Route-level departure-time scheduling + TSPTW polish | T-25 | ALG-5 | Duty-duration reduction measured and reported |
-| `T-40` | blocked | Time-dependent travel: FIFO speed profiles, bucketed evaluation, lower-bound filtering | T-11, T-33 | FR-14, §6.3 | FIFO property test; false-negative rate of the filter reported |
+| `T-40` | done | Time-dependent travel: FIFO speed profiles, bucketed evaluation, lower-bound filtering | T-11, T-33 | FR-14, §6.3 | FIFO property test; false-negative rate of the filter reported |
 | `T-41` | blocked | EV range and en-route recharging with charging-time functions | T-33 | FR-20 | Range never violated on a generated EV corpus; charging time appears in the duty timeline, not bolted on after. **`COULD` priority** — the only optional task in this backlog, and the only one with no data source in the current stack (charger locations and charging curves) |
 
 ### Slice 4 — Allocation
@@ -1534,6 +1544,7 @@ dated is one nobody can trust.
 | `T-61` | done | Telematics ingestion + plan-adherence metric | T-15 | CON-6, §12.4 | Adherence dashboard by depot/driver/territory |
 | `T-62` | done | Service-time calibration pipeline | T-61 | §12.1 | Monthly re-fit job; drift alerting |
 | `T-63` | blocked | Speed-profile calibration pipeline (FIFO-preserving) | T-40, T-61 | §12.2 | Weekly re-fit; held-out validation report |
+| `T-81` | done | Split `T-40`'s construction from its data, and record what each is blocked on | — | §13 | Every blocked row names the specific thing that would unblock it |
 | `T-64` | done | Zone-sequence prior learned from executed routes (advisory only) | T-61 | §12.4 step 2 | Improves adherence with no verifier regressions |
 | `T-65` | done | Shadow mode + canary rollout tooling with rollback criteria | T-61 | §11.4 | One depot canary run completed with written go/no-go |
 | `T-66` | done | Public `/verify` endpoint | T-04 | §9.4, CON-1 | External plans verifiable; used by at least one integrator |
@@ -1656,6 +1667,7 @@ separate them, and displaced work is reported as `PREEMPTED` naming what took
 the slot -- while work that was never planned keeps its own reason, because the
 round was already larger than the van and the emergency did not cause that.
 | `T-78` | done | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-21, FR-30, FR-32 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry |
+| `T-80` | blocked | Time-dependent evaluation on the route path, with §7.5's mitigation for the concatenation shortcuts it forbids | T-40, T-63 | FR-14, §6.3, §7.5 | A plan built on a peak profile is later than the same plan built on free flow, and the local search still meets NFR-01 |
 | `T-79` | done | Graceful matrix degradation: cached fallback, and a `DEGRADED` plan that says so | T-11, T-15 | NFR-04, MTX-11, `UC-072` | A build whose provider fails mid-way returns the cached matrix rather than raising; every plan costed on an incomplete or haversine matrix carries `DEGRADED` out to the caller; `test_uc072_a_degraded_matrix_is_labelled_rather_than_fatal` xpasses |
 
 **`UC-171`'s claim was right and the measurement was wrong**, which is worth
@@ -1782,6 +1794,7 @@ Methodology:
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
 | 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
+| 1.7 | Unblocked `T-40` by separating the construction from the data, and filed `T-80` for the integration and `T-81` for the audit of the blocker notes themselves. `T-40`'s row claimed OSRM's lack of a departure-time parameter left "nothing to fit FIFO speed profiles against"; §12.2 fits multipliers *against* free flow from observed traces, so that was never the obstacle, and the task's own definition of done asks about the construction rather than about real traffic. `T-40` and `T-63` had been waiting on each other. Every blocked row now states what would unblock it, which is the only form of the claim anybody can check. | `T-40`, `T-63`, `T-80`, `T-81` |
 | 1.6 | Filed `T-79` for `NFR-04` (graceful matrix degradation), defined since version 1.0 with no task claiming it — found by `tests/test_traceability.py`, not by review. The requirement asks for two things and the system has one: a mid-build provider failure propagates rather than fabricating arcs, so nothing silently substitutes haversine, but there is no cached fallback and no `DEGRADED` label on a plan costed against an incomplete matrix. `UC-072` is the operation and is `PARTIALLY_MODELLED` for exactly that split. No requirement was added or changed. | `T-79` |
 | 1.5 | Recorded `INV-10`–`INV-15` in §4.3, which the independent verifier has enforced without the specification naming them. §4.3 listed nine invariants and §11.2 claimed the verifier "checks INV-1 … INV-9"; it checks fifteen. Each was added when a requirement arrived that none of the first nine covered — compatibility and site access, reloads, dock capacity, depot inventory, ride time, and route synchronisation — and each covers a plan that satisfied every invariant §4.3 named while being one nobody could drive. Found by a mechanical audit of the repository rather than by review, which is the point: a specification that understates what the system checks invites somebody to rely on a guarantee it does not know it makes. No requirement was added or renumbered; this records behaviour that already exists. | `T-04`, `T-22`, `T-28`, `T-45`, `T-74`, `T-76` |
 | 1.4 | Drafted `CON-11`, which states how a constraint reaches the plan: the model carries it, the verifier checks it exactly, the search is told whatever can be said soundly, and what cannot be said is refused by name rather than assumed. **Proposed, not in force** — §17.1 requires sign-off from engineering, operations and compliance before a §1 change binds, and that has not been recorded. Written from Slice 7, where the same choice was made independently seven times and where `T-72` and `T-76` between them found five constraints that were checked by the verifier and compiled into the search nowhere. No requirement, task or identifier was changed. | `T-72`, `T-73`, `T-74`, `T-75`, `T-76`, `T-77`, `T-78` |

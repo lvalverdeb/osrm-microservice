@@ -8,10 +8,10 @@ Companion to [VRP_SDD_FIT_GAP.md](VRP_SDD_FIT_GAP.md), which measures how far
 today's implementation is from the specification. This document is the route
 from one to the other.
 
-**Status — 58 of 62 examples done**, verified against the repository on
-2026-09-02 (901 tests passing, CI green on `bc476f5`). Slice 7's seven all
-landed, and `E-79` was added and closed with `T-79` when an audit found
-`NFR-04` owned by nobody. Two of them do not have the file §11a first named for them, and the
+**Status — 60 of 63 examples done**, verified against the repository on
+2026-09-02 (912 tests passing, CI green on `2928a30`). `E-40` moved from
+Blocked to Done when `T-40`'s blocker turned out to be a misreading, and `E-80`
+was added for the integration that genuinely does wait on data. Two of them do not have the file §11a first named for them, and the
 rows say where they went instead rather than claiming a path that does not
 exist. Every row below is marked
 `**Done.**`, `**Blocked**` or `**Not built**` in its *Passes when* column.
@@ -247,7 +247,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-37 | `tests/vrp/test_decomposition.py` | `T-37` | §7.6 | | L5 | **Done.** Large instances decompose and recombine with no invariant violation at the boundaries |
 | E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | | L5 | **Done.** Never worse than the best pooled trajectory on the frozen corpus (mean reported); ≥ 0.5% on a capacity-pressured 200-customer instance |
 | E-39 | `examples/src/fleet/rich/departure_scheduling.py` | `T-39` | ALG-5 | TSP | L1 | **Done.** Duty duration measurably reduced by departure-time choice |
-| E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | | L2 | FIFO (no-passing) property holds across every bucket boundary. **Blocked**: OSRM has no departure-time parameter — see the wishlist |
+| E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | | L2 | FIFO (no-passing) property holds across every bucket boundary, and the formulation §6.3 forbids is shown overtaking on the same instance. **Done.** The blocker was misread: OSRM cannot serve time-dependent travel, but §12.2 fits multipliers *against* free flow, so the construction never needed a departure-time parameter |
 | E-41 | `examples/src/fleet/rich/ev_recharging.py` | `T-41` | FR-20 | | L2 | Range never violated on a generated EV corpus; charging time appears in the duty timeline rather than being added afterwards. **`COULD` priority, and blocked** on charger locations and charging curves, which this stack has no source for. **Not built**: `COULD` priority, and the only task in the backlog with no data source in this stack — no charger locations, no charging curves |
 
 ---
@@ -369,6 +369,7 @@ written first and fails.
 | `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work, what it displaced is named, and with room the displaced work is re-planned rather than dropped. **Done.** |
 | `E-78` | `examples/src/fleet/p0/must_work_at_v1.py` (`UC-171`) | `T-78` | FR-21, FR-30, FR-32 | L2 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry. **Done.** No `absent_driver.py`: `UC-171` is a P0 operation and belongs with the other thirteen. The claim was never false — the measurement was, because a free re-plan was being scored on a freedom the depot does not have |
 | `E-79` | `examples/src/fleet/infra/degraded_matrix.py` | `T-79` | NFR-04, MTX-11 | L1 | A provider that dies mid-build keeps the tiles that arrived, leaves the rest `UNREACHABLE` rather than guessing, and carries the reason out to the plan a dispatcher reads. **Done.** |
+| `E-80` | `examples/src/fleet/rich/time_dependent_routes.py` | `T-80` | FR-14, §7.5 | L2 | A plan built on a peak profile is later than the same plan on free flow, and the local search still meets NFR-01. **Not built** |
 
 ---
 
