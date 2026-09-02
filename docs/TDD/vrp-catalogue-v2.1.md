@@ -1040,7 +1040,6 @@ Engineers to customer premises in booked slots.
 - **Binds:** appointment windows and skill coverage
 - **Exercises:** FR-04, FR-05, FR-08, FR-10, FR-16
 - **Breaks:** modelling technicians as depot-based. Each home is a distinct start and end, making this multi-depot even with one office
-- **Status:** PARTIALLY_MODELLED — home-start routing works and beats a depot-based model once the commute it omits is counted; FR-10's skills are checked by the verifier and reported at pre-flight but compiled into the search nowhere, so a plan may send gas work to an electricity-only crew and be rejected afterwards
 #### UC-022 — Home care and domiciliary visits
 
 Carers visiting clients on a recurring weekly schedule.
