@@ -285,7 +285,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-60 | `examples/src/fleet/explain/why_unassigned.py` | `T-60` | CON-5, FR-36 | | L1 | **Done.** Per-order rationale, marginal cost, and `would_fit_if` for every rejected order |
 | E-61 | `tests/vrp/test_plan_adherence.py` | `T-61` | CON-6, §12.4 | | L6 | **Done.** Adherence computed per depot, driver and territory from telematics |
 | E-62 | `examples/src/fleet/learn/service_time_calibration.py` | `T-62` | §12.1 | | L1 | **Done.** Monthly re-fit reproduces a known fixture; drift alerts fire |
-| E-63 | `examples/src/fleet/learn/speed_calibration.py` | `T-63` | §12.2 | | L1 | Weekly re-fit preserves FIFO; held-out validation reported. **Blocked** on `T-40`: without departure-time speed profiles a fitted multiplier would have no consumer |
+| E-63 | `examples/src/fleet/learn/speed_calibration.py` | `T-63` | §12.2 | | L1 | Where a speed profile's numbers come from: multipliers fitted from what the vans did, against what the engine believed. Shows the arcs that cross the hour being discarded, the fit recovering the traffic that produced it, a held-out week scoring 0s against 880s for a week of gridlock, and the fit refusing to average arc classes together. **Done.** |
 | E-64 | `tests/vrp/test_zone_prior.py` | `T-64` | §12.4 | | L6 | **Done.** Adherence improves with no verifier regression; advisory only, never a hard constraint |
 | E-65 | `tests/vrp/test_shadow_and_canary.py` | `T-65` | §11.4 | | L6+L7 | **Done.** One depot canary completed with a written go/no-go |
 | E-66 | `tests/vrp/test_verify_endpoint.py` | `T-66` | §9.4, CON-1 | | L1 | **Done.** An externally supplied plan is verifiable through the public endpoint |
