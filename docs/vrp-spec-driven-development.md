@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.4 |
+| Version | 1.5 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -475,6 +475,24 @@ Step
   independently of the solver.
 - `INV-8` All locks (§6.6) are satisfied exactly.
 - `INV-9` `objective_breakdown` recomputed from `routes` equals the solver-reported objective.
+- `INV-10` No route carries an order whose `required_skills` its vehicle lacks, whose `order_class`
+  another order aboard forbids, or whose site refuses that vehicle's access class or weight
+  (`FR-10`, `FR-11`).
+- `INV-11` Reloads happen only at a vehicle's permitted reload locations, and no more often than
+  `max_reloads` (`FR-09`).
+- `INV-12` No depot dispatches more vehicles in a time slot than it has bays (`FR-19`).
+- `INV-13` No depot supplies more of a dimension than it holds, counted **globally** across every
+  route drawing on it, never per cluster (`FR-31`, `DEC-1`).
+- `INV-14` No shipment is aboard longer than its `max_ride_time`, measured from departing the
+  pickup to arriving at the delivery (`FR-24`).
+- `INV-15` Two coupled routes meet as their `Synchronisation` requires, on different vehicles
+  (`FR-26`).
+
+**`INV-10`–`INV-15` are numbered past §4.3's original nine deliberately.** Each was added when a
+requirement arrived that none of the first nine covered, and each covers a plan that satisfied
+every invariant this section named while being one nobody could drive. They are listed here rather
+than only in `vrp/verify/verifier.py` because a specification that understates what the system
+checks invites somebody to rely on a guarantee it does not know it makes.
 
 **INV-9 is the single most valuable test in the system.** Most silent optimisation bugs are
 objective-evaluation drift between the incremental move evaluator and ground truth.
@@ -1318,7 +1336,7 @@ A separate module, in a separate package, with no shared code with any solver, t
 - Recomputes every arrival, departure, load, and cost from the raw route sequences and the pinned
   matrix.
 - Evaluates the hours-of-service timeline via the rules engine.
-- Checks INV-1 … INV-9 and every lock.
+- Checks INV-1 … INV-15 and every lock.
 - Is used in CI, at runtime before any plan is published, and via the public `/verify` endpoint.
 
 It MUST be written by a different author than the solver adapter, and MUST NOT import the
@@ -1438,7 +1456,7 @@ dated is one nobody can trust.
 | `T-01` | done | Repository scaffold, SDD artefacts, ADR log, CI skeleton | — | CON-* | `constitution.md`, `spec.md`, `plan.md`, `tasks.md` in repo; CI runs lint + tests |
 | `T-02` | done | Domain model types (§4) with integer units and exhaustive validation | T-01 | FR-01…FR-16 | Types compile; property tests generate valid/invalid instances |
 | `T-03` | done | Canonical evaluator: recompute objective + timeline from a solution | T-02 | INV-9, OBJ-* | Deterministic; unit-tested against hand-computed fixtures |
-| `T-04` | done | **[GATE]** Independent verifier package (§11.2) | T-02 | CON-1, INV-1…INV-9 | Separate package, separate author; detects seeded violations in 100% of mutation tests |
+| `T-04` | done | **[GATE]** Independent verifier package (§11.2) | T-02 | CON-1, INV-1…INV-9 (extended to INV-15 by later tasks) | Separate package, separate author; detects seeded violations in 100% of mutation tests |
 | `T-05` | done | Instance generator + property test harness (L2) | T-03, T-04 | §11.1 | 10⁵ random instances produce zero invariant violations |
 | `T-06` | done | VRPLIB/Solomon/GH/CVRPLIB/Li&Lim readers + BKS registry | T-02 | §11.3 | All five sets parse; BKS values loaded and versioned |
 
@@ -1756,6 +1774,7 @@ Methodology:
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
 | 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
+| 1.5 | Recorded `INV-10`–`INV-15` in §4.3, which the independent verifier has enforced without the specification naming them. §4.3 listed nine invariants and §11.2 claimed the verifier "checks INV-1 … INV-9"; it checks fifteen. Each was added when a requirement arrived that none of the first nine covered — compatibility and site access, reloads, dock capacity, depot inventory, ride time, and route synchronisation — and each covers a plan that satisfied every invariant §4.3 named while being one nobody could drive. Found by a mechanical audit of the repository rather than by review, which is the point: a specification that understates what the system checks invites somebody to rely on a guarantee it does not know it makes. No requirement was added or renumbered; this records behaviour that already exists. | `T-04`, `T-22`, `T-28`, `T-45`, `T-74`, `T-76` |
 | 1.4 | Drafted `CON-11`, which states how a constraint reaches the plan: the model carries it, the verifier checks it exactly, the search is told whatever can be said soundly, and what cannot be said is refused by name rather than assumed. **Proposed, not in force** — §17.1 requires sign-off from engineering, operations and compliance before a §1 change binds, and that has not been recorded. Written from Slice 7, where the same choice was made independently seven times and where `T-72` and `T-76` between them found five constraints that were checked by the verifier and compiled into the search nowhere. No requirement, task or identifier was changed. | `T-72`, `T-73`, `T-74`, `T-75`, `T-76`, `T-77`, `T-78` |
 | 1.3 | Corrected the slice labels in §3.4's `Delivered by` column. Two rows cited a task from the wrong slice: VRPTW listed `T-23` under Slice 1 and PDPTW listed `T-13` under Slice 2, where §13 places them in Slice 2 and Slice 1 respectively. Both classes genuinely span two slices, so each task now carries its own slice rather than one label covering both. No task, requirement or composition changed — only the labels naming where each already sits. | `T-13`, `T-23` |
 
