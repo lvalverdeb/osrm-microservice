@@ -25,6 +25,8 @@ import math
 import random
 from collections.abc import Callable
 
+from vrp.battery import ChargingCurve
+from vrp.hos.rules import DriverState
 from vrp.matrix import PlanarMatrix
 from vrp.model import (
     UNREACHABLE,
@@ -33,10 +35,12 @@ from vrp.model import (
     Order,
     Problem,
     StopSpec,
+    Synchronisation,
     TimeWindow,
     TravelMatrix,
     Vehicle,
 )
+from vrp.timedependent import SpeedProfile
 
 HOUR = 3600
 DAY = TimeWindow(start=0, end=12 * HOUR)
@@ -691,3 +695,107 @@ NOT_AN_INSTANCE: dict[str, str] = {
               "provider that stops responding mid-build has no Problem to "
               "attach to. Exercised against the matrix layer instead.",
 }
+
+
+# --------------------------------------------- NFR-08's serialisation fixture
+
+def _profile(multiplier: int) -> SpeedProfile:
+    return SpeedProfile(bucket_seconds=3600,
+                        multipliers_ppt=tuple(multiplier for _ in range(24)))
+
+
+def maximal_problem() -> Problem:
+    """A problem with every field set to something other than its default.
+
+    Not a scenario: nothing about it is operationally sensible, and it is here
+    because `NFR-08` needs an instance that exercises the model's serialisation
+    completely. A round trip is only as good as what goes through it, and the
+    one test that round-tripped a problem used one so plain that dropping thirty
+    fields changed nothing about it -- which is how thirty came to be dropped.
+
+    `tests/vrp/test_snapshot.py` carries the guard that fails when a dataclass
+    gains a field this leaves at its default.
+    """
+    window = TimeWindow(start=7 * 3600, end=18 * 3600, hardness="SOFT",
+                        earliness_cost_per_sec=2, lateness_cost_per_sec=5)
+    locations = (
+        Location(id="D", lat=9.9, lon=-84.0, matrix_index=0, dwell_overhead=60,
+                 dock_capacity=3, inventory={"kg": 500},
+                 access_classes=frozenset({"yard", "night", "hgv"}),
+                 max_vehicle_kg=18_000),
+        Location(id="C1", lat=9.91, lon=-84.01, matrix_index=1,
+                 dwell_overhead=30, dock_capacity=1, inventory={"kg": 10},
+                 access_classes=frozenset({"lez", "night"}), max_vehicle_kg=7_500),
+        Location(id="C2", lat=9.92, lon=-84.02, matrix_index=2,
+                 dwell_overhead=45, dock_capacity=2, inventory={"kg": 20},
+                 access_classes=frozenset({"lez", "hgv", "yard"}),
+                 max_vehicle_kg=3_500),
+    )
+    stop = StopSpec(location_id="C1", time_windows=(window,), service_fixed=300,
+                    service_per_unit=12, service_per_unit_dimension="kg")
+    other = StopSpec(location_id="C2", time_windows=(window,), service_fixed=240,
+                     service_per_unit=8, service_per_unit_dimension="kg")
+    depot_pickup = StopSpec(location_id="D", time_windows=(window,),
+                            service_fixed=180, service_per_unit=5,
+                            service_per_unit_dimension="kg")
+    # Shipments rather than jobs: `max_ride_time` bounds pickup-to-delivery and
+    # the model refuses it on a one-stop order, so a maximal instance that
+    # exercises it has to carry both ends.
+    orders = (
+        Order(id="O1", kind="SHIPMENT", quantities={"kg": 4},
+              pickup=depot_pickup, delivery=stop,
+              priority_tier=2, prize=900, release_time=8 * 3600,
+              required_skills=frozenset({"tail-lift", "adr", "hiab"}),
+              max_ride_time=5400,
+              priority_source="SLA", order_class="chilled",
+              incompatible_with=frozenset({"raw", "hazardous"})),
+        # No prize: the model refuses one on a STATUTORY order, and `prize` is
+        # exercised by O1. The guard below asks that *some* instance sets each
+        # field, not that every instance sets all of them -- which no instance
+        # could, since the model has rules about which combinations mean
+        # anything.
+        Order(id="O2", kind="SHIPMENT", quantities={"kg": 6},
+              pickup=depot_pickup, delivery=other,
+              priority_tier=1, release_time=7 * 3600,
+              required_skills=frozenset({"tail-lift", "adr"}), max_ride_time=7200,
+              priority_source="STATUTORY", order_class="raw",
+              incompatible_with=frozenset({"chilled", "frozen"})),
+    )
+    vehicles = (
+        Vehicle(id="V1", capacities={"kg": 100}, shift=window,
+                start_location_id="D", end_location_id="D",
+                max_duration=9 * 3600, max_distance=250_000,
+                skills=frozenset({"tail-lift", "adr", "hiab", "crane"}),
+                fixed_cost=5_000,
+                cost_per_metre=2, cost_per_second=3,
+                overtime_cost_per_second=7, cost_per_order=40,
+                profile="lorry", service_factor_ppt=600,
+                reload_locations=frozenset({"D", "C1"}), max_reloads=2,
+                reload_duration=900, battery_wh=60_000,
+                consumption_wh_per_km=250,
+                charger_locations=frozenset({"D", "C2"}),
+                charging_curve=ChargingCurve(bands=((800, 50_000),
+                                                    (1000, 15_000))),
+                initial_soc_ppt=850, access_class="lez",
+                gross_weight_kg=3_400, open_route=True, hos_rules="EU-561",
+                initial_state=DriverState(drive_used=3_600, duty_used=7_200,
+                                          since_last_break=1_800,
+                                          week_drive_used=36_000)),
+    )
+    grid = ((0, 120, 3_600), (120, 0, 900), (3_600, 900, 0))
+    return Problem(
+        id="maximal", locations=locations, orders=orders, vehicles=vehicles,
+        matrix=TravelMatrix(version="snap-v1", durations=grid, distances=grid,
+                            degraded="cached: provider timed out mid-build"),
+        horizon=TimeWindow(start=0, end=24 * 3600),
+        locks=(Lock(kind="PIN_ORDER_TO_VEHICLE", order_id="O1",
+                    vehicle_id="V1"),
+               Lock(kind="PIN_DEPOT", order_id="O2", depot_id="D"),
+               Lock(kind="FIX_SEQUENCE", vehicle_id="V1",
+                    order_ids=("O1", "O2")),
+               Lock(kind="FREEZE_UNTIL", instant=8 * 3600)),
+        synchronisations=(Synchronisation(kind="TRANSFER", first="O1",
+                                          second="O2", min_gap=300,
+                                          max_gap=1_800),),
+        speed_profiles={"local": _profile(900), "arterial": _profile(800),
+                        "trunk": _profile(700)})

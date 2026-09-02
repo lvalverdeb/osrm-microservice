@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vrp.battery import FULL_PPT
+from vrp.battery import FULL_PPT, ChargingCurve
 from vrp.hos.rules import DriverState
 from vrp.timedependent import arc_class_of
 
@@ -28,7 +28,6 @@ from vrp.timedependent import arc_class_of
 # Reading one through `duration()`/`distance()` raises rather than returning
 # it, so the sentinel cannot reach arithmetic by accident either.
 if TYPE_CHECKING:                       # pragma: no cover
-    from vrp.battery import ChargingCurve
     from vrp.timedependent import SpeedProfile
 
 UNREACHABLE = -1
@@ -746,16 +745,66 @@ class Problem:
     def from_dict(cls, raw: dict[str, Any]) -> Problem:
         return cls(
             id=raw["id"],
-            locations=tuple(Location(**location) for location in raw["locations"]),
+            locations=tuple(_location_from_dict(location)
+                            for location in raw["locations"]),
             orders=tuple(_order_from_dict(order) for order in raw["orders"]),
             vehicles=tuple(_vehicle_from_dict(vehicle) for vehicle in raw["vehicles"]),
             matrix=TravelMatrix(
                 version=raw["matrix"]["version"],
                 durations=tuple(tuple(row) for row in raw["matrix"]["durations"]),
                 distances=tuple(tuple(row) for row in raw["matrix"]["distances"]),
+                # NFR-04's marker. Dropping it made a plan costed on a cached
+                # or incomplete matrix come back through the round trip looking
+                # like one costed on a live measurement.
+                degraded=raw["matrix"].get("degraded"),
             ),
             horizon=TimeWindow(**raw["horizon"]) if raw.get("horizon") else None,
+            locks=tuple(_lock_from_dict(lock) for lock in raw.get("locks", ())),
+            synchronisations=tuple(
+                Synchronisation(**sync) for sync in raw.get("synchronisations", ())),
+            speed_profile=_profile_from_dict(raw.get("speed_profile")),
+            speed_profiles=None if raw.get("speed_profiles") is None else {
+                arc_class: _profile_from_dict(profile)
+                for arc_class, profile in raw["speed_profiles"].items()},
         )
+
+
+def _location_from_dict(raw: dict[str, Any]) -> Location:
+    """Rebuild a site, restoring the collection types JSON cannot carry.
+
+    A snapshot is JSON (NFR-08), and JSON has neither a set nor a tuple. Passing
+    the decoded lists straight to the constructor produced a `Location` that
+    compared unequal to the one it was written from -- the values were right and
+    the types were not, which is the kind of difference an audit trail must not
+    have.
+    """
+    return Location(
+        id=raw["id"], lat=raw["lat"], lon=raw["lon"],
+        matrix_index=raw["matrix_index"],
+        dwell_overhead=raw.get("dwell_overhead", 0),
+        dock_capacity=raw.get("dock_capacity"),
+        inventory=None if raw.get("inventory") is None else dict(raw["inventory"]),
+        access_classes=frozenset(raw.get("access_classes", ())),
+        max_vehicle_kg=raw.get("max_vehicle_kg"),
+    )
+
+
+def _lock_from_dict(raw: dict[str, Any]) -> Lock:
+    return Lock(
+        kind=raw["kind"], order_id=raw.get("order_id"),
+        vehicle_id=raw.get("vehicle_id"),
+        order_ids=tuple(raw.get("order_ids", ())),
+        depot_id=raw.get("depot_id"), instant=raw.get("instant"),
+    )
+
+
+def _profile_from_dict(raw: dict[str, Any] | None) -> SpeedProfile | None:
+    if raw is None:
+        return None
+    from vrp.timedependent import SpeedProfile as _SpeedProfile
+
+    return _SpeedProfile(bucket_seconds=raw["bucket_seconds"],
+                         multipliers_ppt=tuple(raw["multipliers_ppt"]))
 
 
 def _stop_from_dict(raw: dict[str, Any] | None) -> StopSpec | None:
@@ -765,6 +814,8 @@ def _stop_from_dict(raw: dict[str, Any] | None) -> StopSpec | None:
         location_id=raw["location_id"],
         time_windows=tuple(TimeWindow(**w) for w in raw.get("time_windows", ())),
         service_fixed=raw.get("service_fixed", 0),
+        service_per_unit=raw.get("service_per_unit", 0),
+        service_per_unit_dimension=raw.get("service_per_unit_dimension"),
     )
 
 
@@ -779,10 +830,25 @@ def _order_from_dict(raw: dict[str, Any]) -> Order:
         prize=raw.get("prize", 0),
         release_time=raw.get("release_time", 0),
         required_skills=frozenset(raw.get("required_skills", ())),
+        max_ride_time=raw.get("max_ride_time"),
+        priority_source=raw.get("priority_source", "COMMERCIAL"),
+        order_class=raw.get("order_class"),
+        incompatible_with=frozenset(raw.get("incompatible_with", ())),
     )
 
 
 def _vehicle_from_dict(raw: dict[str, Any]) -> Vehicle:
+    """Every field, because NFR-08 replays a plan from this.
+
+    This reconstructed nine of twenty-eight fields until `T-89`. The other
+    nineteen -- every cost, the hours-of-service rule set, site access, the
+    battery, reloads -- were dropped in silence, so a problem that went through
+    the round trip came back cheaper to serve and legal in more ways than the
+    original. Nothing caught it because the only test round-tripping a problem
+    used one with none of them set.
+    """
+    curve = raw.get("charging_curve")
+    state = raw.get("initial_state")
     return Vehicle(
         id=raw["id"],
         capacities=dict(raw["capacities"]),
@@ -792,6 +858,27 @@ def _vehicle_from_dict(raw: dict[str, Any]) -> Vehicle:
         max_duration=raw.get("max_duration"),
         max_distance=raw.get("max_distance"),
         skills=frozenset(raw.get("skills", ())),
+        fixed_cost=raw.get("fixed_cost", 0),
+        cost_per_metre=raw.get("cost_per_metre", 0),
+        cost_per_second=raw.get("cost_per_second", 0),
+        overtime_cost_per_second=raw.get("overtime_cost_per_second", 0),
+        cost_per_order=raw.get("cost_per_order", 0),
+        profile=raw.get("profile", "driving"),
+        service_factor_ppt=raw.get("service_factor_ppt", 1000),
+        reload_locations=frozenset(raw.get("reload_locations", ())),
+        max_reloads=raw.get("max_reloads", 0),
+        reload_duration=raw.get("reload_duration", 0),
+        battery_wh=raw.get("battery_wh"),
+        consumption_wh_per_km=raw.get("consumption_wh_per_km", 0),
+        charger_locations=frozenset(raw.get("charger_locations", ())),
+        charging_curve=None if curve is None else ChargingCurve(
+            bands=tuple(tuple(band) for band in curve["bands"])),
+        initial_soc_ppt=raw.get("initial_soc_ppt", FULL_PPT),
+        access_class=raw.get("access_class"),
+        gross_weight_kg=raw.get("gross_weight_kg"),
+        open_route=raw.get("open_route", False),
+        hos_rules=raw.get("hos_rules"),
+        initial_state=None if state is None else DriverState(**state),
     )
 
 
