@@ -370,7 +370,7 @@ written first and fails.
 | `E-78` | `examples/src/fleet/p0/must_work_at_v1.py` (`UC-171`) | `T-78` | FR-21, FR-30, FR-32 | L2 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry. **Done.** No `absent_driver.py`: `UC-171` is a P0 operation and belongs with the other thirteen. The claim was never false — the measurement was, because a free re-plan was being scored on a freedom the depot does not have |
 | `E-79` | `examples/src/fleet/infra/degraded_matrix.py` | `T-79` | NFR-04, MTX-11 | L1 | A provider that dies mid-build keeps the tiles that arrived, leaves the rest `UNREACHABLE` rather than guessing, and carries the reason out to the plan a dispatcher reads. **Done.** |
 | `E-80` | `examples/src/fleet/rich/time_dependent.py` (§2–3) | `T-80` | FR-14, §7.5 | L2 | The same stops finish later through a peak than at free flow, the verifier agrees with the evaluator about every arrival, and §7.5's bound is measured on route-shaped arcs. **Done.** No separate file: it is the same construction `E-40` shows, one layer up |
-| `E-82` | `examples/src/fleet/rich/planning_under_congestion.py` | `T-82` | FR-14, NFR-01 | L2 | A plan *built* under a peak profile beats one built at free flow and evaluated under it. **Not built** |
+| `E-82` | `examples/src/fleet/rich/planning_under_congestion.py` | `T-82` | FR-14, §7.5, NFR-01 | L2 | Five stops and one 11:00 deadline: free flow says nearest-first, the peak says buy the far stop while the day is young. The free-flow plan is the *faster* of the two and is fifteen minutes late. Also shows the bound holding at every departure, and what IGP costs the polish. **Done.** |
 
 ---
 

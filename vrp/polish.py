@@ -49,7 +49,8 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from vrp.hos.schedule import schedule_route
-from vrp.model import Problem, Step, Vehicle
+from vrp.model import Problem, Step, Vehicle, travel_between
+from vrp.timedependent import fastest_possible
 
 # ALG-5's "<= ~14 stops". Held-Karp is O(2^n * n^2): fourteen stops is about
 # 3.2 million state transitions, which is a second or so; fifteen doubles it.
@@ -228,6 +229,19 @@ def _service_and_window(problem: Problem, vehicle: Vehicle, order_id: str):
     return service_time(order, vehicle, location), opens, closes
 
 
+def _floor(problem: Problem, origin: int, destination: int) -> int:
+    """The fastest an arc can ever be. §7.5's fixed-departure lower bound.
+
+    Free flow when the instance declares no profile, which is when free flow is
+    already the only speed there is.
+    """
+    free_flow = problem.matrix.duration(origin, destination)
+    profile = problem.speed_profile
+    if profile is None or free_flow <= 0:
+        return free_flow
+    return fastest_possible(free_flow, profile)
+
+
 def tsptw_sequence(problem: Problem, vehicle_id: str,
                    order_ids: list[str]) -> list[str] | None:
     """The optimal visiting order for a short route. ALG-5, Held-Karp with windows.
@@ -249,26 +263,42 @@ def tsptw_sequence(problem: Problem, vehicle_id: str,
     ending at the same stop are not interchangeable if one arrives earlier: the
     cheaper one may have no legal completion. Both are kept when neither
     dominates.
+
+    **Time-dependent travel rides along for free, and only because of FIFO.**
+    Each leg is charged at the moment the state says the vehicle leaves, which
+    is `ready` -- the DP already tracks exactly the quantity IGP needs. The
+    dominance argument survives it precisely because §6.3's no-passing property
+    holds: arriving earlier can never lead to a later completion, so a label
+    that is cheaper *and* earlier still dominates. Under a formulation that let
+    a later departure overtake an earlier one, this pruning would be unsound
+    and the DP would return sequences that are not optimal -- which is the
+    concrete reason §6.3 forbids bucketing travel time, beyond it being
+    obviously wrong.
+
+    §7.5's mitigation is here too: a candidate is dismissed on the lower bound
+    -- the leg at the fastest speed the profile ever offers -- before the exact
+    departure-dependent leg is computed. The bound never rejects a candidate
+    the exact evaluation would have kept, so the sequence is the same one the
+    unfiltered DP finds, only reached with less arithmetic.
     """
     if len(order_ids) > MAX_DP_STOPS or not order_ids:
         return None
 
     vehicle = problem.vehicle(vehicle_id)
     start, end, stops, _ = _route_nodes(problem, vehicle_id, order_ids)
-    matrix = problem.matrix
     count = len(order_ids)
     facts = [_service_and_window(problem, vehicle, o) for o in order_ids]
 
     # state[(mask, last)] -> list of non-dominated (cost, ready, path)
     state: dict[tuple[int, int], list[tuple[int, int, tuple[int, ...]]]] = {}
+    depart = vehicle.shift.start
     for i in range(count):
         service, opens, closes = facts[i]
-        arrival = vehicle.shift.start + matrix.duration(start, stops[i])
-        begin = max(arrival, opens)
+        leg = travel_between(problem, start, stops[i], depart)
+        begin = max(depart + leg, opens)
         if begin > closes:
             continue
-        state[(1 << i, i)] = [(matrix.duration(start, stops[i]),
-                               begin + service, (i,))]
+        state[(1 << i, i)] = [(leg, begin + service, (i,))]
 
     for _ in range(count - 1):
         nxt: dict[tuple[int, int], list[tuple[int, int, tuple[int, ...]]]] = {}
@@ -278,7 +308,13 @@ def tsptw_sequence(problem: Problem, vehicle_id: str,
                     if mask & (1 << i):
                         continue
                     service, opens, closes = facts[i]
-                    leg = matrix.duration(stops[last], stops[i])
+                    # §7.5: filter on the fixed-departure lower bound first.
+                    # Nothing reaches this stop faster than its best speed, so
+                    # a candidate that misses its window even then misses it at
+                    # every speed, and the exact leg need not be computed.
+                    if ready + _floor(problem, stops[last], stops[i]) > closes:
+                        continue
+                    leg = travel_between(problem, stops[last], stops[i], ready)
                     begin = max(ready + leg, opens)
                     if begin > closes:
                         continue
@@ -294,8 +330,9 @@ def tsptw_sequence(problem: Problem, vehicle_id: str,
         if mask != full:
             continue
         for cost, ready, path in labels:
-            total = cost + matrix.duration(stops[last], end)
-            if ready + matrix.duration(stops[last], end) > vehicle.shift.end:
+            home = travel_between(problem, stops[last], end, ready)
+            total = cost + home
+            if ready + home > vehicle.shift.end:
                 continue
             if best is None or total < best[0]:
                 best = (total, path)
