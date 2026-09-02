@@ -289,7 +289,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-64 | `tests/vrp/test_zone_prior.py` | `T-64` | §12.4 | | L6 | **Done.** Adherence improves with no verifier regression; advisory only, never a hard constraint |
 | E-65 | `tests/vrp/test_shadow_and_canary.py` | `T-65` | §11.4 | | L6+L7 | **Done.** One depot canary completed with a written go/no-go |
 | E-66 | `tests/vrp/test_verify_endpoint.py` | `T-66` | §9.4, CON-1 | | L1 | **Done.** An externally supplied plan is verifiable through the public endpoint |
-| E-67 | `tests/vrp/test_cuopt_profile.py` | `T-67` | NFR-09 | | L4 | Feature-flagged; the CPU path is bit-identical when disabled. **Not built**: optional accelerator profile, and no GPU is present in this environment |
+| E-67 | `examples/src/fleet/infra/accelerator_profile.py` | `T-67` | NFR-09, §7.3 | | L4 | A negative requirement demonstrated on the machine that lacks the thing: with the profile off the import system is never asked for `cuopt` at all (shown with a watcher carrying its own sentinel), the plan is the same stops in the same order, and switching it on without the library reports the fallback instead of hiding it. The engine refuses by name — no cuOpt has ever run against this code. **Done.** accelerator profile, and no GPU is present in this environment |
 
 ---
 
