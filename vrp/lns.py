@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from vrp.model import TravelMatrix
+from vrp.observe import Recorder
 
 # ALG-3b calls for "short" strings. The paper draws a length per string; this
 # keeps the ceiling low so a removal stays a scalpel rather than a route
@@ -212,7 +213,8 @@ _RUINS = {"sisr": sisr_ruin, "random": random_ruin}
 
 def lns_search(matrix: TravelMatrix, plan: list[list[int]], iterations: int,
                seed: int = 0, ruin: str = "sisr",
-               blink: float = 0.01) -> list[list[int]]:
+               blink: float = 0.01,
+               recorder: Recorder | None = None) -> list[list[int]]:
     """Ruin, recreate, accept. ALG-3b's loop.
 
     Args:
@@ -222,6 +224,10 @@ def lns_search(matrix: TravelMatrix, plan: list[list[int]], iterations: int,
         seed: the run's seed. Same seed, same plan.
         ruin: "sisr" or "random". The second exists to be beaten.
         blink: probability of skipping a candidate insertion position.
+        recorder: optional `vrp.observe.Recorder`. Told about each new
+            incumbent, which is NFR-06's objective trajectory. Optional and
+            passive: the search reports what it found and knows nothing about
+            what is done with it, so observability cannot change the plan.
 
     Returns:
         The best plan found, which is never worse than the one given.
@@ -242,6 +248,8 @@ def lns_search(matrix: TravelMatrix, plan: list[list[int]], iterations: int,
     current = [route[:] for route in plan]
     current_cost = plan_cost(matrix, current)
     best, best_cost = [route[:] for route in current], current_cost
+    if recorder is not None:
+        recorder.improved(0, best_cost)
 
     served = sum(len(route) for route in plan)
     for iteration in range(iterations):
@@ -254,5 +262,9 @@ def lns_search(matrix: TravelMatrix, plan: list[list[int]], iterations: int,
             current, current_cost = candidate, cost
         if cost < best_cost:
             best, best_cost = [route[:] for route in candidate], cost
+            if recorder is not None:
+                # `iteration + 1`: the construction is 0, so the first ruin
+                # -recreate that beats it is 1 rather than sharing its index.
+                recorder.improved(iteration + 1, best_cost)
 
     return best
