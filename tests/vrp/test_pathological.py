@@ -21,6 +21,7 @@ API.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -396,50 +397,101 @@ def test_uc071_an_empty_fleet_is_a_result_not_a_crash():
 # UC-072 — matrix provider timeout mid-build
 # --------------------------------------------------------------------------
 
-def test_uc072_a_matrix_gap_is_never_filled_with_straight_line_distance(monkeypatch):
-    """Breaks: filling the gap with straight-line distance.
-
-    A silent haversine substitution yields a plan that looks ordinary and is
-    costed against a road network that does not exist.
-    """
+def _flaky_gateway(monkeypatch, coords, fail_after: int = 1):
+    """A provider that answers `fail_after` tiles and then stops responding."""
     import httpx
 
     import vrp.matrix as matrix_module
 
-    coords = [(9.90 + i / 100, -84.0) for i in range(6)]
     monkeypatch.setattr(matrix_module, "_snap_all",
                         lambda *a, **k: [Snap(location=point, snapped=point,
                                               distance_m=0.0)
                                          for point in coords])
-
     calls = {"n": 0}
 
     def flaky(*args, **kwargs):
         calls["n"] += 1
-        if calls["n"] > 1:
+        if calls["n"] > fail_after:
             raise httpx.TimeoutException("gateway stopped responding")
         size = len(coords)
         return {"durations": [[60] * size for _ in range(size)],
                 "distances": [[600] * size for _ in range(size)]}
 
     monkeypatch.setattr(matrix_module, "_fetch_tile", flaky)
+    return matrix_module, calls
 
-    with pytest.raises(httpx.TimeoutException):
-        matrix_module.build_large_matrix("http://gateway", coords, max_cells=9)
+
+def test_uc072_a_matrix_gap_is_never_filled_with_straight_line_distance(monkeypatch):
+    """Breaks: filling the gap with straight-line distance.
+
+    A silent haversine substitution yields a plan that looks ordinary and is
+    costed against a road network that does not exist. What the provider never
+    answered stays `UNREACHABLE`, which MTX-5 makes a hard-infeasible arc
+    rather than a guess.
+    """
+    coords = [(9.90 + i / 100, -84.0) for i in range(6)]
+    matrix_module, calls = _flaky_gateway(monkeypatch, coords)
+
+    matrix, _snaps = matrix_module.build_large_matrix(
+        "http://gateway", coords, max_cells=9)
 
     assert calls["n"] > 1, "the build must actually have reached a second tile"
+    for row in matrix.durations:
+        for cell in row:
+            assert cell == UNREACHABLE or cell >= 0, (
+                "an unfetched arc is unknown; any finite number here is an "
+                "invention the optimiser will trade against")
+    assert any(cell == UNREACHABLE for row in matrix.durations for cell in row), (
+        "the tiles that were never fetched have to be visible as missing")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "NFR-04 and MTX-11 require a mid-build failure to fall back to the cached "
-    "matrix and mark the plan DEGRADED. Neither the label nor the fallback "
-    "exists: `build_large_matrix` propagates the error, which is safe but is "
-    "not graceful degradation. `UC-072` is PARTIALLY_MODELLED for this reason."))
-def test_uc072_a_degraded_matrix_is_labelled_rather_than_fatal():
-    """Breaks: a fallback nobody can see is the same defect as no fallback."""
-    from vrp.model import TravelMatrix as _TravelMatrix
+def test_uc072_a_degraded_matrix_is_labelled_rather_than_fatal(monkeypatch):
+    """Breaks: a fallback nobody can see is the same defect as no fallback.
 
-    assert hasattr(_TravelMatrix, "degraded")
+    A strict xfail until `T-79`. NFR-04 asks for two things and the engine had
+    one: the failure propagated, which is safe, and nothing degraded, which is
+    not the same as graceful. A provider dying on the last of forty tiles threw
+    away thirty-nine good ones and the whole plan with them.
+    """
+    coords = [(9.90 + i / 100, -84.0) for i in range(6)]
+    matrix_module, _calls = _flaky_gateway(monkeypatch, coords)
+
+    matrix, _snaps = matrix_module.build_large_matrix(
+        "http://gateway", coords, max_cells=9)
+
+    assert matrix.degraded, "a matrix built from a failed provider is degraded"
+    assert "never fetched" in matrix.degraded and "TimeoutException" in matrix.degraded, (
+        f"the reason has to say what happened: {matrix.degraded!r}")
+
+
+def test_uc072_the_plan_carries_what_its_matrix_was(monkeypatch):
+    """NFR-04's actual requirement: "mark the *plan* `DEGRADED`".
+
+    A degraded matrix nobody propagates is a fact recorded where the person
+    deciding whether to dispatch will never look.
+    """
+    problem = FIXTURES["UC-070"]()
+    degraded = fixtures.grid(len(problem.locations))
+    problem = replace(problem, matrix=replace(
+        degraded, degraded="two tiles were never fetched"))
+
+    solution = solve(problem, iterations=100, seed=0)
+
+    assert solution.status == "FEASIBLE", "degraded is not infeasible"
+    assert solution.degraded == "two tiles were never fetched", (
+        "the plan is where a dispatcher looks, and the matrix is the only "
+        "thing that knows")
+
+
+def test_uc072_an_ordinary_matrix_leaves_the_plan_unmarked():
+    """The label has to mean something. A plan marked degraded when nothing
+    degraded teaches everybody to ignore the field."""
+    problem = FIXTURES["UC-070"]()
+
+    solution = solve(problem, iterations=100, seed=0)
+
+    assert problem.matrix.degraded is None
+    assert solution.degraded is None
 
 
 # --------------------------------------------------------------------------

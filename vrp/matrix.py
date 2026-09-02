@@ -206,6 +206,8 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
 
     durations = [[UNREACHABLE] * size for _ in range(size)]
     distances = [[UNREACHABLE] * size for _ in range(size)]
+    unfetched: list[str] = []
+    reasons: dict[str, str] = {}
 
     for tile in plan_tiles(size, max_cells):
         # Serve what the cache already knows, and only fetch a tile that still
@@ -221,7 +223,20 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
         if not missing:
             continue
 
-        body = _fetch_tile(gateway, coordinates, tile, profile, timeout)
+        try:
+            body = _fetch_tile(gateway, coordinates, tile, profile, timeout)
+        except Exception as failure:
+            # NFR-04: "If the matrix provider is unavailable, fall back to a
+            # cached matrix and mark the plan `DEGRADED`." Raising here was
+            # safe and not graceful: a provider that dies on the last of forty
+            # tiles threw away thirty-nine good ones and the whole plan with
+            # them. What the cache already held stands; what it did not stays
+            # `UNREACHABLE`, which MTX-5 makes a hard-infeasible arc rather
+            # than a guess. Nothing is invented -- the plan simply covers less
+            # ground and says so.
+            unfetched.append(f"{len(tile.sources)}x{len(tile.destinations)}")
+            reasons.setdefault(type(failure).__name__, str(failure)[:120])
+            continue
         for row, i in enumerate(tile.sources):
             for column, j in enumerate(tile.destinations):
                 duration = body["durations"][row][column]
@@ -231,10 +246,17 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
                 durations[i][j], distances[i][j] = duration, distance
                 cache.put(locations[i], locations[j], profile, duration, distance)
 
+    degraded = None
+    if unfetched:
+        detail = "; ".join(f"{kind}: {text}" for kind, text in sorted(reasons.items()))
+        degraded = (f"{len(unfetched)} matrix tile(s) were never fetched and "
+                    f"their arcs are unknown, not zero ({detail})")
+
     return TravelMatrix(
         version=matrix_version(locations, profile, extract_version),
         durations=tuple(tuple(row) for row in durations),
         distances=tuple(tuple(row) for row in distances),
+        degraded=degraded,
     ), snaps
 
 
@@ -278,6 +300,12 @@ class PlanarMatrix:
     version: str
     coordinates: tuple[tuple[float, float], ...]
     speed_m_per_s: float = PLANAR_SPEED_M_PER_S
+    # A planar matrix is a deliberate choice, not a fallback: §7.6 uses it for
+    # instances too large to store and the generators use it on purpose. It
+    # carries the attribute so every matrix answers the same question, and
+    # answers None -- marking it degraded would label every benchmark plan as
+    # suspect and teach readers to ignore the label.
+    degraded: str | None = None
 
     def __post_init__(self) -> None:
         if not self.version:

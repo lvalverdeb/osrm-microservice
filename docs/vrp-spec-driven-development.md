@@ -1432,9 +1432,10 @@ all learning.
 Each task lists dependencies, the requirements it satisfies, and a definition of done. Tasks marked
 **[GATE]** block the next slice.
 
-**Status — 57 of 62 done**, verified against the repository on 2026-09-02 (898 tests passing, CI
-green on `bc9b0c0`). `T-72`–`T-78` all landed. `T-79` was filed afterwards, when a traceability
-audit found `NFR-04` defined and owned by nobody. `done` means the task's artefacts exist, are tested and are on `main`; where a
+**Status — 58 of 62 done**, verified against the repository on 2026-09-02 (901 tests passing, CI
+green on `bc476f5`). `T-72`–`T-79` all landed; `T-79` was filed and closed after a traceability
+audit found `NFR-04` defined and owned by nobody. The four that remain are blocked on data or
+hardware, not effort. `done` means the task's artefacts exist, are tested and are on `main`; where a
 definition of done has a half that needs people or production, the commit says which half is owed
 rather than counting the proxy. `blocked` and `optional` are the four that remain:
 
@@ -1655,7 +1656,7 @@ separate them, and displaced work is reported as `PREEMPTED` naming what took
 the slot -- while work that was never planned keeps its own reason, because the
 round was already larger than the van and the emergency did not cause that.
 | `T-78` | done | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-21, FR-30, FR-32 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry |
-| `T-79` | todo | Graceful matrix degradation: cached fallback, and a `DEGRADED` plan that says so | T-11, T-15 | NFR-04, MTX-11, `UC-072` | A build whose provider fails mid-way returns the cached matrix rather than raising; every plan costed on an incomplete or haversine matrix carries `DEGRADED` out to the caller; `test_uc072_a_degraded_matrix_is_labelled_rather_than_fatal` xpasses |
+| `T-79` | done | Graceful matrix degradation: cached fallback, and a `DEGRADED` plan that says so | T-11, T-15 | NFR-04, MTX-11, `UC-072` | A build whose provider fails mid-way returns the cached matrix rather than raising; every plan costed on an incomplete or haversine matrix carries `DEGRADED` out to the caller; `test_uc072_a_degraded_matrix_is_labelled_rather_than_fatal` xpasses |
 
 **`UC-171`'s claim was right and the measurement was wrong**, which is worth
 recording because the backlog said the opposite. Two things were being compared

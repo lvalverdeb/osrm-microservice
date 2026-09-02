@@ -397,9 +397,17 @@ class TravelMatrix:
     version: str
     durations: tuple[tuple[int, ...], ...]
     distances: tuple[tuple[int, ...], ...]
+    # NFR-04 and MTX-11: why this matrix is not what was asked for, or None.
+    # A sentence rather than a flag, because an operator deciding whether to
+    # dispatch a `DEGRADED` plan needs to know which arcs are guesses and why --
+    # "true" tells them the plan is suspect and nothing about what to do.
+    degraded: str | None = None
 
     def __post_init__(self) -> None:
         _require(bool(self.version), "matrix version must not be empty")
+        _require(self.degraded is None or bool(self.degraded.strip()),
+                 "a degraded matrix must say why; an empty reason is a flag "
+                 "pretending to be an explanation")
         size = len(self.durations)
         for name, grid in (("durations", self.durations), ("distances", self.distances)):
             _require(len(grid) == size, f"{name} must have {size} rows")
@@ -728,6 +736,11 @@ class Solution:
     unassigned: tuple[dict[str, Any], ...] = ()
     objective_breakdown: dict[str, int] = field(default_factory=dict)
     status: str = "FEASIBLE"
+    # NFR-04: "mark the plan `DEGRADED`". Separate from `status` because it is
+    # a separate fact -- a plan can be perfectly feasible and costed against
+    # arcs nobody measured, and collapsing the two would make an operator
+    # choose between hearing that it works and hearing what it is built on.
+    degraded: str | None = None
     # CON-4: wall-clock runs are permitted "but MUST record the deterministic
     # iteration count actually achieved so that any run can be replayed". Until
     # this existed the seed and the budget were arguments somebody happened to

@@ -2070,7 +2070,6 @@ The routing engine stops responding partway through a large matrix build, leavin
 - **Binds:** what is actually known about the arcs that were never retrieved
 - **Exercises:** MTX-10, MTX-11, NFR-04
 - **Breaks:** filling the gap with straight-line distance. A silent haversine substitution yields a plan that looks ordinary and is costed against a road network that does not exist, so the fallback is either visible as `DEGRADED` or the build fails
-- **Status:** PARTIALLY_MODELLED — a mid-build failure propagates rather than fabricating arcs, so nothing silently substitutes haversine; the cached-matrix fallback and the `DEGRADED` label required by NFR-04 and MTX-11 are not built
 #### UC-073 — Antimeridian and high-latitude coordinates
 
 Stops either side of longitude 180, and stops far enough north that a degree of longitude is a small fraction of a degree of latitude.

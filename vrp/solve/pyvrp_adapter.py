@@ -709,6 +709,11 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
                     unassigned=unassigned,
                     objective_breakdown={},
                     status="FEASIBLE" if feasible else "INFEASIBLE",
+                    # NFR-04: the plan carries what its matrix was. A plan
+                    # costed against arcs nobody measured is not wrong, but a
+                    # dispatcher deciding whether to send it needs to know,
+                    # and the matrix is the only thing that does.
+                    degraded=problem.matrix.degraded,
                     solver=dict(solver or {}) or None)
 
 
@@ -766,7 +771,7 @@ def _nothing_to_dispatch(problem: Problem, solver: dict) -> Solution:
     dispatcher as a 500 and says nothing about the roster.
     """
     return Solution(
-        problem_id=problem.id, routes=(),
+        problem_id=problem.id, routes=(), degraded=problem.matrix.degraded,
         unassigned=tuple(
             {"order_id": order.id, "reason_code": "FLEET_EXHAUSTED",
              "explanation": "no vehicles are available in this planning run"}

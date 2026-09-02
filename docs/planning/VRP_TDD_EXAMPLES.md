@@ -8,10 +8,10 @@ Companion to [VRP_SDD_FIT_GAP.md](VRP_SDD_FIT_GAP.md), which measures how far
 today's implementation is from the specification. This document is the route
 from one to the other.
 
-**Status — 57 of 62 examples done**, verified against the repository on
-2026-09-02 (898 tests passing, CI green on `bc9b0c0`). Slice 7's seven all
-landed, and `E-79` was added with `T-79` when an audit found `NFR-04` owned by
-nobody. Two of them do not have the file §11a first named for them, and the
+**Status — 58 of 62 examples done**, verified against the repository on
+2026-09-02 (901 tests passing, CI green on `bc476f5`). Slice 7's seven all
+landed, and `E-79` was added and closed with `T-79` when an audit found
+`NFR-04` owned by nobody. Two of them do not have the file §11a first named for them, and the
 rows say where they went instead rather than claiming a path that does not
 exist. Every row below is marked
 `**Done.**`, `**Blocked**` or `**Not built**` in its *Passes when* column.
@@ -368,7 +368,7 @@ written first and fails.
 | `E-76` | `examples/src/fleet/rich/synchronisation.py` | `T-76` | FR-26 | L2 | A plain solve leaves the bike departing before the lorry arrives; the loop holds it until the handover is done, and the half no window can express is refused by name. **Done.** |
 | `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work, what it displaced is named, and with room the displaced work is re-planned rather than dropped. **Done.** |
 | `E-78` | `examples/src/fleet/p0/must_work_at_v1.py` (`UC-171`) | `T-78` | FR-21, FR-30, FR-32 | L2 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry. **Done.** No `absent_driver.py`: `UC-171` is a P0 operation and belongs with the other thirteen. The claim was never false — the measurement was, because a free re-plan was being scored on a freedom the depot does not have |
-| `E-79` | `examples/src/fleet/infra/degraded_matrix.py` | `T-79` | NFR-04, MTX-11 | L1 | A provider that dies mid-build yields a plan costed on the cached matrix and labelled `DEGRADED`, and no unlabelled plan is ever built on haversine. **Not built** |
+| `E-79` | `examples/src/fleet/infra/degraded_matrix.py` | `T-79` | NFR-04, MTX-11 | L1 | A provider that dies mid-build keeps the tiles that arrived, leaves the rest `UNREACHABLE` rather than guessing, and carries the reason out to the plan a dispatcher reads. **Done.** |
 
 ---
 
