@@ -1549,7 +1549,31 @@ collection time is fixed -- a school stop, a booked ward round. Flooring it at
 the window's opening instead of at the earliest reachable pickup made ordinary
 instances infeasible, because the van still has to drive there.
 | `T-75` | done | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; a statutory obligation cannot be priced; an SLA window is derived at intake |
-| `T-76` | todo | Route synchronisation: satellite transfer, convoy departure, hub cut-off | T-28, T-37 | FR-26, DEC-1 | Two coupled routes meet at a place and time, and the verifier checks the coupling rather than each route alone |
+| `T-76` | done | Route synchronisation: satellite transfer, convoy departure, hub cut-off | T-28, T-37 | FR-26, INV-15, DEC-1 | Two coupled routes meet at a place and time, and the verifier checks the coupling rather than each route alone |
+
+**`T-76` is the first constraint here whose subject is a pair**, and it splits
+into two halves that need different answers.
+
+The *timing* half is a loop. `vrp/synchronise.py` solves, sees when the first
+echelon actually finished, tells the second it may not start before that, and
+solves again. The lever is a time window, which converges for a transfer
+because the first half is not constrained by the second and so does not move in
+response. A convoy is symmetric and is bounded and reported rather than
+promised.
+
+The *different-vehicle* half cannot be done there at all. It is an
+order-to-order constraint, the same shape as the class incompatibility `T-72`
+refused to compile, and a window says nothing about it: one van collecting
+where it just delivered is simply a good route. The first version tried
+`FORBID_ORDER_ON_VEHICLE` locks and forbade the second order on every vehicle
+in turn until the instance had no answer. It is now refused by name, and the
+fix belongs to the instance -- a satellite has a receiving bay and a dispatch
+bay, and an HGV cannot get into the second, which `T-72`'s eligibility already
+expresses.
+
+`UC-168`'s transhipment is **not** covered. Permitting a shipment to change
+vehicle mid-journey breaks `INV-2`'s same-vehicle rule, which FR-26's text does
+not ask for and which is a model extension rather than a coupling.
 | `T-77` | done | Preemption of planned work by higher-priority arrivals | T-51, T-56, T-75 | FR-27, DYN-5 | Displaced work is re-planned and reported, never silently dropped; churn attributable to preemption is separated from ordinary churn |
 
 **`T-77` turned out to be mostly a reporting task**, which is worth recording

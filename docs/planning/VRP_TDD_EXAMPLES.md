@@ -362,7 +362,7 @@ written first and fails.
 | `E-73` | `examples/src/fleet/rich/multi_period.py` | `T-73` | FR-23 | L2 | A clustered schedule and a spread one both make four visits; only one keeps the interval, and an unkeepable contract is refused rather than reported. **Done.** |
 | `E-74` | `examples/src/fleet/rich/ride_time.py` | `T-74` | FR-24 | L2 | A shipment's time aboard is bounded independently of its delivery window; the search is told a sound deadline and the verifier measures the journey exactly. **Done.** |
 | `E-75` | `examples/src/fleet/rich/priority_sources.py` | `T-75` | FR-25 | L1 | Three orders equal on tier are ordered by source; a statutory duty cannot be priced; an SLA window is computed from the fault timestamp. **Done.** |
-| `E-76` | `examples/src/fleet/rich/synchronisation.py` | `T-76` | FR-26 | L2 | Two routes meet at a satellite; moving one moves the other. **Not built** |
+| `E-76` | `examples/src/fleet/rich/synchronisation.py` | `T-76` | FR-26 | L2 | A plain solve leaves the bike departing before the lorry arrives; the loop holds it until the handover is done, and the half no window can express is refused by name. **Done.** |
 | `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work, what it displaced is named, and with room the displaced work is re-planned rather than dropped. **Done.** |
 | `E-78` | `examples/src/fleet/dynamic/absent_driver.py` | `T-78` | FR-30, FR-32 | L2 | Stripping and redistributing beats replanning the reduced fleet — `UC-171`'s claim, which today is false and pinned as an xfail. **Not built** |
 

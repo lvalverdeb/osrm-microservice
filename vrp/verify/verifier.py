@@ -91,6 +91,7 @@ def verify(problem: Problem, solution: Solution) -> Report:
     _check_docks(problem, solution, report)                  # INV-12
     _check_inventory(problem, solution, report)              # INV-13
     _check_ride_times(problem, solution, report)             # INV-14
+    _check_synchronisation(problem, solution, report)        # INV-15
     _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
     return report
@@ -425,6 +426,63 @@ def _served_orders(solution: Solution) -> list[tuple[str, str]]:
             for route in solution.routes
             for step in route.steps
             if step.order_id is not None]
+
+
+def _check_synchronisation(problem: Problem, solution: Solution,
+                           report: Report) -> None:
+    """INV-15: coupled routes actually meet. FR-26, DEC-1.
+
+    The first invariant here whose subject is a *pair* of routes. Every other
+    check in this module reads one route and decides; this one cannot, and that
+    is the whole reason `UC-131` calls it out: "the second-echelon departure
+    depends on the first echelon's arrival, which is a synchronisation
+    constraint across two routing problems". Both routes can be individually
+    perfect while the cargo bike leaves the satellite an hour before the lorry
+    carrying its load arrives.
+
+    A coupling also implies two vehicles. `UC-147`'s convoy is two vehicles
+    travelling together; two stops on one route are a sequence, and calling
+    that a convoy would let a plan satisfy the constraint by ignoring it.
+    """
+    if not problem.synchronisations:
+        report.not_applicable.add("INV-15")
+        return
+
+    served: dict[str, tuple[str, Step]] = {}
+    for route in solution.routes:
+        for step in route.steps:
+            if step.order_id is not None:
+                served[step.order_id] = (route.vehicle_id, step)
+
+    for sync in problem.synchronisations:
+        if sync.first not in served or sync.second not in served:
+            # One end unplanned is a coverage question, and INV-1 owns it. A
+            # second complaint here would report one fault twice and send
+            # somebody looking for a scheduling bug.
+            continue
+        first_vehicle, first = served[sync.first]
+        second_vehicle, second = served[sync.second]
+        if first_vehicle == second_vehicle:
+            report.fail("INV-15",
+                        f"{sync.kind} couples {sync.first} and {sync.second}, "
+                        f"and {first_vehicle} carries both: a coupling between "
+                        f"two routes cannot be met by one",
+                        vehicle_id=first_vehicle, order_id=sync.second)
+            continue
+        if sync.kind == "TRANSFER":
+            gap = second.start_service - first.departure
+        else:
+            gap = abs(second.start_service - first.start_service)
+        if gap < sync.min_gap:
+            report.fail("INV-15",
+                        f"{sync.second} follows {sync.first} by {gap}s of a "
+                        f"required {sync.min_gap}s",
+                        vehicle_id=second_vehicle, order_id=sync.second)
+        if sync.max_gap is not None and gap > sync.max_gap:
+            report.fail("INV-15",
+                        f"{sync.second} follows {sync.first} by {gap}s of an "
+                        f"allowed {sync.max_gap}s",
+                        vehicle_id=second_vehicle, order_id=sync.second)
 
 
 def _check_ride_times(problem: Problem, solution: Solution,

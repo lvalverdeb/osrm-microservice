@@ -499,6 +499,61 @@ class Lock:
             _require_int(self.instant, "instant")
 
 
+SYNCHRONISATION_KINDS: tuple[str, ...] = ("TRANSFER", "CONVOY")
+
+
+@dataclass(frozen=True)
+class Synchronisation:
+    """Two routes meeting at a place and a time. FR-26, §12.2.
+
+    Every other constraint in this model belongs to something: a capacity to a
+    vehicle, a window to a stop, an obligation to an order. This one belongs to
+    a *pair*, and that is what makes it different in kind -- each route can be
+    beyond reproach on its own while the plan is fiction.
+
+    `TRANSFER` is `UC-131`'s two-echelon satellite: "the second-echelon
+    departure depends on the first echelon's arrival". The second order may not
+    be served until the first has been, plus whatever the handover takes.
+
+    `CONVOY` is `UC-147`: "vehicles must travel in convoy, which is a
+    synchronisation constraint forcing several routes to share a path and a
+    schedule". The two are served together, within `max_gap` of each other.
+
+    Attributes:
+        kind: `TRANSFER` or `CONVOY`.
+        first: the order that must happen first, or either of a convoy pair.
+        second: the order that follows, or the other half of the convoy.
+        min_gap: seconds the second must wait after the first departs. The
+            handover itself -- craning a container across, breaking a pallet
+            down for cargo bikes.
+        max_gap: the longest the coupling tolerates. Required for a convoy,
+            where it is how far apart "together" may be; optional for a
+            transfer, where it bounds how long goods may sit at the satellite.
+    """
+
+    kind: str
+    first: str
+    second: str
+    min_gap: int = 0
+    max_gap: int | None = None
+
+    def __post_init__(self) -> None:
+        _require(self.kind in SYNCHRONISATION_KINDS,
+                 f"unknown synchronisation {self.kind!r}; FR-26 defines "
+                 f"{', '.join(SYNCHRONISATION_KINDS)}")
+        _require(self.first != self.second,
+                 "a synchronisation couples two orders; one order is a sequence")
+        _require_int(self.min_gap, "min_gap")
+        _require(self.min_gap >= 0, "a handover cannot take negative time")
+        if self.max_gap is not None:
+            _require_int(self.max_gap, "max_gap")
+            _require(self.max_gap >= self.min_gap,
+                     "max_gap must not be shorter than the handover it allows")
+        _require(self.kind != "CONVOY" or self.max_gap is not None,
+                 "a convoy needs a max_gap: 'together' with no bound is not a "
+                 "constraint, and zero is a legitimate value for it")
+
+
 @dataclass(frozen=True)
 class Problem:
     id: str
@@ -508,6 +563,11 @@ class Problem:
     matrix: TravelMatrix
     horizon: TimeWindow | None = None
     locks: tuple[Lock, ...] = ()
+    # FR-26: couplings between two routes at a place and time. On the problem
+    # rather than on an order, because the constraint is a relation and belongs
+    # to neither side of it -- putting it on one order would make the other's
+    # copy either redundant or, worse, separately editable.
+    synchronisations: tuple[Synchronisation, ...] = ()
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "problem id must not be empty")
@@ -525,6 +585,10 @@ class Problem:
                 _require(stop.location_id in by_id,
                          f"order {order.id} references unknown location "
                          f"{stop.location_id!r}")
+        for sync in self.synchronisations:
+            for side in (sync.first, sync.second):
+                _require(side in order_ids,
+                         f"synchronisation references unknown order {side!r}")
         for vehicle in self.vehicles:
             for name in ("start_location_id", "end_location_id"):
                 location_id = getattr(vehicle, name)
