@@ -371,6 +371,7 @@ written first and fails.
 | `E-79` | `examples/src/fleet/infra/degraded_matrix.py` | `T-79` | NFR-04, MTX-11 | L1 | A provider that dies mid-build keeps the tiles that arrived, leaves the rest `UNREACHABLE` rather than guessing, and carries the reason out to the plan a dispatcher reads. **Done.** |
 | `E-80` | `examples/src/fleet/rich/time_dependent.py` (§2–3) | `T-80` | FR-14, §7.5 | L2 | The same stops finish later through a peak than at free flow, the verifier agrees with the evaluator about every arrival, and §7.5's bound is measured on route-shaped arcs. **Done.** No separate file: it is the same construction `E-40` shows, one layer up |
 | `E-82` | `examples/src/fleet/rich/planning_under_congestion.py` | `T-82` | FR-14, §7.5, NFR-01 | L2 | Five stops and one 11:00 deadline: free flow says nearest-first, the peak says buy the far stop while the day is young. The free-flow plan is the *faster* of the two and is fifteen minutes late. Also shows the bound holding at every departure, and what IGP costs the polish. **Done.** |
+| `E-83` | `examples/src/fleet/rich/arc_class_profiles.py` | `T-83` | §6.3, §12.2, MTX-9 | L2 | The measurement that unblocked the task — sixteen of twenty-seven fixtures span more than one arc class; one profile forced to slow a side street exactly as much as a motorway; three profiles saying what a driver would; and a mapping that misses a class refused rather than defaulted to free flow. **Done.** |
 
 ---
 

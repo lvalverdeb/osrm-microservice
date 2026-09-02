@@ -51,7 +51,13 @@ from dataclasses import dataclass
 
 from vrp.adherence import ExecutedRoute
 from vrp.model import Problem
-from vrp.timedependent import PPT, SpeedProfile, travel
+from vrp.timedependent import (
+    PPT,
+    ArcKey,
+    SpeedProfile,
+    arc_class_of,
+    travel,
+)
 
 FREE_FLOW_PPT = PPT
 
@@ -61,29 +67,10 @@ FREE_FLOW_PPT = PPT
 # road rather than a wall.
 SLOWEST_PPT = 1
 
-# Arc classes by free-flow duration, in the order they are tested. §12.2 says
-# per-arc-class without naming the classes; duration bands are the classification
-# the matrix already supports, and a dispatcher can check which band an arc is
-# in by reading one number. Road category would be better and is not in the
-# domain: inventing it from coordinates would put an unauditable label in an
-# auditable pipeline, which is the objection §12.1 raises to driver experience.
-ARC_CLASSES = ((300, "local"), (1_200, "arterial"))
-
-
-def arc_class_of(free_flow_seconds: int) -> str:
-    """Which class an arc belongs to, by what the engine thinks it costs."""
-    for ceiling, name in ARC_CLASSES:
-        if free_flow_seconds <= ceiling:
-            return name
-    return "trunk"
-
-
-@dataclass(frozen=True)
-class ArcKey:
-    """§12.2's grouping key: a class of road at an hour of the day."""
-
-    arc_class: str
-    bucket: int
+# The classes and the key live in `vrp.timedependent`, which owns
+# `SpeedProfile`: since T-83 the *model* has to classify an arc to pick its
+# profile, and `vrp.model` imports that module. Re-exported here because
+# §12.2's readers look for them beside the fit that groups by them.
 
 
 @dataclass(frozen=True)
@@ -160,6 +147,21 @@ class SpeedCalibration:
             multipliers_ppt=tuple(
                 self.by_key.get(ArcKey(arc_class, bucket), FREE_FLOW_PPT)
                 for bucket in range(self.buckets)))
+
+    def as_profiles(self) -> dict[str, SpeedProfile]:
+        """Every fitted class at once, shaped for `Problem.speed_profiles`.
+
+        T-83's reason for existing: until the model carried a profile per arc
+        class, `profile` was the only way to apply a fit and it applied one
+        class to every arc in the instance. This hands back what was actually
+        measured.
+
+        Returns:
+            One profile per class with any observations, unfitted buckets at
+            free flow. Empty when nothing was fitted, which `Problem` refuses
+            rather than reading as free flow.
+        """
+        return {arc_class: self.profile(arc_class) for arc_class in self.classes}
 
     def defaulted(self, arc_class: str) -> tuple[int, ...]:
         """Which buckets fell back to free flow because nothing was seen."""

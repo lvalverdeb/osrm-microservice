@@ -87,6 +87,40 @@ class SpeedProfile:
         return max(self.multipliers_ppt)
 
 
+# Arc classes by free-flow duration, in the order they are tested. §6.3 asks
+# for profiles "per arc (or per zone)" and §12.2 fits multipliers per arc
+# class; duration bands are the classification the matrix already supports,
+# and a dispatcher can check which band an arc is in by reading one number.
+# Road category would be better and is not in the domain: deriving it from
+# coordinates would put an unauditable label in an auditable pipeline.
+#
+# They live here rather than with the calibration because the *model* has to
+# classify an arc to pick its profile, and `vrp.model` imports this module.
+ARC_CLASSES = ((300, "local"), (1_200, "arterial"))
+TRUNK = "trunk"
+
+
+def arc_class_of(free_flow_seconds: int) -> str:
+    """Which class an arc belongs to, by what the engine thinks it costs."""
+    for ceiling, name in ARC_CLASSES:
+        if free_flow_seconds <= ceiling:
+            return name
+    return TRUNK
+
+
+def arc_class_names() -> tuple[str, ...]:
+    """Every class an arc can be, longest last."""
+    return tuple(name for _, name in ARC_CLASSES) + (TRUNK,)
+
+
+@dataclass(frozen=True)
+class ArcKey:
+    """§12.2's grouping key: a class of road at a bucket of the day."""
+
+    arc_class: str
+    bucket: int
+
+
 def travel(free_flow_seconds: int, depart: int, profile: SpeedProfile) -> int:
     """How long an arc takes, leaving at `depart`. The IGP construction.
 

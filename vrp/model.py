@@ -13,11 +13,13 @@ stop catching them.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from vrp.battery import FULL_PPT
 from vrp.hos.rules import DriverState
+from vrp.timedependent import arc_class_of
 
 # MTX-5: unreachable pairs are represented explicitly and handled as hard-
 # infeasible arcs. Negative because it must be impossible to mistake for a
@@ -633,6 +635,14 @@ class Problem:
     # enough to make afternoon travel cost what it costs, and enough for the
     # FIFO property to bind on every arc.
     speed_profile: SpeedProfile | None = None
+    # §6.3: "per-arc (or per-zone)" profiles; §12.2 fits per arc class. One
+    # profile for a whole instance says congestion slows a motorway exactly as
+    # it slows a residential street, which sixteen of the twenty-seven
+    # `vrp.bench` fixtures are in a position to contradict -- they span two or
+    # three classes each. Keyed by `vrp.timedependent.arc_class_of`, so the
+    # storage is O(classes · buckets) and the classification is derived from
+    # the matrix rather than stored per arc.
+    speed_profiles: Mapping[str, SpeedProfile] | None = None
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "problem id must not be empty")
@@ -642,6 +652,8 @@ class Problem:
         _require(len(indices) == len(self.locations), "duplicate matrix_index")
         _require(all(i < self.matrix.size for i in indices),
                  "matrix_index outside the matrix")
+
+        self._require_coherent_profiles()
 
         order_ids = {order.id for order in self.orders}
         _require(len(order_ids) == len(self.orders), "duplicate order id")
@@ -671,6 +683,40 @@ class Problem:
             _require(lock.vehicle_id is None or lock.vehicle_id in vehicle_ids,
                      f"lock {lock.kind} references unknown vehicle "
                      f"{lock.vehicle_id!r}")
+
+
+    def _require_coherent_profiles(self) -> None:
+        """§6.3's two forms are alternatives, and the per-class one is total.
+
+        Declaring both is two answers to the same question, and whichever the
+        lookup happened to prefer would decide it without anybody choosing.
+
+        A mapping that omits a class the matrix contains is refused rather
+        than defaulted to free flow. The default is the dangerous version: the
+        motorway becomes the one road nobody modelled, and the plan still
+        looks fully time-aware to everything downstream. Naming the missing
+        class is something an operator can act on -- fit it, or say the
+        instance is single-profile and mean it.
+        """
+        if self.speed_profiles is None:
+            return
+        _require(self.speed_profile is None,
+                 "the instance declares both a single speed_profile and a "
+                 "per-class speed_profiles mapping; they are alternatives")
+        _require(bool(self.speed_profiles),
+                 "speed_profiles is empty; omit it rather than declaring no "
+                 "profiles, which reads as free flow but is not stated")
+        present = {arc_class_of(self.matrix.duration(origin, destination))
+                   for origin in range(self.matrix.size)
+                   for destination in range(self.matrix.size)
+                   if origin != destination
+                   and self.matrix.is_reachable(origin, destination)
+                   and self.matrix.duration(origin, destination) > 0}
+        missing = sorted(present - set(self.speed_profiles))
+        _require(not missing,
+                 f"the matrix contains {', '.join(missing)} arcs and "
+                 f"speed_profiles has no profile for them; classes present: "
+                 f"{sorted(present)}")
 
     def location(self, location_id: str) -> Location:
         for candidate in self.locations:
@@ -830,11 +876,34 @@ def travel_between(problem: Problem, origin: int, destination: int,
     was right.
     """
     free_flow = problem.matrix.duration(origin, destination)
-    profile = problem.speed_profile
+    profile = profile_for_arc(problem, free_flow)
     if profile is None or free_flow <= 0:
         return free_flow
     from vrp.timedependent import travel
     return travel(free_flow, depart, profile)
+
+
+def profile_for_arc(problem: Problem, free_flow_seconds: int):
+    """The speed profile governing an arc, or None when nothing does.
+
+    Args:
+        problem: the instance.
+        free_flow_seconds: what the matrix says the arc costs, which is both
+            the thing the profile scales and the thing that classifies it.
+
+    Returns:
+        The per-class profile if the instance declares them, the single
+        instance-wide profile if it declares one, otherwise None.
+
+    The class is derived rather than stored. `MTX-9` sizes per-arc profile
+    storage at `O(nnz · T)`; per *class* is `O(C · T)` with the classification
+    recomputed in constant time from a number the matrix already holds, which
+    is what §12.2 can actually fit -- an individual arc is driven too rarely
+    for a profile of its own to be estimated from traces.
+    """
+    if problem.speed_profiles is not None:
+        return problem.speed_profiles.get(arc_class_of(free_flow_seconds))
+    return problem.speed_profile
 
 
 def may_enter(vehicle: Vehicle, site: Location) -> bool:

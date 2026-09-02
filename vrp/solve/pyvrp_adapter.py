@@ -260,7 +260,7 @@ def _eligibility_profiles(problem: Problem, model: Model) -> dict:
     hundred identically-qualified vans share one. Instances with no skills and
     no site restrictions get a single profile and the edge loop they always had.
     """
-    if problem.speed_profile is not None:
+    if problem.speed_profile is not None or problem.speed_profiles:
         raise NotImplementedError(
             "this instance declares a speed profile (FR-14) and PyVRP compiles "
             "one duration per arc, so the plan it returns would be timed at "

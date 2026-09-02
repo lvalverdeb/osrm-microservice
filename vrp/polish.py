@@ -49,7 +49,13 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from vrp.hos.schedule import schedule_route
-from vrp.model import Problem, Step, Vehicle, travel_between
+from vrp.model import (
+    Problem,
+    Step,
+    Vehicle,
+    profile_for_arc,
+    travel_between,
+)
 from vrp.timedependent import fastest_possible
 
 # ALG-5's "<= ~14 stops". Held-Karp is O(2^n * n^2): fourteen stops is about
@@ -234,9 +240,13 @@ def _floor(problem: Problem, origin: int, destination: int) -> int:
 
     Free flow when the instance declares no profile, which is when free flow is
     already the only speed there is.
+
+    The profile is the *arc's own* (T-83): bounding a side street against a
+    motorway's fastest speed would over-state on one and under-state on the
+    other, and an over-stating bound silently discards legal sequences.
     """
     free_flow = problem.matrix.duration(origin, destination)
-    profile = problem.speed_profile
+    profile = profile_for_arc(problem, free_flow)
     if profile is None or free_flow <= 0:
         return free_flow
     return fastest_possible(free_flow, profile)
