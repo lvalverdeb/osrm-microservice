@@ -486,9 +486,10 @@ Step
 - `INV-14` No shipment is aboard longer than its `max_ride_time`, measured from departing the
   pickup to arriving at the delivery (`FR-24`).
 - `INV-15` Two coupled routes meet as their `Synchronisation` requires, on different vehicles
+- `INV-16` An electric vehicle never arrives anywhere past empty, and charges only where its own `charger_locations` say there is a charger
   (`FR-26`).
 
-**`INV-10`–`INV-15` are numbered past §4.3's original nine deliberately.** Each was added when a
+**`INV-10`–`INV-16` are numbered past §4.3's original nine deliberately.** Each was added when a
 requirement arrived that none of the first nine covered, and each covers a plan that satisfied
 every invariant this section named while being one nobody could drive. They are listed here rather
 than only in `vrp/verify/verifier.py` because a specification that understates what the system
@@ -1336,7 +1337,7 @@ A separate module, in a separate package, with no shared code with any solver, t
 - Recomputes every arrival, departure, load, and cost from the raw route sequences and the pinned
   matrix.
 - Evaluates the hours-of-service timeline via the rules engine.
-- Checks INV-1 … INV-15 and every lock.
+- Checks INV-1 … INV-16 and every lock.
 - Is used in CI, at runtime before any plan is published, and via the public `/verify` endpoint.
 
 It MUST be written by a different author than the solver adapter, and MUST NOT import the
@@ -1443,7 +1444,6 @@ rather than counting the proxy. `blocked` and `optional` are the four that remai
 | ID | Why it is open |
 |---|---|
 | `T-83` | **Unblocks when** there is a reason to prefer per-arc profiles over one, which is a question about data rather than engineering: `T-63` fits per arc class today and every class it has ever seen on the corpus available is `local`, so the model's single profile has not yet cost an answer. Filing it rather than building it, because a second profile dimension in the matrix is `MTX-9`'s `O(nnz · T)` storage bought against no measured need. |
-| `T-41` | `COULD` priority, and this backlog's own note says it is the only task with no data source in the current stack: no charger locations, no charging curves. |
 | `T-67` | Optional accelerator profile. Needs GPU hardware not present in this environment; the CPU path is unaffected either way. |
 
 **`T-40`'s row used to read** "`osrm-routed` exposes no departure-time parameter, so there is
@@ -1466,7 +1466,7 @@ dated is one nobody can trust.
 | `T-01` | done | Repository scaffold, SDD artefacts, ADR log, CI skeleton | — | CON-* | `constitution.md`, `spec.md`, `plan.md`, `tasks.md` in repo; CI runs lint + tests |
 | `T-02` | done | Domain model types (§4) with integer units and exhaustive validation | T-01 | FR-01…FR-16 | Types compile; property tests generate valid/invalid instances |
 | `T-03` | done | Canonical evaluator: recompute objective + timeline from a solution | T-02 | INV-9, OBJ-* | Deterministic; unit-tested against hand-computed fixtures |
-| `T-04` | done | **[GATE]** Independent verifier package (§11.2) | T-02 | CON-1, INV-1…INV-9 (extended to INV-15 by later tasks) | Separate package, separate author; detects seeded violations in 100% of mutation tests |
+| `T-04` | done | **[GATE]** Independent verifier package (§11.2) | T-02 | CON-1, INV-1…INV-9 (extended to INV-16 by later tasks) | Separate package, separate author; detects seeded violations in 100% of mutation tests |
 | `T-05` | done | Instance generator + property test harness (L2) | T-03, T-04 | §11.1 | 10⁵ random instances produce zero invariant violations |
 | `T-06` | done | VRPLIB/Solomon/GH/CVRPLIB/Li&Lim readers + BKS registry | T-02 | §11.3 | All five sets parse; BKS values loaded and versioned |
 
@@ -1511,7 +1511,7 @@ dated is one nobody can trust.
 | `T-38` | done | Set-partitioning polish over the generated route pool | T-36 | ALG-6 | Never worse than the best pooled trajectory on any frozen-corpus instance, with the mean recovery reported; ALG-6's ≥ 0.5% demonstrated separately where its premise holds (see the measurement note under ALG-6) |
 | `T-39` | done | Route-level departure-time scheduling + TSPTW polish | T-25 | ALG-5 | Duty-duration reduction measured and reported |
 | `T-40` | done | Time-dependent travel: FIFO speed profiles, bucketed evaluation, lower-bound filtering | T-11, T-33 | FR-14, §6.3 | FIFO property test; false-negative rate of the filter reported |
-| `T-41` | blocked | EV range and en-route recharging with charging-time functions | T-33 | FR-20 | Range never violated on a generated EV corpus; charging time appears in the duty timeline, not bolted on after. **`COULD` priority** — the only optional task in this backlog, and the only one with no data source in the current stack (charger locations and charging curves) |
+| `T-41` | done | EV range and en-route recharging with charging-time functions | T-33 | FR-20, INV-16 | Range never violated across a generated corpus that contains rounds needing no charge, rounds needing one, and rounds no charge can rescue — the third refused by name rather than planned; a charge is a `CHARGE` step in the timeline, so it pushes every later arrival by its own duration and a time window can notice it; the curve tapers, so the top of a battery costs what it costs. **`COULD` priority**, built because the definition of done asks for a *generated* corpus and generating one needs no charger data |
 
 ### Slice 4 — Allocation
 
@@ -1795,6 +1795,7 @@ Methodology:
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
 | 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
+| 2.1 | Closed `T-41` and added `INV-16`. The blocker said there was no data source for charger locations or charging curves; the definition of done asks for a **generated** EV corpus, and a generated corpus needs neither — the fourth time a row argued value and called it feasibility, after `T-40`, `T-80` and `T-63`. Range is a state a *detour* replenishes on a non-linear curve rather than a capacity dimension, so PyVRP refuses an electric fleet by name and `vrp.electric` places the stops around a solved route, the shape `DEC-1` gives and `vrp.depots` already uses. Charging is a `CHARGE` step rather than a total added afterwards, which is what the definition of done's second half is for: an hour on a plug that delays the rest of the day can break a time window, and an hour in a report cannot. Where to charge is greedy and says so — choosing charge points jointly with the route is the electric VRP proper and is a search problem, not a repair one. | `T-41` |
 | 2.0 | Closed `T-63`. The blocker said the missing thing was telematics volume; the definition of done asks for a weekly re-fit and a held-out validation report, and both are properties of the pipeline rather than of the traffic. Traces generated by driving a known profile are what makes the fit checkable at all — against real telematics nobody knows the answer, so nobody can tell a working pipeline from one that returns free flow every week, which is the argument for the generated corpus rather than a concession about it. **The fit found a gap in the model**: §12.2 fits per arc class and §6.3 specifies per-arc profiles, while `Problem.speed_profile` carries one for the whole instance. The classes are kept apart and the caller names one, per `CON-11` — collapsing them would describe no road in particular. Filed as `T-83`, blocked on a measured need rather than on effort. | `T-63`, `T-83` |
 | 1.9 | Closed `T-82` on the route polish rather than the metaheuristic. `vrp/lns.py` and `vrp/localsearch.py` are distance-based and carry no clock, so §7.5's filter has nothing to attach to there; `tsptw_sequence`'s Held-Karp state already tracks `ready`, which is exactly the departure time the Ichoua–Gendreau–Potvin construction needs, and the dominance argument survives time-dependence only because §6.3's no-passing property holds. **The row's dependency on `T-63` was the third instance of the mistake `T-81` audited**: a search that carries a profile is testable against any profile, and only its *usefulness* waits on fitted traffic. The definition of done said a built plan "beats" an evaluated one, which measurement contradicted — the congestion-aware sequence finishes later on the clock and is the only one that is legal — so the row now says legality. `NFR-01` is a measured 2.2x constant on a step already bounded at `MAX_DP_STOPS`. | `T-82` |
 | 1.8 | Closed `T-80` for the evaluation path and filed `T-82` for the planning one. `T-80`'s blocker was written a day earlier and repeated the mistake it was written to correct: it said wiring the construction in "before `T-63`" would be arithmetic about congestion nobody measured, which is an argument about value rather than feasibility, and the task's definition of done asks only that a peak be slower than free flow. Integrating it surfaced that PyVRP compiles one duration per arc, so an instance carrying a profile is now refused by name rather than returning a plan the verifier rejects at every arrival. | `T-80`, `T-82` |

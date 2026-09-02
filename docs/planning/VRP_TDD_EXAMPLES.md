@@ -248,7 +248,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | | L5 | **Done.** Never worse than the best pooled trajectory on the frozen corpus (mean reported); ≥ 0.5% on a capacity-pressured 200-customer instance |
 | E-39 | `examples/src/fleet/rich/departure_scheduling.py` | `T-39` | ALG-5 | TSP | L1 | **Done.** Duty duration measurably reduced by departure-time choice |
 | E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | | L2 | FIFO (no-passing) property holds across every bucket boundary, and the formulation §6.3 forbids is shown overtaking on the same instance. **Done.** The blocker was misread: OSRM cannot serve time-dependent travel, but §12.2 fits multipliers *against* free flow, so the construction never needed a departure-time parameter |
-| E-41 | `examples/src/fleet/rich/ev_recharging.py` | `T-41` | FR-20 | | L2 | Range never violated on a generated EV corpus; charging time appears in the duty timeline rather than being added afterwards. **`COULD` priority, and blocked** on charger locations and charging curves, which this stack has no source for. **Not built**: `COULD` priority, and the only task in the backlog with no data source in this stack — no charger locations, no charging curves |
+| E-41 | `examples/src/fleet/rich/ev_recharging.py` | `T-41` | FR-20, INV-16 | | L2 | The taper that makes the last fifth of a battery cost three times the first; a 240 km round on 200 km of range ending 20% past empty, with the shortfall at a step rather than in a total; the charge placed late and sized to the rest of the round; every later stop moving by the time on the plug; and a 30 kWh van refused by name. **Done.** |
 
 ---
 

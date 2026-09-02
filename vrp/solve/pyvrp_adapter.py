@@ -265,15 +265,38 @@ def _eligibility_profiles(problem: Problem, model: Model) -> dict:
             "this instance declares a speed profile (FR-14) and PyVRP compiles "
             "one duration per arc, so the plan it returns would be timed at "
             "free flow and the verifier would reject every arrival under "
-            "INV-4. The evaluator and the verifier are time-aware (T-80); "
-            "planning under a profile needs a search that carries §7.5's "
-            "lower-bound filter, which is T-82. Solve at free flow and "
-            "evaluate under the profile to see what the peak costs")
+            "INV-4. The evaluator and the verifier are time-aware (T-80), and "
+            "`vrp.polish.tsptw_sequence` sequences a route under a profile "
+            "carrying §7.5's lower-bound filter (T-82) -- so solve at free "
+            "flow and polish under the profile, or evaluate under it to see "
+            "what the peak costs")
+    _refuse_electric_fleet(problem)
     _refuse_order_incompatibility(problem)
     _refuse_ambiguous_eligibility(problem)
     keys = {_eligibility_key(problem, vehicle) for vehicle in problem.vehicles}
     return {key: (model.add_profile(name=f"eligibility-{index}"), key)
             for index, key in enumerate(sorted(keys, key=sorted))}
+
+
+def _refuse_electric_fleet(problem: Problem) -> None:
+    """FR-20: PyVRP has no battery dimension, so an EV instance is refused here.
+
+    A capacity dimension is monotone along a route and replenished only at a
+    reload; a battery is replenished by a *detour*, in an amount that depends
+    non-linearly on how empty it is. Compiling the range as a capacity would
+    produce plans that run flat, and the verifier would reject them under
+    INV-16 -- so the instance is refused by name and `vrp.electric` plans the
+    charging around a solved route instead.
+    """
+    electric = [vehicle.id for vehicle in problem.vehicles if vehicle.is_electric]
+    if electric:
+        raise NotImplementedError(
+            f"{', '.join(electric)} declare a battery (FR-20) and PyVRP has no "
+            "dimension a charger replenishes, so a plan it returned would run "
+            "flat and the verifier would reject it under INV-16. Solve the "
+            "fleet as unconstrained and call vrp.electric.plan_charging to "
+            "place the stops, or T-41's note for why the search itself does "
+            "not carry the battery")
 
 
 def _refuse_order_incompatibility(problem: Problem) -> None:

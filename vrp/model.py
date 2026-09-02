@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from vrp.battery import FULL_PPT
 from vrp.hos.rules import DriverState
 
 # MTX-5: unreachable pairs are represented explicitly and handled as hard-
@@ -25,6 +26,7 @@ from vrp.hos.rules import DriverState
 # Reading one through `duration()`/`distance()` raises rather than returning
 # it, so the sentinel cannot reach arithmetic by accident either.
 if TYPE_CHECKING:                       # pragma: no cover
+    from vrp.battery import ChargingCurve
     from vrp.timedependent import SpeedProfile
 
 UNREACHABLE = -1
@@ -335,6 +337,19 @@ class Vehicle:
     reload_locations: frozenset[str] = frozenset()
     max_reloads: int = 0
     reload_duration: int = 0
+    # FR-20: EV range and en-route recharging. `battery_wh` is the switch --
+    # None is a vehicle that burns diesel and is untouched by any of this, so
+    # a mixed fleet needs no flag and every existing instance keeps its
+    # behaviour. Charging is a reload of a different dimension, and the fields
+    # deliberately echo the ones above: energy is only available where a
+    # charger is, so the places are named rather than assumed.
+    battery_wh: int | None = None
+    consumption_wh_per_km: int = 0
+    charger_locations: frozenset[str] = frozenset()
+    charging_curve: ChargingCurve | None = None
+    # Vans start their shift plugged in overnight. Stated rather than assumed
+    # so a second round on the same battery can say what it inherited.
+    initial_soc_ppt: int = FULL_PPT
     access_class: str | None = None
     gross_weight_kg: int | None = None
     # FR-08's "end-anywhere". Deliberately not spelled `end_location_id=None`:
@@ -382,6 +397,39 @@ class Vehicle:
         # precisely what a solver would exploit.
         _require(self.service_factor_ppt > 0,
                  "service_factor_ppt must be positive")
+        self._require_coherent_battery()
+
+    def _require_coherent_battery(self) -> None:
+        """FR-20's fields describe one vehicle or none of it.
+
+        Half a specification is the dangerous state: a battery with no
+        consumption is a van with infinite range, and chargers named on a
+        vehicle that has no battery is a claim nobody can act on. Both are
+        refused here rather than discovered as a plan that drives forever.
+        """
+        _require_set(self.charger_locations, "charger_locations")
+        if self.battery_wh is None:
+            _require(not self.charger_locations and self.charging_curve is None
+                     and self.consumption_wh_per_km == 0,
+                     f"{self.id} declares charging but no battery_wh; a "
+                     "vehicle with no battery does not have a range")
+            return
+        _require_int(self.battery_wh, "battery_wh")
+        _require(self.battery_wh > 0, "battery_wh must be positive")
+        _require_int(self.consumption_wh_per_km, "consumption_wh_per_km")
+        _require(self.consumption_wh_per_km > 0,
+                 f"{self.id} has a battery and no consumption, which is a "
+                 "vehicle with unlimited range wearing FR-20's fields")
+        _require(self.charging_curve is not None,
+                 f"{self.id} has a battery and no charging curve, so how long "
+                 "it spends on a charger is unanswerable")
+        _require_int(self.initial_soc_ppt, "initial_soc_ppt")
+        _require(0 <= self.initial_soc_ppt <= FULL_PPT,
+                 f"initial_soc_ppt must be between 0 and {FULL_PPT}")
+
+    @property
+    def is_electric(self) -> bool:
+        return self.battery_wh is not None
 
     @property
     def ends_at(self) -> str:
@@ -718,9 +766,14 @@ class Step:
     # cannot trace to an article is not evidence of anything.
     rule_ref: str | None = None
     placement: str | None = None
+    # FR-20. None on a route that is not electric, so a diesel timeline reads
+    # exactly as it always did rather than carrying a column of 1000s that
+    # mean nothing.
+    soc_after_ppt: int | None = None
 
     def __post_init__(self) -> None:
-        _require(self.type in ("START", "PICKUP", "DELIVERY", "BREAK", "RELOAD", "END"),
+        _require(self.type in ("START", "PICKUP", "DELIVERY", "BREAK", "RELOAD",
+                              "CHARGE", "END"),
                  f"unknown step type {self.type!r}")
         _require(self.rule_ref is None or self.type == "BREAK",
                  "rule_ref belongs on a BREAK step")

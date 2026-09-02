@@ -13,10 +13,19 @@ service times, never from a solver's own accounting.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
 
-from vrp.model import Order, Problem, Step, service_time, travel_between
+from vrp.battery import ChargeStop, charge_seconds, consumed_ppt
+from vrp.model import (
+    Order,
+    Problem,
+    Step,
+    Vehicle,
+    service_time,
+    travel_between,
+)
 
 
 @dataclass(frozen=True)
@@ -95,12 +104,29 @@ def _service_start(arrival: int, windows: tuple) -> int:
 
 
 def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
-                   start_time: int | None = None) -> tuple[Step, ...]:
+                   start_time: int | None = None,
+                   charges: Mapping[int, ChargeStop] | None = None
+                   ) -> tuple[Step, ...]:
     """Expand a vehicle's order sequence into a full timeline.
 
-    Returns START, one step per order, then END. Load is computed backwards for
-    delivery-only work — the vehicle leaves the depot carrying everything it
-    will drop — which is what makes `load_after` meaningful at the first step.
+    Args:
+        problem: the instance.
+        vehicle_id: whose day this is.
+        order_ids: the stops, in the order they will be served.
+        start_time: when the shift begins, defaulting to the vehicle's.
+        charges: FR-20. `{index: ChargeStop}` puts a visit to a charger
+            *before* the order at that index. Passing it here rather than
+            appending a total afterwards is the whole point: a charge is a
+            stop, so it delays everything after it and a time window can
+            notice.
+
+    Returns:
+        START, one step per order with any charges interleaved, then END. Load
+        is computed backwards for delivery-only work — the vehicle leaves the
+        depot carrying everything it will drop — which is what makes
+        `load_after` meaningful at the first step. On an electric vehicle every
+        step also carries the state of charge it leaves with; on any other
+        vehicle that stays None.
     """
     vehicle = problem.vehicle(vehicle_id)
     orders = [problem.order(order_id) for order_id in order_ids]
@@ -115,12 +141,18 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
 
     clock = vehicle.shift.start if start_time is None else start_time
     start_location = problem.location(vehicle.start_location_id)
+    soc = vehicle.initial_soc_ppt if vehicle.is_electric else None
     steps: list[Step] = [Step(type="START", location_id=start_location.id,
                               arrival=clock, start_service=clock, departure=clock,
-                              load_after=dict(on_board))]
+                              load_after=dict(on_board), soc_after_ppt=soc)]
 
     position = start_location.matrix_index
-    for order in orders:
+    for index, order in enumerate(orders):
+        if charges and index in charges:
+            step, clock, position, soc = _charge_step(
+                problem, vehicle, charges[index], clock, position, soc,
+                on_board)
+            steps.append(step)
         location_id, _fixed, windows = _stop_of(order)
         location = problem.location(location_id)
         # FR-05: fixed + per-unit + vehicle factor + dwell. Reading
@@ -130,6 +162,8 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
         service = service_time(order, vehicle, location)
         arrival = clock + travel_between(problem, position,
                                          location.matrix_index, clock)
+        soc = _drained(vehicle, soc, problem.matrix.distance(
+            position, location.matrix_index))
         begin = _service_start(arrival, windows)
         # `service_time` already includes the dwell overhead (FR-05), so
         # adding it again here charged it twice -- 255 s where the model
@@ -147,17 +181,58 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
             type="DELIVERY" if order.delivery is not None else "PICKUP",
             location_id=location.id, order_id=order.id,
             arrival=arrival, start_service=begin, departure=depart,
-            load_after=dict(on_board),
+            load_after=dict(on_board), soc_after_ppt=soc,
         ))
         clock, position = depart, location.matrix_index
 
     end_location = problem.location(vehicle.ends_at)
     arrival = clock + travel_between(problem, position,
                                      end_location.matrix_index, clock)
+    soc = _drained(vehicle, soc, problem.matrix.distance(
+        position, end_location.matrix_index))
     steps.append(Step(type="END", location_id=end_location.id, arrival=arrival,
                       start_service=arrival, departure=arrival,
-                      load_after=dict(on_board)))
+                      load_after=dict(on_board), soc_after_ppt=soc))
     return tuple(steps)
+
+
+def _drained(vehicle: Vehicle, soc: int | None, metres: int) -> int | None:
+    """What driving `metres` leaves in the battery. None stays None.
+
+    Allowed to go negative rather than clamped at zero. A clamp would turn "this
+    round is 40km beyond the van" into "this round ends empty", which reads like
+    a plan that just works out — and the verifier would have nothing to see.
+    """
+    if soc is None:
+        return None
+    return soc - consumed_ppt(vehicle.battery_wh, vehicle.consumption_wh_per_km,
+                              metres)
+
+
+def _charge_step(problem: Problem, vehicle: Vehicle, stop: ChargeStop,
+                 clock: int, position: int, soc: int | None,
+                 on_board: dict[str, int]) -> tuple[Step, int, int, int]:
+    """One visit to a charger, priced on the curve.
+
+    Raises:
+        ValueError: if the vehicle is not electric, or arrives with less charge
+            than nothing. A diesel van at a charge point is a modelling error
+            worth hearing about rather than a step that costs no time.
+    """
+    if not vehicle.is_electric:
+        raise ValueError(
+            f"{vehicle.id} has no battery and cannot charge at {stop.location_id}")
+    charger = problem.location(stop.location_id)
+    arrival = clock + travel_between(problem, position, charger.matrix_index,
+                                     clock)
+    on_arrival = _drained(vehicle, soc, problem.matrix.distance(
+        position, charger.matrix_index))
+    plugged = charge_seconds(vehicle.battery_wh, vehicle.charging_curve,
+                             max(on_arrival, 0), stop.to_soc_ppt)
+    return (Step(type="CHARGE", location_id=charger.id, arrival=arrival,
+                 start_service=arrival, departure=arrival + plugged,
+                 load_after=dict(on_board), soc_after_ppt=stop.to_soc_ppt),
+            arrival + plugged, charger.matrix_index, stop.to_soc_ppt)
 
 
 def route_metrics(problem: Problem, timeline: tuple[Step, ...]) -> dict[str, int]:

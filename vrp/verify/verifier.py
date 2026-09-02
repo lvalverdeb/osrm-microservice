@@ -34,11 +34,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import pairwise
 
+from vrp.battery import FULL_PPT, charge_seconds, consumed_ppt
 from vrp.hos.rules import Activity, rules_for
 from vrp.model import (
     Problem,
+    Route,
     Solution,
     Step,
+    Vehicle,
     service_time,
     travel_between,
 )
@@ -94,6 +97,7 @@ def verify(problem: Problem, solution: Solution) -> Report:
     for route in solution.routes:
         _check_compatibility(problem, route, report)         # INV-10
         _check_reloads(problem, route, report)               # INV-11
+        _check_battery(problem, route, report)               # INV-16
     _check_docks(problem, solution, report)                  # INV-12
     _check_inventory(problem, solution, report)              # INV-13
     _check_ride_times(problem, solution, report)             # INV-14
@@ -188,6 +192,66 @@ def _check_reloads(problem: Problem, route, report: Report) -> None:
             report.fail("INV-11",
                         f"reloaded at {step.location_id}, which holds no stock "
                         f"for {vehicle.id}", vehicle_id=route.vehicle_id)
+
+
+def _check_battery(problem: Problem, route: Route, report: Report) -> None:
+    """INV-16: an electric van never runs flat, and charges only at a charger.
+
+    FR-20, §4.3. The state of charge is recomputed here from the distances the
+    steps imply rather than read from `soc_after_ppt`, because a plan asserting
+    its own battery is fine is not evidence of anything -- the field is what the
+    evaluator believed, and CON-1 exists so the verifier does not believe it
+    too. The arithmetic primitives are shared (`vrp.battery` is a domain
+    primitive, like `service_time`); the rule is not.
+
+    A route that ends exactly empty passes. The reserve `vrp.electric` plans to
+    is an operator's policy, and a verifier that enforced it would reject
+    perfectly drivable plans that somebody else's policy allows.
+    """
+    vehicle = problem.vehicle(route.vehicle_id)
+    if not vehicle.is_electric:
+        return
+
+    soc = vehicle.initial_soc_ppt
+    for previous, current in pairwise(route.steps):
+        soc -= consumed_ppt(
+            vehicle.battery_wh, vehicle.consumption_wh_per_km,
+            problem.matrix.distance(
+                problem.location(previous.location_id).matrix_index,
+                problem.location(current.location_id).matrix_index))
+        if soc < 0:
+            report.fail("INV-16",
+                        f"arrives at {current.location_id} with the battery "
+                        f"{-soc} parts per thousand past empty",
+                        vehicle_id=route.vehicle_id)
+            return
+        if current.type != "CHARGE":
+            continue
+        if current.location_id not in vehicle.charger_locations:
+            report.fail("INV-16",
+                        f"charges at {current.location_id}, which is not a "
+                        f"charger for {vehicle.id}",
+                        vehicle_id=route.vehicle_id)
+            return
+        soc = _charged_to(vehicle, soc, current)
+
+
+def _charged_to(vehicle: Vehicle, arrived_with: int, step: Step) -> int:
+    """How full a charge step could have left the van, given how long it took.
+
+    Believing the declared state of charge would let a plan claim a full
+    battery from a two-minute stop. What the plug can deliver in the time the
+    step actually occupies is the bound, and the walk is the same one
+    `vrp.battery` does -- shared arithmetic, independent rule.
+    """
+    plugged = step.departure - step.start_service
+    reached = arrived_with
+    while reached < FULL_PPT:
+        if charge_seconds(vehicle.battery_wh, vehicle.charging_curve,
+                          arrived_with, reached + 1) > plugged:
+            break
+        reached += 1
+    return reached
 
 
 def _check_docks(problem: Problem, solution: Solution, report: Report) -> None:
