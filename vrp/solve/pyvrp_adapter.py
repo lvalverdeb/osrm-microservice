@@ -260,6 +260,15 @@ def _eligibility_profiles(problem: Problem, model: Model) -> dict:
     hundred identically-qualified vans share one. Instances with no skills and
     no site restrictions get a single profile and the edge loop they always had.
     """
+    if problem.speed_profile is not None:
+        raise NotImplementedError(
+            "this instance declares a speed profile (FR-14) and PyVRP compiles "
+            "one duration per arc, so the plan it returns would be timed at "
+            "free flow and the verifier would reject every arrival under "
+            "INV-4. The evaluator and the verifier are time-aware (T-80); "
+            "planning under a profile needs a search that carries §7.5's "
+            "lower-bound filter, which is T-82. Solve at free flow and "
+            "evaluate under the profile to see what the peak costs")
     _refuse_order_incompatibility(problem)
     _refuse_ambiguous_eligibility(problem)
     keys = {_eligibility_key(problem, vehicle) for vehicle in problem.vehicles}

@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import pairwise
 
-from vrp.model import Order, Problem, Step, service_time
+from vrp.model import Order, Problem, Step, service_time, travel_between
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,6 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
     """
     vehicle = problem.vehicle(vehicle_id)
     orders = [problem.order(order_id) for order_id in order_ids]
-    matrix = problem.matrix
 
     dimensions = {dimension for order in orders for dimension in order.quantities}
     # Delivery-only routes start fully laden; pickups add along the way.
@@ -129,7 +128,8 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
         # made the other three components decorative: a richer model that
         # produced identical plans.
         service = service_time(order, vehicle, location)
-        arrival = clock + matrix.duration(position, location.matrix_index)
+        arrival = clock + travel_between(problem, position,
+                                         location.matrix_index, clock)
         begin = _service_start(arrival, windows)
         # `service_time` already includes the dwell overhead (FR-05), so
         # adding it again here charged it twice -- 255 s where the model
@@ -152,7 +152,8 @@ def build_timeline(problem: Problem, vehicle_id: str, order_ids: list[str],
         clock, position = depart, location.matrix_index
 
     end_location = problem.location(vehicle.ends_at)
-    arrival = clock + matrix.duration(position, end_location.matrix_index)
+    arrival = clock + travel_between(problem, position,
+                                     end_location.matrix_index, clock)
     steps.append(Step(type="END", location_id=end_location.id, arrival=arrival,
                       start_service=arrival, departure=arrival,
                       load_after=dict(on_board)))
@@ -169,7 +170,11 @@ def route_metrics(problem: Problem, timeline: tuple[Step, ...]) -> dict[str, int
         origin = problem.location(previous.location_id).matrix_index
         destination = problem.location(current.location_id).matrix_index
         metrics["distance"] += matrix.distance(origin, destination)
-        metrics["driving_seconds"] += matrix.duration(origin, destination)
+        # Timed from when the vehicle actually left, not from free flow:
+        # the whole point of a profile is that the same arc costs
+        # different amounts at different hours.
+        metrics["driving_seconds"] += travel_between(
+            problem, origin, destination, previous.departure)
         metrics["waiting_seconds"] += current.waiting
         metrics["service_seconds"] += current.departure - current.start_service
         early, late = soft_penalties(problem, current)

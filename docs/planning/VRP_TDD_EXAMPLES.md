@@ -8,7 +8,7 @@ Companion to [VRP_SDD_FIT_GAP.md](VRP_SDD_FIT_GAP.md), which measures how far
 today's implementation is from the specification. This document is the route
 from one to the other.
 
-**Status — 60 of 63 examples done**, verified against the repository on
+**Status — 61 of 64 examples done**, verified against the repository on
 2026-09-02 (912 tests passing, CI green on `2928a30`). `E-40` moved from
 Blocked to Done when `T-40`'s blocker turned out to be a misreading, and `E-80`
 was added for the integration that genuinely does wait on data. Two of them do not have the file §11a first named for them, and the
@@ -369,7 +369,8 @@ written first and fails.
 | `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work, what it displaced is named, and with room the displaced work is re-planned rather than dropped. **Done.** |
 | `E-78` | `examples/src/fleet/p0/must_work_at_v1.py` (`UC-171`) | `T-78` | FR-21, FR-30, FR-32 | L2 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry. **Done.** No `absent_driver.py`: `UC-171` is a P0 operation and belongs with the other thirteen. The claim was never false — the measurement was, because a free re-plan was being scored on a freedom the depot does not have |
 | `E-79` | `examples/src/fleet/infra/degraded_matrix.py` | `T-79` | NFR-04, MTX-11 | L1 | A provider that dies mid-build keeps the tiles that arrived, leaves the rest `UNREACHABLE` rather than guessing, and carries the reason out to the plan a dispatcher reads. **Done.** |
-| `E-80` | `examples/src/fleet/rich/time_dependent_routes.py` | `T-80` | FR-14, §7.5 | L2 | A plan built on a peak profile is later than the same plan on free flow, and the local search still meets NFR-01. **Not built** |
+| `E-80` | `examples/src/fleet/rich/time_dependent.py` (§2–3) | `T-80` | FR-14, §7.5 | L2 | The same stops finish later through a peak than at free flow, the verifier agrees with the evaluator about every arrival, and §7.5's bound is measured on route-shaped arcs. **Done.** No separate file: it is the same construction `E-40` shows, one layer up |
+| `E-82` | `examples/src/fleet/rich/planning_under_congestion.py` | `T-82` | FR-14, NFR-01 | L2 | A plan *built* under a peak profile beats one built at free flow and evaluated under it. **Not built** |
 
 ---
 

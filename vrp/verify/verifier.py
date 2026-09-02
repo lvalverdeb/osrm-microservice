@@ -35,7 +35,13 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from vrp.hos.rules import Activity, rules_for
-from vrp.model import Problem, Solution, Step, service_time
+from vrp.model import (
+    Problem,
+    Solution,
+    Step,
+    service_time,
+    travel_between,
+)
 
 # Invariants this verifier cannot yet evaluate, and why. Empty: every invariant
 # now has a subject when its instance provides one. INV-7 and INV-8 are added
@@ -669,7 +675,9 @@ def _check_route(problem: Problem, route, report: Report) -> None:
             continue
         origin = problem.location(previous.location_id).matrix_index
         destination = problem.location(current.location_id).matrix_index
-        expected = (previous.departure + matrix.duration(origin, destination)
+        expected = (previous.departure
+                    + travel_between(problem, origin, destination,
+                                     previous.departure)
                     + en_route_breaks)
         en_route_breaks = 0
         if current.arrival != expected:
@@ -723,7 +731,8 @@ def _check_objective(problem: Problem, solution: Solution, report: Report) -> No
             origin = problem.location(previous.location_id).matrix_index
             destination = problem.location(current.location_id).matrix_index
             recomputed["distance"] += matrix.distance(origin, destination)
-            recomputed["driving_seconds"] += matrix.duration(origin, destination)
+            recomputed["driving_seconds"] += travel_between(
+                problem, origin, destination, previous.departure)
 
     for component, claimed in reported.items():
         if component not in recomputed:

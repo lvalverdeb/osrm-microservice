@@ -14,7 +14,7 @@ stop catching them.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vrp.hos.rules import DriverState
 
@@ -24,6 +24,9 @@ from vrp.hos.rules import DriverState
 # nothing better optimises it into a plan and returns a leg nobody can drive.
 # Reading one through `duration()`/`distance()` raises rather than returning
 # it, so the sentinel cannot reach arithmetic by accident either.
+if TYPE_CHECKING:                       # pragma: no cover
+    from vrp.timedependent import SpeedProfile
+
 UNREACHABLE = -1
 
 
@@ -576,6 +579,12 @@ class Problem:
     # to neither side of it -- putting it on one order would make the other's
     # copy either redundant or, worse, separately editable.
     synchronisations: tuple[Synchronisation, ...] = ()
+    # FR-14: one profile for the instance. §6.3 allows per-arc or per-zone and
+    # this is neither -- a refinement worth making when there is data to fit
+    # per-arc multipliers from, which is `T-63`. An instance-wide profile is
+    # enough to make afternoon travel cost what it costs, and enough for the
+    # FIFO property to bind on every arc.
+    speed_profile: SpeedProfile | None = None
 
     def __post_init__(self) -> None:
         _require(bool(self.id), "problem id must not be empty")
@@ -747,6 +756,32 @@ class Solution:
     # pass, surviving nowhere -- so a production plan could not be reproduced
     # even in principle. Keys: solver, seed, iterations, matrix_version.
     solver: dict[str, Any] | None = None
+
+
+def travel_between(problem: Problem, origin: int, destination: int,
+                   depart: int) -> int:
+    """How long an arc takes, leaving at `depart`. FR-14, §6.3.
+
+    Free flow when the instance declares no speed profile, which is every
+    instance that existed before `T-80` and every one whose matrix already
+    reflects the traffic it cares about. Where a profile is present the matrix
+    supplies free flow and the profile scales it, which is §12.2's construction
+    -- multipliers fitted *against* the routing engine's assumptions rather
+    than replacing them.
+
+    Shared by the evaluator and the independent verifier, on the same footing
+    as `service_time`, which the verifier has always imported from here. CON-1
+    forbids the verifier sharing code with a *solver*; a domain primitive both
+    of them compute from is the model, not a solver, and duplicating this one
+    would give two IGP implementations to keep in step and no way to tell which
+    was right.
+    """
+    free_flow = problem.matrix.duration(origin, destination)
+    profile = problem.speed_profile
+    if profile is None or free_flow <= 0:
+        return free_flow
+    from vrp.timedependent import travel
+    return travel(free_flow, depart, profile)
 
 
 def may_enter(vehicle: Vehicle, site: Location) -> bool:

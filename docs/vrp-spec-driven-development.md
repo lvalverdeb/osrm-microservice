@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | Document ID | `SDD-VRP-001` |
-| Version | 1.7 |
+| Version | 1.8 |
 | Status | Authoritative — normative for implementation |
 | Scope | Real-world vehicle routing, scheduling, and vehicle allocation |
 | Supersedes | — |
@@ -1432,7 +1432,7 @@ all learning.
 Each task lists dependencies, the requirements it satisfies, and a definition of done. Tasks marked
 **[GATE]** block the next slice.
 
-**Status — 60 of 64 done**, verified against the repository on 2026-09-02 (912 tests passing, CI
+**Status — 61 of 65 done**, verified against the repository on 2026-09-02 (912 tests passing, CI
 green on `2928a30`). `T-40` was unblocked by separating its construction from its data and turns
 out to have been buildable all along; `T-80` and `T-81` were filed in the same edit. Every blocked
 row now names the specific thing that would unblock it, so the claim can be checked rather than
@@ -1443,7 +1443,7 @@ rather than counting the proxy. `blocked` and `optional` are the four that remai
 | ID | Why it is open |
 |---|---|
 | `T-63` | **Unblocks when** executed routes carry enough arc timings to fit per-bucket multipliers against free flow. `ExecutedRoute` already records a departure and an arrival per stop, which is the observation §12.2 needs; what is missing is volume, not shape. Same category as `T-61` and `T-62`'s owed halves. |
-| `T-80` | **Unblocks when** `T-63` produces profiles worth planning against. Wiring the construction into route evaluation before that would trade §7.5's O(1) concatenation for arithmetic about a congestion nobody measured. |
+| `T-82` | **Unblocks when** a search can carry a departure-dependent cost. PyVRP compiles one duration per arc, so it is refused by name rather than returning a plan the verifier rejects; the repository's own LNS could carry §7.5's filter, and `T-63`'s profiles are what would make doing so worth the O(1) concatenation it costs. |
 | `T-41` | `COULD` priority, and this backlog's own note says it is the only task with no data source in the current stack: no charger locations, no charging curves. |
 | `T-67` | Optional accelerator profile. Needs GPU hardware not present in this environment; the CPU path is unaffected either way. |
 
@@ -1667,7 +1667,8 @@ separate them, and displaced work is reported as `PREEMPTED` naming what took
 the slot -- while work that was never planned keeps its own reason, because the
 round was already larger than the van and the emergency did not cause that.
 | `T-78` | done | Recovery policy for a fleet reduced before the shift starts | T-56 | FR-21, FR-30, FR-32 | A recovery never asks a loaded vehicle to be repacked, and serves what the remaining fleet can carry |
-| `T-80` | blocked | Time-dependent evaluation on the route path, with §7.5's mitigation for the concatenation shortcuts it forbids | T-40, T-63 | FR-14, §6.3, §7.5 | A plan built on a peak profile is later than the same plan built on free flow, and the local search still meets NFR-01 |
+| `T-80` | done | Time-dependent evaluation on the route path: the canonical evaluator, the independent verifier, and §7.5's lower-bound filter | T-40 | FR-14, §6.3, §7.5 | The same sequence of stops finishes later through a peak than at free flow, and the verifier agrees with the evaluator about every arrival |
+| `T-82` | blocked | Planning under a speed profile: a search that carries §7.5's filter rather than refusing the instance | T-80, T-63 | FR-14, §7.5, NFR-01 | A plan *built* under a peak profile beats one built at free flow and evaluated under it, and the local search still meets NFR-01 |
 | `T-79` | done | Graceful matrix degradation: cached fallback, and a `DEGRADED` plan that says so | T-11, T-15 | NFR-04, MTX-11, `UC-072` | A build whose provider fails mid-way returns the cached matrix rather than raising; every plan costed on an incomplete or haversine matrix carries `DEGRADED` out to the caller; `test_uc072_a_degraded_matrix_is_labelled_rather_than_fatal` xpasses |
 
 **`UC-171`'s claim was right and the measurement was wrong**, which is worth
@@ -1794,6 +1795,7 @@ Methodology:
 |---|---|---|
 | 1.1 | Added §3.4, mapping the named problem classes — TSP, CVRP, VRPTW, MDHVRPTW, PDPTW — onto the requirements that compose them, the benchmark set that exercises each, and the slice that delivers it. **MDHVRPTW was previously unnamed anywhere in this document** despite being the shape §2.1 describes, and TSP appeared only as a polish technique in §7.5 rather than as a class the platform serves. Added the corresponding glossary entries and a Cordeau MDVRPTW row to §11.3. No requirement was added, renumbered or reused: §3.4 is a mapping over the existing `FR-*` set, per rule 2. | `T-12`, `T-13`, `T-20`, `T-21`, `T-23`, `T-39` |
 | 1.2 | Closed five traceability gaps found by auditing the document against itself. `FR-19` (dock synchronisation) and `FR-22` (partial dispatch) were each implied by a task's own title but claimed by neither, so nothing traced them: added to `T-28` and `T-51`. `FR-20` (EV range) appeared in no task at all and was not excluded either — a requirement with no owner — and now has `T-41`, marked `COULD` and flagged as the only task with no data source in the current stack. §6.2 cited `T-42`, which does not exist; service-time calibration is `T-62`. `ALG-3`'s two strategies were referenced as `ALG-3a`/`ALG-3b` but labelled only **(a)**/**(b)**, so the identifiers dangled; they are labelled now. | `T-28`, `T-41`, `T-51`, `T-62` |
+| 1.8 | Closed `T-80` for the evaluation path and filed `T-82` for the planning one. `T-80`'s blocker was written a day earlier and repeated the mistake it was written to correct: it said wiring the construction in "before `T-63`" would be arithmetic about congestion nobody measured, which is an argument about value rather than feasibility, and the task's definition of done asks only that a peak be slower than free flow. Integrating it surfaced that PyVRP compiles one duration per arc, so an instance carrying a profile is now refused by name rather than returning a plan the verifier rejects at every arrival. | `T-80`, `T-82` |
 | 1.7 | Unblocked `T-40` by separating the construction from the data, and filed `T-80` for the integration and `T-81` for the audit of the blocker notes themselves. `T-40`'s row claimed OSRM's lack of a departure-time parameter left "nothing to fit FIFO speed profiles against"; §12.2 fits multipliers *against* free flow from observed traces, so that was never the obstacle, and the task's own definition of done asks about the construction rather than about real traffic. `T-40` and `T-63` had been waiting on each other. Every blocked row now states what would unblock it, which is the only form of the claim anybody can check. | `T-40`, `T-63`, `T-80`, `T-81` |
 | 1.6 | Filed `T-79` for `NFR-04` (graceful matrix degradation), defined since version 1.0 with no task claiming it — found by `tests/test_traceability.py`, not by review. The requirement asks for two things and the system has one: a mid-build provider failure propagates rather than fabricating arcs, so nothing silently substitutes haversine, but there is no cached fallback and no `DEGRADED` label on a plan costed against an incomplete matrix. `UC-072` is the operation and is `PARTIALLY_MODELLED` for exactly that split. No requirement was added or changed. | `T-79` |
 | 1.5 | Recorded `INV-10`–`INV-15` in §4.3, which the independent verifier has enforced without the specification naming them. §4.3 listed nine invariants and §11.2 claimed the verifier "checks INV-1 … INV-9"; it checks fifteen. Each was added when a requirement arrived that none of the first nine covered — compatibility and site access, reloads, dock capacity, depot inventory, ride time, and route synchronisation — and each covers a plan that satisfied every invariant §4.3 named while being one nobody could drive. Found by a mechanical audit of the repository rather than by review, which is the point: a specification that understates what the system checks invites somebody to rely on a guarantee it does not know it makes. No requirement was added or renumbered; this records behaviour that already exists. | `T-04`, `T-22`, `T-28`, `T-45`, `T-74`, `T-76` |
