@@ -1518,7 +1518,24 @@ what `UC-134` warns that a pre-assignment would forfeit. `SolveService` runs it
 once before a job finishes; an intermediate incumbent may still over-draw, which
 is what `status` already reports about anytime plans.
 
-| `T-73` | todo | Multi-period horizon: visit frequency, permitted-day patterns, interval compliance | T-47 | FR-23, §12.2 | A visit-frequency instance plans a horizon, not seven days; compliance measured against the interval and reported per order |
+| `T-73` | done | Multi-period horizon: visit frequency, permitted-day patterns, interval compliance | T-47 | FR-23, §12.2 | A visit-frequency instance plans a horizon, not seven days; compliance measured against the interval and reported per order |
+
+**`T-73`'s coupling is the calendar, and only the calendar.** The seven citing
+operations agree on that -- `UC-043`: "The decision is which days to visit which
+assets" -- so `vrp/periodic.py` chooses the days and each day is then an
+ordinary single-day problem for the ordinary solver. Solving every day jointly
+would be a much larger claim and none of the entries makes it.
+
+A recurrence is deliberately not an `Order`. An order is one visit at one place
+on one day, which is what the model, the evaluator and the verifier all take it
+to be; a commitment to inspect something four times a year is a statement about
+orders that do not exist yet. A frequency field on `Order` would have made every
+single-day plan carry one meaning nothing.
+
+Compliance counts the gaps at both ends of the horizon, which is `UC-129`'s
+point: "the next due date is set by the last visit". Four visits in January is
+four visits and eleven months out of compliance, and a measure looking only
+between visits calls it perfect.
 | `T-74` | done | Maximum ride time from pickup to delivery, for passengers and for perishable goods | T-20 | FR-24, INV-14 | Li & Lim PDPTW still passes; a ride-time-bounded instance never exceeds the bound, and the bound is distinguishable from a delivery window |
 
 **`T-74`'s bound is exact in the verifier and conservative in the search**, and
