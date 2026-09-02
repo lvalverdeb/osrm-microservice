@@ -360,7 +360,7 @@ written first and fails.
 |---|---|---|---|---|---|
 | `E-72` | `examples/src/fleet/rich/eligibility.py` | `T-72` | FR-10, FR-11, FR-31 | L1 | A plan the verifier would reject on skills, order class, site access or depot stock is never built in the first place. **Not built** |
 | `E-73` | `examples/src/fleet/rich/multi_period.py` | `T-73` | FR-23 | L2 | A quarterly inspection round meets its interval, and seven independent days do not. **Not built** |
-| `E-74` | `examples/src/fleet/rich/ride_time.py` | `T-74` | FR-24 | L2 | A patient's time aboard is bounded independently of the appointment window. **Not built** |
+| `E-74` | `examples/src/fleet/rich/ride_time.py` | `T-74` | FR-24 | L2 | A shipment's time aboard is bounded independently of its delivery window; the search is told a sound deadline and the verifier measures the journey exactly. **Done.** |
 | `E-75` | `examples/src/fleet/rich/priority_sources.py` | `T-75` | FR-25 | L1 | Three orders equal on tier are ordered by source; a statutory duty cannot be priced; an SLA window is computed from the fault timestamp. **Done.** |
 | `E-76` | `examples/src/fleet/rich/synchronisation.py` | `T-76` | FR-26 | L2 | Two routes meet at a satellite; moving one moves the other. **Not built** |
 | `E-77` | `examples/src/fleet/dynamic/preemption.py` | `T-77` | FR-27 | L2 | An emergency displaces planned work mid-shift and the displaced work reappears. **Not built** |

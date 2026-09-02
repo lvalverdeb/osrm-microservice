@@ -126,6 +126,64 @@ def tier_bonuses(problem: Problem) -> dict[int, int]:
     return bonuses
 
 
+def _delivery_deadline(problem: Problem, order) -> int:
+    """When a shipment must be delivered by. FR-04 and, if set, FR-24.
+
+    `add_shipment` takes no ride-time bound, so the only lever is the delivery
+    window -- which is not the same constraint, and the entries citing FR-24
+    say so directly. What *can* be said soundly is a deadline: a shipment
+    collected no earlier than its pickup window opens and aboard for at most
+    `max_ride_time` cannot legally be delivered after `pickup_opens + ride`.
+    Any plan violating the ride bound violates that deadline too, so no illegal
+    plan survives it.
+
+    "No earlier" means the earliest the collection could physically happen, not
+    the instant its window opens. Those differ by the drive out, and using the
+    window alone made feasible instances infeasible: a shipment whose window
+    opens at 00:00 but whose depot is an hour away was being held to a deadline
+    an hour tighter than the operation allows. The floor is therefore the later
+    of the window and the earliest any vehicle could be standing there, loaded.
+
+    It remains **conservative, and exact when the collection time is fixed.** A
+    shipment collected later than it could have been has ride time to spare
+    that this deadline does not give back. For a scheduled collection -- a
+    school stop, a booked ward round -- the two coincide. Where they do not,
+    `INV-14` is the exact check and this is the search's safe approximation of
+    it.
+    """
+    window_end = (order.delivery.time_windows[0].end
+                  if order.delivery.time_windows else shift_end_of(problem))
+    if order.max_ride_time is None:
+        return window_end
+    return min(window_end,
+               _earliest_departure(problem, order) + order.max_ride_time)
+
+
+def _earliest_departure(problem: Problem, order) -> int:
+    """The soonest a shipment could leave its pickup, loaded.
+
+    A lower bound, deliberately: it takes the quickest vehicle from its own
+    start, ignores everything else that vehicle might have to do first, and
+    adds the collection's own service. Anything looser would make the deadline
+    unsound; anything tighter would need to know the route, which is what is
+    being decided.
+    """
+    collect = problem.location(order.pickup.location_id)
+    opens = (order.pickup.time_windows[0].start
+             if order.pickup.time_windows else shift_start_of(problem))
+    reachable = min(
+        (vehicle.shift.start + problem.matrix.duration(
+            problem.location(vehicle.start_location_id).matrix_index,
+            collect.matrix_index)
+         for vehicle in problem.vehicles
+         if problem.matrix.is_reachable(
+             problem.location(vehicle.start_location_id).matrix_index,
+             collect.matrix_index)),
+        default=opens)
+    return max(opens, reachable) + service_time(
+        order, problem.vehicles[0], collect)
+
+
 def _bounds(window, shift_start: int, shift_end: int) -> tuple[int, int]:
     """PyVRP bounds for one window. FR-04's hard/soft distinction lives here.
 
@@ -356,8 +414,7 @@ def compile_problem(problem: Problem) -> _Compiled:
                     order, problem.vehicles[0], collect),
                 delivery_tw_early=order.delivery.time_windows[0].start
                 if order.delivery.time_windows else shift_start_of(problem),
-                delivery_tw_late=order.delivery.time_windows[0].end
-                if order.delivery.time_windows else shift_end_of(problem),
+                delivery_tw_late=_delivery_deadline(problem, order),
                 delivery_service_duration=service_time(
                     order, problem.vehicles[0], drop),
                 amount=[order.quantities.get(name, 0) for name in dimensions],

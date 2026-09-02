@@ -90,6 +90,7 @@ def verify(problem: Problem, solution: Solution) -> Report:
         _check_reloads(problem, route, report)               # INV-11
     _check_docks(problem, solution, report)                  # INV-12
     _check_inventory(problem, solution, report)              # INV-13
+    _check_ride_times(problem, solution, report)             # INV-14
     _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
     return report
@@ -424,6 +425,51 @@ def _served_orders(solution: Solution) -> list[tuple[str, str]]:
             for route in solution.routes
             for step in route.steps
             if step.order_id is not None]
+
+
+def _check_ride_times(problem: Problem, solution: Solution,
+                      report: Report) -> None:
+    """INV-14: nothing is aboard longer than it may be. FR-24.
+
+    Measured from *departing* the pickup to *arriving* at the delivery, which
+    is the definition both citing operations insist on. `UC-092`: "the clock
+    starts at loading, so the constraint is elapsed time since departure, not
+    arrival time at the customer." `UC-157` says the same of a viability
+    window: "the clock starts at collection, making it a maximum elapsed time
+    per shipment, not an arrival window."
+
+    That distinction is the whole check. A delivery window and a ride bound
+    constrain different things, and an instance can carry both -- a blood
+    sample due at the lab before its cut-off *and* viable for only six hours.
+    Reading one as the other passes plans in which the sample arrives on time
+    and useless.
+
+    Numbered past INV-13 for the reason INV-10 was: §4.3's nine invariants do
+    not cover it, and a plan leaving a five-year-old aboard for ninety minutes
+    satisfied every one of them.
+    """
+    bounded = {order.id: order.max_ride_time for order in problem.orders
+               if order.max_ride_time is not None}
+    if not bounded:
+        report.not_applicable.add("INV-14")
+        return
+
+    for route in solution.routes:
+        aboard: dict[str, int] = {}
+        for step in route.steps:
+            if step.order_id not in bounded:
+                continue
+            if step.type == "PICKUP":
+                aboard[step.order_id] = step.departure
+            elif step.type == "DELIVERY" and step.order_id in aboard:
+                ride = step.arrival - aboard.pop(step.order_id)
+                allowed = bounded[step.order_id]
+                if ride > allowed:
+                    report.fail("INV-14",
+                                f"{step.order_id} was aboard {ride}s of an "
+                                f"allowed {allowed}s",
+                                vehicle_id=route.vehicle_id,
+                                order_id=step.order_id)
 
 
 def _check_coverage(problem: Problem, solution: Solution, report: Report) -> None:

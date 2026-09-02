@@ -1519,7 +1519,18 @@ once before a job finishes; an intermediate incumbent may still over-draw, which
 is what `status` already reports about anytime plans.
 
 | `T-73` | todo | Multi-period horizon: visit frequency, permitted-day patterns, interval compliance | T-47 | FR-23, §12.2 | A visit-frequency instance plans a horizon, not seven days; compliance measured against the interval and reported per order |
-| `T-74` | todo | Maximum ride time from pickup to delivery, for passengers and for perishable goods | T-20 | FR-24 | Li & Lim PDPTW still passes; a ride-time-bounded instance never exceeds the bound, and the bound is distinguishable from a delivery window |
+| `T-74` | done | Maximum ride time from pickup to delivery, for passengers and for perishable goods | T-20 | FR-24, INV-14 | Li & Lim PDPTW still passes; a ride-time-bounded instance never exceeds the bound, and the bound is distinguishable from a delivery window |
+
+**`T-74`'s bound is exact in the verifier and conservative in the search**, and
+the difference is worth knowing. `INV-14` measures the journey itself, departure
+from the pickup to arrival at the delivery, which is what both `UC-092` and
+`UC-157` insist the clock means. `add_shipment` takes no such parameter, so the
+adapter derives the one thing it can say soundly: a delivery deadline of the
+earliest the collection could physically happen plus the bound. That never
+admits a violating plan and can refuse a feasible one, and it is exact when the
+collection time is fixed -- a school stop, a booked ward round. Flooring it at
+the window's opening instead of at the earliest reachable pickup made ordinary
+instances infeasible, because the van still has to drive there.
 | `T-75` | done | Separate the sources of priority: commercial tier, SLA clock, statutory obligation | T-13, T-27 | FR-25, FR-13 | Three orders equal on tier and different on source are ordered by source; a statutory obligation cannot be priced; an SLA window is derived at intake |
 | `T-76` | todo | Route synchronisation: satellite transfer, convoy departure, hub cut-off | T-28, T-37 | FR-26, DEC-1 | Two coupled routes meet at a place and time, and the verifier checks the coupling rather than each route alone |
 | `T-77` | todo | Preemption of planned work by higher-priority arrivals | T-51, T-56 | FR-27, DYN-5 | Displaced work is re-planned and reported, never silently dropped; churn attributable to preemption is separated from ordinary churn |

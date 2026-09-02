@@ -28,6 +28,7 @@ from vrp.model import (
     Problem,
     Route,
     Solution,
+    Step,
     StopSpec,
     TimeWindow,
     TravelMatrix,
@@ -184,3 +185,153 @@ def _step(kind: str, location: str, at: int, order_id: str | None = None):
     return Step(type=kind, location_id=location, arrival=at, start_service=at,
                 departure=at + (60 if order_id else 0), order_id=order_id,
                 load_after={"kg": 0})
+
+
+# --------------------------------------------------------------------------
+# How long it may be aboard — FR-24, INV-14, T-74
+# --------------------------------------------------------------------------
+
+def bounded(order_id: str, collect_at: str, drop_at: str, kg: int,
+            ride: int, *, pickup_at: TimeWindow = DAY,
+            deliver_by: TimeWindow = DAY) -> Order:
+    return Order(
+        id=order_id, kind="SHIPMENT", quantities={"kg": kg},
+        max_ride_time=ride,
+        pickup=StopSpec(location_id=collect_at, time_windows=(pickup_at,),
+                        service_fixed=60),
+        delivery=StopSpec(location_id=drop_at, time_windows=(deliver_by,),
+                          service_fixed=60))
+
+
+def test_a_ride_bound_is_not_a_delivery_window():
+    """FR-24, and the confusion both citing operations break on.
+
+    `UC-092`: "the clock starts at loading, so the constraint is elapsed time
+    since departure, not arrival time at the customer." `UC-157` says it of a
+    viability window: "the clock starts at collection, making it a maximum
+    elapsed time per shipment, not an arrival window."
+
+    Two shipments, one delivery window, different bounds. If a ride bound were
+    a delivery window these would be the same order twice.
+    """
+    quick = bounded("QUICK", "C1", "C2", kg=1, ride=30 * 60)
+    slow = bounded("SLOW", "C1", "C2", kg=1, ride=6 * 3600)
+
+    assert quick.delivery.time_windows == slow.delivery.time_windows
+    assert quick.max_ride_time != slow.max_ride_time, (
+        "the window says when the drop may happen; the bound says how long the "
+        "journey may take, and an instance can need both")
+
+
+def test_a_journey_longer_than_its_bound_is_rejected():
+    """INV-14, judging a plan somebody else built.
+
+    Hand-built rather than solved, and that is the point: the search will not
+    produce this, and `/verify` exists so a plan produced elsewhere can be
+    checked (CON-1, T-66). An impossible bound is a different story and is the
+    next test -- it makes the instance infeasible, which INV-4 reports, and a
+    plan whose times have been clamped to an unreachable deadline is not the
+    subject INV-14 is for.
+    """
+    problem = instance((bounded("RIDE", "C1", "C2", kg=1, ride=60),
+                        job("DETOUR", "C4", 1)), stops=4)
+    # Matrix-consistent throughout: the van collects at C1, drives out to C4
+    # for the other drop, and comes back to C2. Every leg is exactly what the
+    # matrix says, so INV-3 and INV-4 are satisfied and the only thing wrong
+    # with this plan is that the shipment spent six minutes aboard.
+    plan = Solution(problem_id=problem.id, status="FEASIBLE", routes=(Route(
+        vehicle_id="V1", steps=(
+            Step(type="START", location_id="D", arrival=0, start_service=0,
+                 departure=0),
+            Step(type="PICKUP", order_id="RIDE", location_id="C1", arrival=60,
+                 start_service=60, departure=120),
+            Step(type="DELIVERY", order_id="DETOUR", location_id="C4",
+                 arrival=300, start_service=300, departure=360),
+            Step(type="DELIVERY", order_id="RIDE", location_id="C2",
+                 arrival=480, start_service=480, departure=540),
+            Step(type="END", location_id="D", arrival=660, start_service=660,
+                 departure=660))),))
+
+    report = verify(problem, plan)
+
+    assert [v.invariant for v in report.violations] == ["INV-14"], (
+        [str(v) for v in report.violations])
+    assert "360s of an allowed 60s" in str(report.violations[0]), (
+        "the report has to say how long the journey took and how long it was "
+        "allowed; 'INV-14 violated' is not something a dispatcher can act on")
+
+
+def test_a_bound_no_route_can_meet_makes_the_instance_infeasible():
+    """The search side of the same constraint.
+
+    The derived deadline is real, so a shipment whose two ends are further
+    apart than its bound has no legal plan at all -- and the engine says so
+    rather than serving it and hoping.
+    """
+    problem = instance((bounded("RIDE", "C1", "C4", kg=1, ride=60),), stops=4)
+
+    plan = solve(problem, iterations=200, seed=0)
+
+    assert plan.status == "INFEASIBLE", (
+        "C1 to C4 is three minutes of driving and the bound is one; there is "
+        "no plan, and reporting one would be reporting a fiction")
+
+
+def test_the_search_will_not_build_a_plan_that_breaks_the_bound():
+    """The deadline the adapter derives is conservative and sound: a shipment
+    collected no earlier than its window opens and aboard for at most its bound
+    cannot legally be delivered after `opens + bound`.
+
+    The geometry matters. The two fillers sit *between* the pickup and the
+    delivery, so collecting them en route costs no extra distance and the
+    search will happily do it -- which is what makes the bound bind. Put them
+    off the path instead and the search never wanted the detour, so the test
+    passes whether or not anything is enforced. That is how the first version
+    of this test passed with the deadline perturbed away.
+    """
+    ride = 4 * 60
+    problem = instance(
+        (bounded("URGENT", "C1", "C4", kg=1, ride=ride),
+         job("ONWAY1", "C2", 1), job("ONWAY2", "C3", 1)),
+        stops=4)
+
+    plan = solve(problem, iterations=400, seed=0)
+    report = verify(problem, plan)
+
+    assert report.ok, [str(v) for v in report.violations]
+    aboard = {}
+    for step in plan.routes[0].steps:
+        if step.order_id == "URGENT" and step.type == "PICKUP":
+            aboard["out"] = step.departure
+        if step.order_id == "URGENT" and step.type == "DELIVERY":
+            aboard["in"] = step.arrival
+    assert aboard, "the shipment has to be served for this to mean anything"
+    assert aboard["in"] - aboard["out"] <= ride, (
+        f"aboard {aboard['in'] - aboard['out']}s of an allowed {ride}s: the "
+        "two fillers are on the way and cost nothing to collect, so only the "
+        "bound stops the search from carrying the shipment past them")
+
+
+def test_an_unbounded_shipment_is_unaffected():
+    """Li & Lim's PDPTW instances carry no ride bound, and the gate that reads
+    them must keep passing: a requirement nobody used should cost nothing."""
+    problem = instance((shipment("PLAIN", "C1", "C2", kg=1),), stops=2)
+
+    plan = solve(problem, iterations=200, seed=0)
+    report = verify(problem, plan)
+
+    assert report.ok
+    assert "INV-14" in report.not_applicable, (
+        "an invariant with no subject says so rather than quietly passing")
+
+
+def test_a_ride_bound_belongs_on_a_shipment():
+    """A job has one stop, so its elapsed time is its service duration --
+    which FR-05 already models and this would silently duplicate."""
+    import pytest
+
+    from vrp.model import ValidationError
+
+    with pytest.raises(ValidationError, match="belongs on a SHIPMENT"):
+        Order(id="J", kind="JOB", quantities={"kg": 1}, max_ride_time=600,
+              delivery=StopSpec(location_id="C1", time_windows=(DAY,)))

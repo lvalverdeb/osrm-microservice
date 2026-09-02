@@ -231,6 +231,13 @@ class Order:
     # contract, which outranks a commercial preference), they expire
     # differently (an SLA clock runs from an intake timestamp; an obligation
     # does not run at all), and only one of them is negotiable.
+    # FR-24: how long the goods or the passenger may be aboard, measured from
+    # departing the pickup to arriving at the delivery. `UC-092` and `UC-157`
+    # both break on the same confusion: "the clock starts at loading, so the
+    # constraint is elapsed time since departure, not arrival time at the
+    # customer". A delivery window says when the drop may happen; this says how
+    # long the journey may take, and an instance can need both.
+    max_ride_time: int | None = None
     priority_source: str = "COMMERCIAL"
     order_class: str | None = None
     incompatible_with: frozenset[str] = frozenset()
@@ -247,6 +254,16 @@ class Order:
         else:
             _require((self.pickup is None) != (self.delivery is None),
                      "a JOB needs exactly one of pickup or delivery")
+        if self.max_ride_time is not None:
+            _require_int(self.max_ride_time, "max_ride_time")
+            _require(self.max_ride_time > 0,
+                     "a maximum ride time must be positive")
+            # A ride is a journey between two places, so it needs both. A JOB
+            # has one stop and its elapsed time is its service duration, which
+            # `FR-05` already models and this would silently duplicate.
+            _require(self.kind == "SHIPMENT",
+                     "max_ride_time bounds the time between a pickup and its "
+                     "delivery, so it belongs on a SHIPMENT; a job has one stop")
         _require(self.priority_source in PRIORITY_SOURCES,
                  f"unknown priority source {self.priority_source!r}; "
                  f"§12.2 names {', '.join(PRIORITY_SOURCES)}")
