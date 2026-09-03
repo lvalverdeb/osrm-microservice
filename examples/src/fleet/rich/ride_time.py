@@ -47,15 +47,17 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.model import (
-    Location,
     Order,
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
+    service_time,
 )
 from vrp.solve.pyvrp_adapter import delivery_deadline, solve
 from vrp.verify import verify
@@ -64,19 +66,32 @@ DAY = TimeWindow(start=0, end=12 * 3600)
 MINUTE = 60
 
 
+# Four real deliveries around the Guadalupe depot. C1 and C4 are both
+# pharmacies, which is where the sample story comes from: the corpus chose
+# them, not the example.
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.planar_sites(4, "spread", "ride")
+
+
+def service_at(stop: str) -> int:
+    """The corpus's own service time at one of the sites."""
+    return DELIVERIES[int(stop[1:]) - 1]["service_minutes"] * MINUTE
+
+
 def instance(orders: tuple[Order, ...], stops: int = 4) -> Problem:
-    size = stops + 1
-    locations = tuple(
-        Location(id="D" if i == 0 else f"C{i}", lat=9.9 + i / 1000, lon=-84.0,
-                 matrix_index=i)
-        for i in range(size))
-    grid = tuple(tuple(abs(i - j) * MINUTE for j in range(size))
-                 for i in range(size))
+    """The real round, carrying whatever orders a section needs.
+
+    Args:
+        orders: The shipments and jobs to place.
+        stops: How many of the four sites to expose.
+
+    Returns:
+        The instance, over real addresses and real service times.
+    """
     return Problem(
-        id="ride", locations=locations, orders=orders,
+        id="ride", locations=LOCATIONS[:stops + 1], orders=orders,
         vehicles=(Vehicle(id="V1", capacities={"kg": 100}, shift=DAY,
                           start_location_id="D", end_location_id="D"),),
-        matrix=TravelMatrix(version="ride", durations=grid, distances=grid))
+        matrix=MATRIX)
 
 
 def shipment(order_id: str, collect: str, drop: str, *,
@@ -84,15 +99,15 @@ def shipment(order_id: str, collect: str, drop: str, *,
     return Order(
         id=order_id, kind="SHIPMENT", quantities={"kg": 1}, max_ride_time=ride,
         pickup=StopSpec(location_id=collect, time_windows=(DAY,),
-                        service_fixed=MINUTE),
+                        service_fixed=service_at(collect)),
         delivery=StopSpec(location_id=drop, time_windows=(deliver_by,),
-                          service_fixed=MINUTE))
+                          service_fixed=service_at(drop)))
 
 
 def job(order_id: str, stop: str) -> Order:
     return Order(id=order_id, kind="JOB", quantities={"kg": 1},
                  delivery=StopSpec(location_id=stop, time_windows=(DAY,),
-                                   service_fixed=MINUTE))
+                                   service_fixed=service_at(stop)))
 
 
 def heading(number: str, title: str) -> None:
@@ -114,57 +129,116 @@ def two_constraints_not_one() -> None:
     print("   useless.")
 
 
-def what_the_search_is_told() -> None:
-    heading("2.", "What the search is told")
-    bound = 4 * MINUTE
+def aboard_for(bound: int) -> tuple[int, int, bool]:
+    """Solve with one ride bound and report what the plan does with it.
+
+    Args:
+        bound: The maximum ride time, in seconds.
+
+    Returns:
+        `(seconds aboard, derived deadline, whether the verifier accepts)`.
+    """
     problem = instance((shipment("URGENT", "C1", "C4", ride=bound),
                         job("ONWAY1", "C2"), job("ONWAY2", "C3")))
-    order = problem.order("URGENT")
-    deadline = delivery_deadline(problem, order)
-    print(f"\n   bound {bound // 60} min; the van is a minute from the pickup "
-          f"and a minute of service")
-    print(f"   derived delivery deadline: {deadline}s "
-          f"(= earliest possible departure + bound)")
-    print("\n   The two fillers sit between the pickup and the delivery, so")
-    print("   collecting them en route costs no extra distance and the search")
-    print("   would happily do it. The bound is the only thing that stops it:")
-
     plan = solve(problem, iterations=400, seed=0)
-    aboard = {}
+    marks = {}
     for step in plan.routes[0].steps:
         if step.order_id == "URGENT":
-            aboard[step.type] = step.departure if step.type == "PICKUP" else step.arrival
-        print(f"      {step.type:9s} {step.order_id or '-':7s} "
-              f"arrive {step.arrival:5d}  depart {step.departure:5d}")
-    print(f"\n   URGENT was aboard {aboard['DELIVERY'] - aboard['PICKUP']}s of "
-          f"an allowed {bound}s, and the plan verifies: "
-          f"{verify(problem, plan).ok}")
+            marks[step.type] = (step.departure if step.type == "PICKUP"
+                                else step.arrival)
+    deadline = delivery_deadline(problem, problem.order("URGENT"))
+    return (marks["DELIVERY"] - marks["PICKUP"], deadline,
+            verify(problem, plan).ok)
+
+
+def what_the_search_is_told() -> None:
+    heading("2.", "What the search is told, and when it makes any difference")
+    direct = MATRIX.duration(1, 4)
+    detour = (MATRIX.duration(1, 2) + service_at("C2")
+              + MATRIX.duration(2, 3) + service_at("C3")
+              + MATRIX.duration(3, 4))
+    print(f"\n   C1 to C4 direct is {direct // 60} min. Going via C2 and C3 --")
+    print(f"   which costs the round no extra distance -- is {detour // 60} min")
+    print("   once their service times are paid. `add_shipment` takes no ride")
+    print("   bound, so the only lever is a delivery deadline: the earliest")
+    print("   the collection could physically happen, plus the bound.\n")
+    print(f"      {'bound':>7s} {'deadline':>9s} {'aboard':>7s}   what the plan does")
+    for minutes in (10, 20, 30, 40, 50):
+        seconds, deadline, ok = aboard_for(minutes * MINUTE)
+        detoured = seconds > direct
+        print(f"      {minutes:5d} m {deadline:8d}s {seconds // 60:5d} m   "
+              f"{'collects both en route' if detoured else 'goes straight there'}"
+              f"{'' if ok else '  (verifier REJECTS)'}")
+    print("\n   The bound only decides anything between the two numbers above.")
+    print("   Tighter and there is nothing to give up; looser and the detour")
+    print("   was always allowed. That is why the operations that asked for")
+    print("   this constraint -- concrete at 90 minutes, blood at a few hours --")
+    print("   are the ones whose clock is commensurate with the round. A")
+    print("   six-hour viability bound on a 35-minute round is a comment.")
+
+
+def _walk(problem: Problem, legs: tuple) -> tuple:
+    """A timeline whose every leg is exactly what the matrix says.
+
+    Building it by hand is the point: this is a plan that arrived from
+    somewhere else, and the only thing wrong with it must be the ride bound.
+    Hard-coding the clock would make INV-3 and INV-4 fire too and bury the one
+    violation the section is about.
+
+    Args:
+        problem: The instance, for the matrix and the service times.
+        legs: `(step type, location id, order id)` in order, depot excluded.
+
+    Returns:
+        The steps, depot to depot.
+    """
+    from vrp.model import Step
+
+    index = {location.id: location.matrix_index
+             for location in problem.locations}
+    steps = [Step(type="START", location_id="D", arrival=0, start_service=0,
+                  departure=0)]
+    clock, here = 0, index["D"]
+    vehicle = problem.vehicles[0]
+    for kind, site, order_id in legs:
+        clock += problem.matrix.duration(here, index[site])
+        # `service_time` rather than the corpus figure directly: it is the
+        # public form of the rule the verifier applies, and duplicating that
+        # rule here is how a plan ends up disagreeing with INV-3 about its own
+        # arithmetic. See the module docstring on shipment pickups.
+        service = service_time(problem.order(order_id), vehicle,
+                               problem.location(site))
+        steps.append(Step(type=kind, order_id=order_id, location_id=site,
+                          arrival=clock, start_service=clock,
+                          departure=clock + service))
+        clock, here = clock + service, index[site]
+    clock += problem.matrix.duration(here, index["D"])
+    steps.append(Step(type="END", location_id="D", arrival=clock,
+                      start_service=clock, departure=clock))
+    return tuple(steps)
 
 
 def what_the_verifier_measures() -> None:
     heading("3.", "What the verifier measures")
-    from vrp.model import Route, Solution, Step
+    from vrp.model import Route, Solution
 
     problem = instance((shipment("RIDE", "C1", "C2", ride=MINUTE),
                         job("DETOUR", "C4")))
-    # Every leg exactly what the matrix says, so nothing else is wrong with it.
-    plan = Solution(problem_id=problem.id, status="FEASIBLE", routes=(Route(
-        vehicle_id="V1", steps=(
-            Step(type="START", location_id="D", arrival=0, start_service=0,
-                 departure=0),
-            Step(type="PICKUP", order_id="RIDE", location_id="C1", arrival=60,
-                 start_service=60, departure=120),
-            Step(type="DELIVERY", order_id="DETOUR", location_id="C4",
-                 arrival=300, start_service=300, departure=360),
-            Step(type="DELIVERY", order_id="RIDE", location_id="C2",
-                 arrival=480, start_service=480, departure=540),
-            Step(type="END", location_id="D", arrival=660, start_service=660,
-                 departure=660))),))
+    steps = _walk(problem, (("PICKUP", "C1", "RIDE"),
+                            ("DELIVERY", "C4", "DETOUR"),
+                            ("DELIVERY", "C2", "RIDE")))
+    plan = Solution(problem_id=problem.id, status="FEASIBLE",
+                    routes=(Route(vehicle_id="V1", steps=steps),))
+    aboard = {step.type: step for step in steps if step.order_id == "RIDE"}
     report = verify(problem, plan)
-    print("\n   a plan built elsewhere, every leg matching the matrix:")
-    print("      collected at 120, delivered at 480, bound 60")
+    print("\n   a plan built elsewhere, every leg exactly what the matrix says:")
+    print(f"      collected at {aboard['PICKUP'].departure}, delivered at "
+          f"{aboard['DELIVERY'].arrival}, bound {MINUTE}")
     for violation in report.violations:
         print(f"      -> {violation.invariant}: {violation.detail}")
+    print("\n   One violation and only one. The detour to C4 is a perfectly")
+    print("   good piece of routing and every other invariant agrees; the")
+    print("   sample was simply aboard too long while it happened.")
     print("\n   This is the exact rule, and the only place it can be applied is")
     print("   a finished plan. `/verify` is public for that reason (CON-1), and")
     print("   the deadline in §2 is the search's safe approximation of it.")

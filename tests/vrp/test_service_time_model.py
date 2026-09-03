@@ -217,3 +217,32 @@ def test_the_dataset_s_service_minutes_still_round_trip():
     for minutes in (5, 10, 20, 45):
         order = an_order(service_fixed=minutes * 60)
         assert service_time(order, a_van(), at()) == minutes * 60
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "`service_time` takes an order, a vehicle and a location, but no step, so "
+    "it cannot tell a shipment's pickup from its delivery -- it resolves the "
+    "stop as `order.delivery or order.pickup` and therefore charges every "
+    "pickup at the delivery's rate. Every caller inherits this: the verifier "
+    "(INV-3), the evaluator, the HOS scheduler, `vrp.polish`, and both "
+    "adapters. It is invisible whenever the two service times are equal, "
+    "which is what every other test and example here happens to do; it "
+    "surfaced when `examples/src/fleet/rich/ride_time.py` began taking real "
+    "per-stop service times from the corpus, where a collection at a pharmacy "
+    "is 8 minutes and the drop is 6. Closing this means giving `service_time` "
+    "the stop rather than making it guess, and updating the six call sites."))
+def test_a_shipment_pickup_is_served_at_its_own_rate():
+    """A collection and a drop are different work and take different times.
+
+    §6.2 defines service against a *stop*, and a shipment has two of them. The
+    consequence of guessing is not cosmetic: a plan whose pickup service is
+    wrong has every subsequent arrival wrong, and INV-3 blames the plan for
+    arithmetic the model handed it.
+    """
+    order = Order(id="S1", kind="SHIPMENT", quantities={"parcels": 1},
+                  pickup=StopSpec(location_id="C1", time_windows=(DAY,),
+                                  service_fixed=480),
+                  delivery=StopSpec(location_id="C2", time_windows=(DAY,),
+                                    service_fixed=360))
+    collection = Location(id="C1", lat=9.9, lon=-84.0, matrix_index=1)
+    assert service_time(order, a_van(), collection) == 480
