@@ -1047,6 +1047,26 @@ def has_skills_for(vehicle: Vehicle, order: Order) -> bool:
     return order.required_skills <= vehicle.skills
 
 
+def _stop_served_at(order: Order, location: Location) -> StopSpec:
+    """Which of an order's stops is the one at this location.
+
+    Args:
+        order: The order being served.
+        location: Where the vehicle is standing.
+
+    Returns:
+        The pickup when the location identifies it unambiguously, otherwise the
+        delivery. A shipment collecting and delivering at the same location id
+        cannot be told apart this way, and keeps the delivery -- the reading
+        every caller had before stops could be distinguished at all.
+    """
+    if (order.pickup is not None and order.delivery is not None
+            and location.id == order.pickup.location_id
+            and location.id != order.delivery.location_id):
+        return order.pickup
+    return order.delivery or order.pickup
+
+
 def service_time(order: Order, vehicle: Vehicle, location: Location) -> int:
     """How long this vehicle takes to serve this order here. FR-05, §6.2.
 
@@ -1061,8 +1081,14 @@ def service_time(order: Order, vehicle: Vehicle, location: Location) -> int:
     Integer throughout (CON-4). The factor is parts per thousand and the
     division truncates, which is deterministic and therefore replayable; a
     float here is how two machines disagree about when a driver left.
+
+    A shipment has two stops and they are different work: §6.2 defines service
+    against a stop, not against an order. `location` is the one being served,
+    so it decides. Resolving it as `delivery or pickup` -- which this did until
+    a collection at 8 minutes met a drop at 6 -- charged every pickup at the
+    delivery's rate, and every caller inherited it.
     """
-    stop = order.delivery or order.pickup
+    stop = _stop_served_at(order, location)
     quantity = 0
     if stop.service_per_unit:
         dimension = stop.service_per_unit_dimension

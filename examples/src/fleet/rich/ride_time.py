@@ -205,7 +205,8 @@ def _walk(problem: Problem, legs: tuple) -> tuple:
         # `service_time` rather than the corpus figure directly: it is the
         # public form of the rule the verifier applies, and duplicating that
         # rule here is how a plan ends up disagreeing with INV-3 about its own
-        # arithmetic. See the module docstring on shipment pickups.
+        # arithmetic. It also knows a shipment's collection from its drop,
+        # which the corpus figure alone does not.
         service = service_time(problem.order(order_id), vehicle,
                                problem.location(site))
         steps.append(Step(type=kind, order_id=order_id, location_id=site,

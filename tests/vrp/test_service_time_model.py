@@ -219,30 +219,47 @@ def test_the_dataset_s_service_minutes_still_round_trip():
         assert service_time(order, a_van(), at()) == minutes * 60
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "`service_time` takes an order, a vehicle and a location, but no step, so "
-    "it cannot tell a shipment's pickup from its delivery -- it resolves the "
-    "stop as `order.delivery or order.pickup` and therefore charges every "
-    "pickup at the delivery's rate. Every caller inherits this: the verifier "
-    "(INV-3), the evaluator, the HOS scheduler, `vrp.polish`, and both "
-    "adapters. It is invisible whenever the two service times are equal, "
-    "which is what every other test and example here happens to do; it "
-    "surfaced when `examples/src/fleet/rich/ride_time.py` began taking real "
-    "per-stop service times from the corpus, where a collection at a pharmacy "
-    "is 8 minutes and the drop is 6. Closing this means giving `service_time` "
-    "the stop rather than making it guess, and updating the six call sites."))
+def a_shipment(pickup_at: str = "C1", delivery_at: str = "C2") -> Order:
+    """A collection of 8 minutes and a drop of 6 -- the corpus's own figures."""
+    return Order(id="S1", kind="SHIPMENT", quantities={"parcels": 1},
+                 pickup=StopSpec(location_id=pickup_at, time_windows=(DAY,),
+                                 service_fixed=480),
+                 delivery=StopSpec(location_id=delivery_at,
+                                   time_windows=(DAY,), service_fixed=360))
+
+
+def a_site(site_id: str) -> Location:
+    return Location(id=site_id, lat=9.9, lon=-84.0, matrix_index=1)
+
+
 def test_a_shipment_pickup_is_served_at_its_own_rate():
     """A collection and a drop are different work and take different times.
 
-    §6.2 defines service against a *stop*, and a shipment has two of them. The
-    consequence of guessing is not cosmetic: a plan whose pickup service is
-    wrong has every subsequent arrival wrong, and INV-3 blames the plan for
-    arithmetic the model handed it.
+    §6.2 defines service against a *stop*, and a shipment has two of them.
+    `service_time` resolved them as `delivery or pickup` and so charged every
+    pickup at the delivery's rate; the verifier (INV-3), the evaluator, the HOS
+    scheduler, `vrp.polish` and both adapters all inherited it. Invisible
+    whenever the two are equal, which is what every other test here does.
     """
-    order = Order(id="S1", kind="SHIPMENT", quantities={"parcels": 1},
-                  pickup=StopSpec(location_id="C1", time_windows=(DAY,),
-                                  service_fixed=480),
-                  delivery=StopSpec(location_id="C2", time_windows=(DAY,),
-                                    service_fixed=360))
-    collection = Location(id="C1", lat=9.9, lon=-84.0, matrix_index=1)
-    assert service_time(order, a_van(), collection) == 480
+    order = a_shipment()
+    assert service_time(order, a_van(), a_site("C1")) == 480
+    assert service_time(order, a_van(), a_site("C2")) == 360
+
+
+def test_a_shipment_serving_both_ends_at_one_site_keeps_the_delivery():
+    """The one case a location cannot disambiguate, pinned rather than guessed.
+
+    Collection and drop at the same location id are indistinguishable to
+    `service_time`, which keeps the delivery -- the reading every caller had
+    before either stop could be told from the other. Nothing here depends on
+    it; it is written down so a change of mind is deliberate.
+    """
+    order = a_shipment(pickup_at="C1", delivery_at="C1")
+    assert service_time(order, a_van(), a_site("C1")) == 360
+
+
+def test_the_vehicle_factor_still_applies_to_a_pickup():
+    """The fix picks the stop; it must not bypass the rest of FR-05."""
+    order = a_shipment()
+    van = a_van(service_factor_ppt=500)
+    assert service_time(order, van, a_site("C1")) == 240
