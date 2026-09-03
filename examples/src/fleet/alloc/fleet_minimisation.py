@@ -43,25 +43,53 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
 from itertools import pairwise
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.benchmarks import read_benchmark
 from vrp.fleet import Ejection, minimise_fleet, routes_needed
 from vrp.model import Problem, TravelMatrix
+from vrp.osrm import build_matrix
 from vrp.solve import pyvrp_adapter
 
 INSTANCES = PROJECT_ROOT / "benchmarks" / "instances"
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
 
-def grid(size: int, leg: int = 1_000) -> TravelMatrix:
-    cells = tuple(tuple(abs(i - j) * leg for j in range(size))
-                  for i in range(size))
-    return TravelMatrix(version="fleet-demo", durations=cells, distances=cells)
+_GRIDS: dict[int, TravelMatrix] = {}
+
+
+def grid(size: int) -> TravelMatrix:
+    """A real round's road matrix, for the sections that need only a matrix.
+
+    Sections 1 and 2 stay on the published instances above: their targets are
+    read from the files, so the geography has to be the files' own or the
+    comparison means nothing. This is for the rest, which prove things about
+    the procedure rather than about an instance -- a capacity floor holds
+    whatever the legs are -- and a real round is simply a truer setting for
+    them than a chain of evenly spaced points.
+
+    Args:
+        size: How many nodes, the depot included.
+
+    Returns:
+        The road matrix over a depot and `size - 1` real deliveries.
+    """
+    if size not in _GRIDS:
+        deliveries, depot = dataset.load().spread(size - 1)
+        points = [(depot["latitude"], depot["longitude"])]
+        points += [(d["latitude"], d["longitude"]) for d in deliveries]
+        matrix, _ = build_matrix(GATEWAY, points)
+        _GRIDS[size] = matrix
+    return _GRIDS[size]
 
 
 def plan_distance(matrix: TravelMatrix, plan: list[list[int]]) -> int:

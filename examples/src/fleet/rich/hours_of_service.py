@@ -49,8 +49,6 @@ past both limits, which shows refusal but not the difference between them.
 from __future__ import annotations
 
 import argparse
-import json
-import math
 import os
 import sys
 from pathlib import Path
@@ -58,6 +56,7 @@ from pathlib import Path
 # Importing config puts OSRM_API_URL into the environment and the repository
 # root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
+import dataset
 import httpx
 
 from vrp.hos import EU_561, US_HOS, DriverState, HoursOfServiceRules
@@ -77,33 +76,9 @@ from vrp.model import (
 from vrp.verify import verify
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
-DATASET = Path("data/deliveries_cr.json")
+DATASET = dataset.DEFAULT_PATH
 HOUR = 3600
 SHIFT = TimeWindow(start=0, end=24 * HOUR)
-
-
-def great_circle_metres(a: tuple[float, float], b: tuple[float, float]) -> int:
-    dlat, dlon = math.radians(b[0] - a[0]), math.radians(b[1] - a[1])
-    h = (math.sin(dlat / 2) ** 2
-         + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0]))
-         * math.sin(dlon / 2) ** 2)
-    return round(6_371_000 * 2 * math.asin(math.sqrt(h)))
-
-
-def load_long_haul(path: Path, stops: int) -> tuple[list[dict], dict]:
-    """The furthest deliveries from a depot: a day with real driving in it.
-
-    Hours-of-service only bites when the driving is long. A dense urban round
-    never reaches 4.5 hours at the wheel, so a demo built on one would show a
-    rules engine that never fires and prove nothing about it.
-    """
-    data = json.loads(path.read_text())
-    deliveries, depot = data["deliveries"], data["depots"][0]
-    home = (depot["latitude"], depot["longitude"])
-    ranked = sorted(deliveries, reverse=True,
-                    key=lambda d: great_circle_metres(
-                        home, (d["latitude"], d["longitude"])))
-    return ranked[:stops], depot
 
 
 def fetch_matrix(depot: dict, deliveries: list[dict],
@@ -117,7 +92,7 @@ def fetch_matrix(depot: dict, deliveries: list[dict],
         for i in range(size):
             for j in range(size):
                 if i != j:
-                    metres = great_circle_metres(points[i], points[j])
+                    metres = dataset.great_circle_metres(points[i], points[j])
                     distances[i][j] = metres
                     durations[i][j] = round(metres / 40_000 * 3600)
         return durations, distances
@@ -250,12 +225,10 @@ def main() -> int:
     parser.add_argument("--dataset", type=Path, default=DATASET)
     args = parser.parse_args()
 
-    if not args.dataset.exists():
-        raise SystemExit(f"no dataset at {args.dataset}; see docs/dataset_prep.md")
 
-    deliveries, depot = load_long_haul(args.dataset, args.stops)
+    deliveries, depot = dataset.load(args.dataset).furthest(args.stops)
     home = (depot["latitude"], depot["longitude"])
-    furthest = max(great_circle_metres(home, (d["latitude"], d["longitude"]))
+    furthest = max(dataset.great_circle_metres(home, (d["latitude"], d["longitude"]))
                    for d in deliveries)
     print(f"depot {depot['name']} -- {len(deliveries)} of the furthest stops, "
           f"out to {furthest / 1000:,.0f} km")

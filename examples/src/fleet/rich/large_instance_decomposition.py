@@ -47,12 +47,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.decompose import (
     concatenate,
@@ -183,9 +187,68 @@ def show_dec_1() -> None:
           "right.\n   Eight of them wanted the same two bays at 00:00.")
 
 
-def show_scale(stops: int) -> None:
-    print(f"\n5. {stops:,} stops, end to end")
-    problem = generate_large_instance(61, stops=stops)
+def costa_rica_instance(stops: int, path: Path) -> Problem:
+    """A large instance built from real deliveries rather than a lattice.
+
+    The scale claim is about geography: whether the partitioner finds seams a
+    dispatcher would recognise. A generated instance puts its stops on an
+    integer lattice, which has no seams to find -- every cut is as good as
+    every other, so a partitioner that ignored geography entirely would score
+    the same. Real deliveries cluster along roads and around towns, and that
+    is the structure decomposition either exploits or does not.
+
+    The matrix stays planar rather than road-derived, and deliberately: §7.6
+    wants a lazy matrix at this size, because a stored one for 10,000 stops is
+    ~3.8 GB and twelve minutes to build. Coordinates are projected to
+    kilometres about the depot, which is the frame `PlanarMatrix` computes in.
+
+    Args:
+        stops: How many deliveries to take, nearest the depot first.
+        path: Where the delivery corpus lives.
+
+    Returns:
+        A `Problem` over real coordinates, real demands and real service times.
+    """
+    deliveries, depot = dataset.load(path).nearest(stops)
+
+    # Degrees to kilometres about the depot: longitude shortens with latitude.
+    lat_km, lon_km = 110.57, 111.32 * math.cos(math.radians(depot["latitude"]))
+    coords = [(0.0, 0.0)]
+    coords += [((d["longitude"] - depot["longitude"]) * lon_km,
+                (d["latitude"] - depot["latitude"]) * lat_km)
+               for d in deliveries]
+
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=d["product_id"], lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i + 1)
+        for i, d in enumerate(deliveries))
+
+    orders = tuple(
+        Order(id=f"O{i}", kind="JOB", quantities={"units": d["units"]},
+              delivery=StopSpec(location_id=d["product_id"],
+                                time_windows=(DAY,),
+                                service_fixed=d["service_minutes"] * 60))
+        for i, d in enumerate(deliveries))
+
+    # Twenty stops a vehicle, capacity for thirty of the heaviest: generous on
+    # purpose, so an infeasible instance does not measure the unassigned path
+    # instead of decomposition.
+    heaviest = max((d["units"] for d in deliveries), default=1)
+    vehicles = tuple(
+        Vehicle(id=f"V{n}", capacities={"units": heaviest * 30}, shift=DAY,
+                start_location_id="D", end_location_id="D")
+        for n in range(max(2, stops // 20)))
+
+    return Problem(id=f"costa-rica-{stops}", locations=locations, orders=orders,
+                   vehicles=vehicles,
+                   matrix=PlanarMatrix(version=f"costa-rica-{stops}-v1",
+                                       coordinates=tuple(coords)))
+
+
+def show_scale(stops: int, path: Path) -> None:
+    print(f"\n5. {stops:,} stops, end to end -- real Costa Rica deliveries")
+    problem = costa_rica_instance(stops, path)
     started = time.monotonic()
     solution = solve_decomposed(problem, target_size=200, seed=0, weights=WEIGHTS)
     elapsed = time.monotonic() - started
@@ -193,15 +256,23 @@ def show_scale(stops: int) -> None:
     report = verify(problem, solution)
     print(f"   {elapsed:.1f}s, {len(solution.routes)} routes, "
           f"{len(solution.unassigned)} unassigned, verifies={report.ok}")
-    print("   NFR-01 allows 60 min for 10,000 stops. Measured separately at "
-          "full size:\n   9.6 min, 200 routes, verifies. Pass --stops 10000 to "
-          "reproduce it here.")
+    print("   NFR-01 allows 60 min for 10,000 stops. Measured at full size on\n"
+          "   real deliveries: 60.8 min (3,650s), 200 routes, 0 unassigned,\n"
+          "   verifies -- 50 seconds OVER the budget, on Darwin arm64,\n"
+          "   single-threaded. Pass --stops 10000 to reproduce it.\n"
+          "   The 9.6 min this example reported before it moved to real\n"
+          "   deliveries was measured on a generated instance, whose stops sit\n"
+          "   on an integer lattice. Real geography is about six times the\n"
+          "   work, and it is the difference between meeting NFR-01 and\n"
+          "   missing it. A lattice does not just flatter the partitioner --\n"
+          "   it flattered the budget.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stops", type=int, default=2_000,
                         help="size of the end-to-end run (default 2000)")
+    parser.add_argument("--dataset", type=Path, default=dataset.DEFAULT_PATH)
     args = parser.parse_args()
 
     show_matrix_cost()
@@ -211,7 +282,7 @@ def main() -> int:
     }, target=40)
     show_seams(generate_large_instance(59, stops=400), target=100)
     show_dec_1()
-    show_scale(args.stops)
+    show_scale(args.stops, args.dataset)
     return 0
 
 

@@ -13,7 +13,10 @@ The service runs by default on port `8000` (mapped to `8080` in Docker).
 
 ## Data Models (Schemas)
 
-The following Pydantic models define the structure of requests and responses.
+The following models define the structure of requests and responses. They are
+generated from the Rust gateway's own types, so the authoritative copy is the
+OpenAPI document the running service serves at `/openapi.json`, rendered at
+`/docs` and `/redoc`.
 
 ### `Coordinate`
 
@@ -132,8 +135,8 @@ A geographic delivery stop or depot location with identification.
 | :--- | :--- | :--- |
 | `depots` | `List[Stop]` | List of warehouse/depot locations. |
 | `stops` | `List[Stop]` | List of delivery stops. |
-| `vehicle_count` | `int` | Number of available vehicles. Defaults to one per depot. |
-| `capacity` | `int` | Maximum stops/packages per vehicle (Default: 35). |
+| `capacity` | `int` | Maximum stops per vehicle (Default: 35). **This is what determines how many vehicles you get**: each depot's stops are cut into loads of at most this many, and each load becomes one vehicle route. |
+| `vehicle_count` | `int` | Accepted and validated — must be `>= 1` when present, so `0` is a `422` — but **never read by the solver**. It is retained only so payloads written against the retired Python gateway keep their status codes. Use `capacity` to control the split. |
 | `max_radius_km` | `float` | Optional maximum road distance from depot (km). |
 | `clustering_mode` | `str` | Clustering type: `travel_time` (default), `distance`, or `radial`. |
 | `hysteresis_m` | `float` | Depot snapping boundary tolerance in metres (Default: `2000.0`). |
@@ -370,7 +373,6 @@ Solves multi-vehicle Vehicle Routing Problems using location-allocation clusteri
     {"id": "S1", "longitude": -84.10, "latitude": 9.94},
     {"id": "S2", "longitude": -84.14, "latitude": 9.96}
   ],
-  "vehicle_count": 2,
   "capacity": 35
 }
 ```

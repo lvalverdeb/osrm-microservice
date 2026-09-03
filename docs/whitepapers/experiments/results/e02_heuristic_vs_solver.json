@@ -1,0 +1,51 @@
+{
+  "cases": {
+    "one_vehicle": {
+      "agreement_delta_m": -0.09999999997671694,
+      "capacity": 60,
+      "gap_pct": 8.227862158243251,
+      "gateway_canonical_m": 341105,
+      "gateway_plan_verified": true,
+      "gateway_reported_m": 341104.9,
+      "iterations": 2000,
+      "orders_assigned_solver": 60,
+      "solver_canonical_m": 315173,
+      "solver_plan_verified": true,
+      "stops": 60,
+      "vehicles_gateway": 1,
+      "vehicles_solver": 1
+    },
+    "six_vehicles": {
+      "agreement_delta_m": -0.9000000000232831,
+      "capacity": 10,
+      "gap_pct": 14.80529942110569,
+      "gateway_canonical_m": 481715,
+      "gateway_plan_verified": true,
+      "gateway_reported_m": 481714.1,
+      "iterations": 2000,
+      "orders_assigned_solver": 60,
+      "solver_canonical_m": 419593,
+      "solver_plan_verified": true,
+      "stops": 60,
+      "vehicles_gateway": 6,
+      "vehicles_solver": 6
+    },
+    "three_vehicles": {
+      "agreement_delta_m": -0.5,
+      "capacity": 20,
+      "gap_pct": 11.670358402886405,
+      "gateway_canonical_m": 391217,
+      "gateway_plan_verified": true,
+      "gateway_reported_m": 391216.5,
+      "iterations": 2000,
+      "orders_assigned_solver": 60,
+      "solver_canonical_m": 350332,
+      "solver_plan_verified": true,
+      "stops": 60,
+      "vehicles_gateway": 3,
+      "vehicles_solver": 3
+    }
+  },
+  "gateway": "http://10.211.55.33:8000",
+  "seed": 20260902
+}

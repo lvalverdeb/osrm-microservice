@@ -39,11 +39,17 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
+import math
+import os
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.consistency import (
     Horizon,
@@ -62,50 +68,66 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.objective import Mode, ObjectiveSpec, Tier, score
+from vrp.osrm import build_matrix
 
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 DAY = TimeWindow(start=0, end=12 * 3600)
 
 
-def ring(stops: int = 12, vans: int = 3) -> Problem:
-    """Customers around the depot, near on one side and far on the other.
+def round_from_dataset(stops: int, vans: int, path: Path,
+                       gateway: str) -> Problem:
+    """A real round: the nearest deliveries to a depot, on real road distances.
 
     Deliberately not a uniform ring. On a symmetric one every split is even and
     FR-17's three measures agree, which is exactly the case that proves
     nothing: the first version of this example printed three columns of zeros
-    and claimed they showed the measures diverging.
-    """
-    import math
+    and claimed they showed the measures diverging. A generated spiral gave the
+    asymmetry by construction; real deliveries give it because towns and roads
+    are not laid out for the convenience of a fairness metric -- and this
+    example's claim is about sending the same driver to the same *street*,
+    which a spiral does not have.
 
-    size = stops + 1
-    points = [(9.9, -84.0)]
-    for i in range(stops):
-        angle = i * math.tau / stops
-        radius = 0.02 + 0.006 * i
-        points.append((9.9 + radius * math.sin(angle),
-                       -84.0 + radius * math.cos(angle)))
-    grid = tuple(tuple(int(math.dist(points[i], points[j]) * 111_000)
-                       for j in range(size)) for i in range(size))
-    locations = tuple(
-        Location(id="D" if i == 0 else f"C{i}", lat=points[i][0],
-                 lon=points[i][1], matrix_index=i)
-        for i in range(size))
+    Stops are ordered by bearing from the depot, because that ordering is what
+    `zoned` and `interleaved` slice: contiguous means a wedge of the map only
+    if the sequence goes round it.
+
+    Args:
+        stops: How many deliveries to take.
+        vans: How many vehicles the round is planned for.
+        path: Where the delivery corpus lives.
+        gateway: Base URL of the OSRM API gateway, for the road matrix.
+
+    Returns:
+        A `Problem` over real coordinates and real road travel.
+    """
+    deliveries, depot = dataset.load(path).nearest(stops)
+    deliveries.sort(key=lambda d: math.atan2(d["latitude"] - depot["latitude"],
+                                             d["longitude"] - depot["longitude"]))
+
+    points = [(depot["latitude"], depot["longitude"])]
+    points += [(d["latitude"], d["longitude"]) for d in deliveries]
+    matrix, _ = build_matrix(gateway, points)
+
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=d["product_id"], lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i + 1)
+        for i, d in enumerate(deliveries))
     orders = tuple(
         Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-              delivery=StopSpec(location_id=f"C{i}", time_windows=(DAY,),
-                                service_fixed=60))
-        for i in range(1, size))
+              delivery=StopSpec(location_id=d["product_id"],
+                                time_windows=(DAY,),
+                                service_fixed=d["service_minutes"] * 60))
+        for i, d in enumerate(deliveries))
     vehicles = tuple(
         Vehicle(id=f"V{n}", capacities={"kg": 100}, shift=DAY,
                 start_location_id="D", end_location_id="D", cost_per_metre=1)
         for n in range(1, vans + 1))
     return Problem(id="terr", locations=locations, orders=orders,
-                   vehicles=vehicles,
-                   matrix=TravelMatrix(version="t", durations=grid,
-                                       distances=grid))
+                   vehicles=vehicles, matrix=matrix)
 
 
 def plan(problem: Problem, assignment: dict[str, list[str]],
@@ -252,8 +274,15 @@ def show_the_price(problem: Problem, vans: int) -> None:
 
 
 def main() -> int:
-    vans = 3
-    problem = ring(stops=12, vans=vans)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stops", type=int, default=12)
+    parser.add_argument("--vans", type=int, default=3)
+    parser.add_argument("--dataset", type=Path, default=dataset.DEFAULT_PATH)
+    args = parser.parse_args()
+
+    vans = args.vans
+    print(f"fetching a road matrix from {GATEWAY}")
+    problem = round_from_dataset(args.stops, vans, args.dataset, GATEWAY)
     show_fairness(problem, vans)
     show_territories(problem, vans)
     show_horizon(problem, vans)

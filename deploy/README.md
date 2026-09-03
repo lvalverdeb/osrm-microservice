@@ -13,8 +13,10 @@ option loads it at runtime — Docker through `env_file:`, the jail by installin
 `${JAIL_DIR}/.env`. Change a rate limit or cache TTL there and both deployments get
 it. Deployment-specific knobs stay in each option's own `.env.example`.
 
-Both run the same three services — OSRM engine, Redis cache, FastAPI gateway —
-and share no state. Nothing in `src/` differs between them.
+Both run the same three services — OSRM engine, Redis cache, and the Rust
+gateway — and share no state. Nothing in `gateway/` differs between them: the
+Docker image and the jail build the same source, one with `cargo build
+--release` in a builder stage, the other natively in the jail.
 
 Full instructions: [`docs/deployment.md`](../docs/deployment.md). Jail-specific
 detail: [`docs/deployment_freebsd.md`](../docs/deployment_freebsd.md).
@@ -23,9 +25,10 @@ detail: [`docs/deployment_freebsd.md`](../docs/deployment_freebsd.md).
 
 | File | Role |
 |---|---|
-| `Dockerfile` | The FastAPI gateway image |
+| `Dockerfile` | The gateway image: builds `gateway/` with cargo, then copies the release binary into a slim runtime |
 | `Dockerfile.builder` | Runs `osrm-extract` / `-partition` / `-customize`, exports `/data` |
 | `Dockerfile.osrm` | OSRM runtime, with the built data copied in from the builder |
+| `Dockerfile.spike` | The `rust-spike/` evaluation binary — a benchmark target, not the gateway |
 | `docker-compose.yml` | The three services, plus the data builder under the `build` profile |
 
 Build contexts are the repository root, so `.dockerignore` lives there and not
@@ -41,6 +44,7 @@ here — Docker reads it from the root of the build context.
 | `jailctl.sh` | Runs on the FreeBSD **host**: applies host kernel tunables, stages sources, then `jexec`s into the jail |
 | `install.sh` | Runs **inside** the jail: phased, idempotent installer |
 | `osrm-api-gateway` | rc.d script for the gateway |
+| `osrm-gateway-spike` | rc.d script for the `rust-spike/` benchmark target |
 | `osrm-routed` | rc.d script for the OSRM engine |
 | `redis-cache.conf` | Redis configuration for the cache |
 

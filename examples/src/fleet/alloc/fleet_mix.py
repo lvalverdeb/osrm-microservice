@@ -44,11 +44,17 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
+import warnings
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
+from pyvrp.PenaltyManager import PenaltyBoundWarning
 
 from vrp.allocate import allocate, marginal_values
 from vrp.evaluator import evaluate
@@ -58,33 +64,59 @@ from vrp.model import (
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.objective import Mode, ObjectiveSpec, Tier, score
+from vrp.osrm import build_matrix
 from vrp.solve import pyvrp_adapter
 from vrp.verify import verify
 
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 DAY = TimeWindow(start=0, end=10 * 3600)
 SPEC = ObjectiveSpec(mode=Mode.MIN_COST)
 
 
-def depot_and_ring(stops: int, radius: int = 12_000) -> tuple:
-    """A depot with customers spread around it, far enough apart to matter."""
-    locations = [Location(id="D", lat=9.9, lon=-84.0, matrix_index=0)]
-    for i in range(1, stops + 1):
-        locations.append(Location(id=f"C{i}", lat=9.9 + i / 500,
-                                  lon=-84.0 + (i % 4) / 500, matrix_index=i))
-    size = stops + 1
-    grid = tuple(tuple(0 if i == j else radius + abs(i - j) * 900
-                       for j in range(size)) for i in range(size))
-    times = tuple(tuple(cell // 12 for cell in row) for row in grid)
-    return tuple(locations), grid, times
+_ROUND: dict[int, tuple] = {}
+
+
+def real_round(stops: int) -> tuple:
+    """The same real round every scenario is judged on, fetched once.
+
+    Geography is the *constant* in this example: every scenario below plans
+    the same customers and varies only the fleet and the load per drop. That
+    is what makes the comparison a comparison, so the round is built once and
+    cached rather than refetched -- and the load stays a parameter of
+    `fleet_problem`, not a property of the data, for the same reason.
+
+    What changes by moving off the generated ring is the shape of the answer.
+    On a ring every customer sits the same distance from the depot, so the
+    marginal van is worth the same wherever it is added and FR-36's marginal
+    values come out flat. Real deliveries are not equidistant, and the last
+    van is worth what the work at the edge of the round costs.
+
+    Args:
+        stops: How many deliveries the round contains.
+
+    Returns:
+        The locations, the road matrix, and the depot record.
+    """
+    if stops not in _ROUND:
+        deliveries, depot = dataset.load().spread(stops)
+        points = [(depot["latitude"], depot["longitude"])]
+        points += [(d["latitude"], d["longitude"]) for d in deliveries]
+        matrix, _ = build_matrix(GATEWAY, points)
+        locations = (Location(id="D", lat=depot["latitude"],
+                              lon=depot["longitude"], matrix_index=0),) + tuple(
+            Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],
+                     matrix_index=i + 1)
+            for i, d in enumerate(deliveries))
+        _ROUND[stops] = (locations, matrix, depot)
+    return _ROUND[stops]
 
 
 def fleet_problem(vehicles: tuple[Vehicle, ...], stops: int = 12,
                   kg: int = 30, prize: int = 0) -> Problem:
-    locations, grid, times = depot_and_ring(stops)
+    locations, matrix, _ = real_round(stops)
     orders = tuple(
         Order(id=f"O{i}", kind="JOB", quantities={"kg": kg}, prize=prize,
               priority_tier=1 if prize else 0,
@@ -92,9 +124,7 @@ def fleet_problem(vehicles: tuple[Vehicle, ...], stops: int = 12,
                                 service_fixed=300))
         for i in range(1, stops + 1))
     return Problem(id="mix", locations=locations, orders=orders,
-                   vehicles=vehicles,
-                   matrix=TravelMatrix(version="mix", durations=times,
-                                       distances=grid))
+                   vehicles=vehicles, matrix=matrix)
 
 
 def own(vehicle_id: str, capacity: int = 120) -> Vehicle:
@@ -232,6 +262,32 @@ def show_allocation_block() -> None:
     print("   years: it is prose, it looks authoritative, and nobody checks it.")
 
 
+def solve_overloaded(problem: Problem):
+    """Solve an instance whose fleet cannot carry the work, quietly.
+
+    The tight fleet in section 4 holds 420 kg and is asked to carry 480, and
+    each re-solve below it drops a vehicle from that. Both are infeasible on
+    purpose -- an overloaded plan is exactly what the right-hand column
+    measures -- so PyVRP reaching its penalty bound is the expected answer
+    here rather than something to report.
+
+    On the generated ring this example used to plan, the warning never
+    surfaced: uniform legs make an overloaded route cheap to represent. Real
+    road distances are not uniform and it does surface, so it is silenced at
+    the two call sites that provoke it deliberately, leaving a genuine
+    warning anywhere else still visible.
+
+    Args:
+        problem: An instance expected to have no feasible solution.
+
+    Returns:
+        The best plan found, overloaded and complete.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=PenaltyBoundWarning)
+        return pyvrp_adapter.solve(problem, iterations=3_000, seed=0)
+
+
 def show_marginal_value() -> None:
     """§7.8's delta, by re-solving rather than estimating."""
     print("\n4. Marginal value: re-solve without each vehicle")
@@ -241,11 +297,11 @@ def show_marginal_value() -> None:
     solution = pyvrp_adapter.solve(problem, iterations=3_000, seed=0)
 
     def resolve(reduced: Problem):
-        return pyvrp_adapter.solve(reduced, iterations=3_000, seed=0)
+        return solve_overloaded(reduced)
 
     print(f"   {'vehicle':<9}{'slack fleet':>16}{'tight fleet':>16}")
     tight = fleet_problem(fleet, stops=12, kg=40)
-    tight_plan = pyvrp_adapter.solve(tight, iterations=3_000, seed=0)
+    tight_plan = solve_overloaded(tight)
 
     slack_values = marginal_values(problem, solution, SPEC, resolve)
     tight_values = marginal_values(tight, tight_plan, SPEC, resolve)

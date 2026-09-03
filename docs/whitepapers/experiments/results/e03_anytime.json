@@ -1,0 +1,87 @@
+{
+  "best": {
+    "beats_gateway": true,
+    "distance_m": 350332,
+    "gap_vs_gateway_pct": -10.450721722215548,
+    "iterations": 3200,
+    "wall_ms": 560.9
+  },
+  "capacity": 20,
+  "first_budget_beating_gateway": {
+    "iterations": 25,
+    "wall_ms": 12.1
+  },
+  "gateway": "http://10.211.55.33:8000",
+  "gateway_canonical_m": 391217,
+  "gateway_wall_ms": 11.9,
+  "improvement_first_to_best_pct": 3.6323675444315158,
+  "ladder": [
+    {
+      "beats_gateway": true,
+      "distance_m": 363537,
+      "gap_vs_gateway_pct": -7.0753571547248715,
+      "iterations": 25,
+      "wall_ms": 12.1
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 359930,
+      "gap_vs_gateway_pct": -7.997351853319258,
+      "iterations": 50,
+      "wall_ms": 15.7
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 355224,
+      "gap_vs_gateway_pct": -9.200264814668074,
+      "iterations": 100,
+      "wall_ms": 24.8
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 351703,
+      "gap_vs_gateway_pct": -10.100276828460931,
+      "iterations": 200,
+      "wall_ms": 41.6
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 351703,
+      "gap_vs_gateway_pct": -10.100276828460931,
+      "iterations": 400,
+      "wall_ms": 80.9
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 351703,
+      "gap_vs_gateway_pct": -10.100276828460931,
+      "iterations": 800,
+      "wall_ms": 151.7
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 351703,
+      "gap_vs_gateway_pct": -10.100276828460931,
+      "iterations": 1600,
+      "wall_ms": 282.7
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 350332,
+      "gap_vs_gateway_pct": -10.450721722215548,
+      "iterations": 3200,
+      "wall_ms": 560.9
+    },
+    {
+      "beats_gateway": true,
+      "distance_m": 350332,
+      "gap_vs_gateway_pct": -10.450721722215548,
+      "iterations": 6400,
+      "wall_ms": 1128.4
+    }
+  ],
+  "note": "gateway_wall_ms is end-to-end and includes its own matrix and one /trip round trip per chunk over the network; solver wall_ms is search only, on an already-pinned matrix. They are not directly comparable and are reported separately for that reason.",
+  "seed": 20260902,
+  "stops": 60,
+  "vehicles": 3
+}

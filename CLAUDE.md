@@ -27,13 +27,16 @@
   `--manifest-path gateway/Cargo.toml`
 
 ## Code Style & Conventions
-- **Language & Framework**: Python 3.13+ and FastAPI.
+- **Language & Framework**: Rust (axum) for the gateway in `gateway/`. Python 3.13+
+  for everything else — the `vrp/` routing platform, tests, parity harness and
+  examples. The conventions below apply to the Python side; the gateway follows
+  ordinary Rust style and is checked with `cargo clippy`.
 - **Indentation**: 4 spaces (do not use tabs).
 - **Naming Conventions**:
   - Variables, functions, methods: `snake_case`
   - Classes, custom exceptions: `PascalCase`
   - Constants/Globals: `SCREAMING_SNAKE_CASE`
-- **Imports**: Formatted using `ruff`. Absolute imports from the `app` namespace (e.g., `from app.models.schemas import ...`).
+- **Imports**: Formatted using `ruff`. Absolute imports from the top-level package (e.g., `from vrp.model import Problem`). There is no `app` namespace — that was the retired FastAPI gateway.
 - **Typing**: Use explicit and modern PEP 585/604 type annotations on all function signatures, return types, and fields.
 - **Docstrings**: Adhere strictly to **Google Style Docstrings** for all new/modified public interfaces (includes `Args:`, `Returns:`, and `Raises:`).
 - **Complexity**: Keep functions short and single-purpose (SRP). If a function body exceeds 20 lines, refactor it into smaller helper methods.

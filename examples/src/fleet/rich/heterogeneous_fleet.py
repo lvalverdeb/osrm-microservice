@@ -40,7 +40,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -50,6 +49,7 @@ from pathlib import Path
 # Importing config puts OSRM_API_URL into the environment and the repository
 # root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
+import dataset
 
 from vrp.model import (
     Location,
@@ -65,7 +65,7 @@ from vrp.solve.pyvrp_adapter import solve
 from vrp.verify import verify
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
-DATASET = Path("data/deliveries_cr.json")
+DATASET = dataset.DEFAULT_PATH
 SHIFT = TimeWindow(start=6 * 3600, end=20 * 3600)
 
 
@@ -86,31 +86,6 @@ FLEET = (
     VehicleClass("VAN", capacity_kg=1_200, fixed_cost=35_000, cost_per_metre=1),
     VehicleClass("RIGID", capacity_kg=5_000, fixed_cost=90_000, cost_per_metre=3),
 )
-
-
-def load(path: Path, stops: int) -> tuple[list[dict], list[dict]]:
-    """A share of deliveries around *each* depot, plus every depot.
-
-    Taking the nearest N to the depot centroid instead put every stop within
-    one van's reach of Grecia, so the solver rightly used one vehicle and the
-    multi-depot half of MDHVRPTW went unexercised -- the example ran, proved
-    nothing, and looked like it had. Work has to exist near each depot for the
-    assignment to be a decision.
-    """
-    data = json.loads(path.read_text())
-    depots = data["depots"]
-    per_depot = max(1, stops // len(depots))
-    chosen: list[dict] = []
-    taken: set[str] = set()
-    for depot in depots:
-        nearest = sorted(
-            (d for d in data["deliveries"] if d["product_id"] not in taken),
-            key=lambda d: (d["latitude"] - depot["latitude"]) ** 2
-            + (d["longitude"] - depot["longitude"]) ** 2)
-        for delivery in nearest[:per_depot]:
-            chosen.append(delivery)
-            taken.add(delivery["product_id"])
-    return chosen, depots
 
 
 def build(depots: list[dict], deliveries: list[dict], matrix: TravelMatrix,
@@ -206,10 +181,8 @@ def main() -> int:
     parser.add_argument("--dataset", type=Path, default=DATASET)
     args = parser.parse_args()
 
-    if not args.dataset.exists():
-        raise SystemExit(f"no dataset at {args.dataset}; see docs/dataset_prep.md")
 
-    deliveries, depots = load(args.dataset, args.stops)
+    deliveries, depots = dataset.load(args.dataset).around_each_depot(args.stops)
     print(f"{len(depots)} depots, {len(deliveries)} stops, "
           f"{len(depots) * len(FLEET)} vehicles "
           f"({', '.join(v.name for v in FLEET)} at each depot)")

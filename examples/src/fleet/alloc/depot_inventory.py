@@ -41,11 +41,15 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.diagnose import preflight
 from vrp.model import (
@@ -57,25 +61,55 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
+from vrp.osrm import build_matrix
 from vrp.verify import verify
 
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 DAY = TimeWindow(start=0, end=12 * 3600)
 LEG = 600
 
 
+_CORPUS = None
+
+
+def corpus():
+    """The delivery corpus, read once for every instance below."""
+    global _CORPUS
+    if _CORPUS is None:
+        _CORPUS = dataset.load()
+    return _CORPUS
+
+
 def instance(depots: tuple[Location, ...], vehicles: tuple[Vehicle, ...],
              stops: int = 2, kg: int = 10, pallets: int = 0) -> Problem:
+    """One inventory scenario, on real depots and real road travel.
+
+    Distance is not what this example is about -- INV-13 counts stock against
+    what left each depot, and that arithmetic is the same whatever the legs
+    are. What real geography changes is the setting: the depots are the six
+    the corpus actually ships from, and a stockout at one of them is a
+    scenario a dispatcher recognises rather than two labels on the same point.
+
+    Args:
+        depots: Depot locations, already carrying their inventory.
+        vehicles: The fleet, homed on those depots.
+        stops: How many deliveries the scenario serves.
+        kg: Weight per drop -- the controlled variable, held per scenario.
+        pallets: Second dimension per drop, when the scenario uses one.
+
+    Returns:
+        A `Problem` over real coordinates and real road travel.
+    """
+    deliveries, _ = corpus().spread(stops, depot=corpus().depots[0])
     customers = tuple(
-        Location(id=f"C{i}", lat=9.9 + i / 100, lon=-84.0,
-                 matrix_index=len(depots) + i - 1)
-        for i in range(1, stops + 1))
+        Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=len(depots) + i)
+        for i, d in enumerate(deliveries))
     locations = (*depots, *customers)
-    size = len(locations)
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
+    matrix, _ = build_matrix(GATEWAY, [(loc.lat, loc.lon) for loc in locations])
+
     quantities = {"kg": kg} | ({"pallets": pallets} if pallets else {})
     orders = tuple(
         Order(id=f"O{i}", kind="JOB", quantities=dict(quantities),
@@ -83,13 +117,14 @@ def instance(depots: tuple[Location, ...], vehicles: tuple[Vehicle, ...],
                                 service_fixed=60))
         for i in range(1, stops + 1))
     return Problem(id="inv", locations=locations, orders=orders,
-                   vehicles=vehicles,
-                   matrix=TravelMatrix(version="i", durations=grid,
-                                       distances=grid))
+                   vehicles=vehicles, matrix=matrix)
 
 
 def depot(depot_id: str, index: int, **kwargs) -> Location:
-    return Location(id=depot_id, lat=9.9, lon=-84.0, matrix_index=index,
+    """A real depot from the corpus, addressed by position."""
+    record = corpus().depots[index]
+    return Location(id=depot_id, lat=record["latitude"],
+                    lon=record["longitude"], matrix_index=index,
                     **kwargs)
 
 

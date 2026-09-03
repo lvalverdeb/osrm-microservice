@@ -1,0 +1,90 @@
+{
+  "cache": {
+    "cold_ms": 25.7,
+    "speedup": 11.5,
+    "warm_ms": [
+      2.1,
+      2.2
+    ]
+  },
+  "gateway": "http://10.211.55.33:8000",
+  "matrix": [
+    {
+      "cells": 100,
+      "side": 10,
+      "wall_ms": 7.9
+    },
+    {
+      "cells": 625,
+      "side": 25,
+      "wall_ms": 15.7
+    },
+    {
+      "cells": 2500,
+      "side": 50,
+      "wall_ms": 36.4
+    },
+    {
+      "cells": 5625,
+      "side": 75,
+      "wall_ms": 55.2
+    },
+    {
+      "cells": 10000,
+      "side": 100,
+      "wall_ms": 78.9
+    }
+  ],
+  "seed": 20260902,
+  "vrp": [
+    {
+      "ms_per_stop": 1.717,
+      "stops": 50,
+      "total_distance_m": 314791.1,
+      "total_duration_s": 34526.3,
+      "vehicles": 2,
+      "wall_ms": 85.8
+    },
+    {
+      "ms_per_stop": 0.808,
+      "stops": 100,
+      "total_distance_m": 530891.4,
+      "total_duration_s": 57501.0,
+      "vehicles": 3,
+      "wall_ms": 80.8
+    },
+    {
+      "ms_per_stop": 0.751,
+      "stops": 250,
+      "total_distance_m": 1018907.8,
+      "total_duration_s": 112943.1,
+      "vehicles": 8,
+      "wall_ms": 187.7
+    },
+    {
+      "ms_per_stop": 0.803,
+      "stops": 500,
+      "total_distance_m": 1790101.9,
+      "total_duration_s": 198478.9,
+      "vehicles": 15,
+      "wall_ms": 401.3
+    },
+    {
+      "ms_per_stop": 0.602,
+      "stops": 1000,
+      "total_distance_m": 3310587.7,
+      "total_duration_s": 354427.69999999995,
+      "vehicles": 29,
+      "wall_ms": 601.5
+    },
+    {
+      "ms_per_stop": 0.591,
+      "stops": 2000,
+      "total_distance_m": 6224446.399999997,
+      "total_duration_s": 658824.1999999998,
+      "vehicles": 58,
+      "wall_ms": 1181.7
+    }
+  ],
+  "vrp_capacity": 35
+}

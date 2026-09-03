@@ -54,8 +54,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import math
 import os
 import sys
 from pathlib import Path
@@ -63,6 +61,7 @@ from pathlib import Path
 # Importing config puts OSRM_API_URL into the environment and the repository
 # root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
+import dataset
 import httpx
 
 from vrp.model import (
@@ -80,7 +79,7 @@ from vrp.solve.pyvrp_adapter import solve
 from vrp.verify import verify
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
-DATASET = Path("data/deliveries_cr.json")
+DATASET = dataset.DEFAULT_PATH
 
 SHIFT = TimeWindow(start=0, end=24 * 3600)
 
@@ -95,45 +94,6 @@ VAN_FIXED_COST = 50_000
 # leaving it at the model default would put every order in Tier 1 of the
 # objective, where no prize applies and nothing can ever be dropped.
 DROPPABLE_TIER = 1
-
-
-def great_circle_metres(a: tuple[float, float], b: tuple[float, float]) -> int:
-    """Straight-line metres. Only used by --straight-line; see the docstring."""
-    dlat, dlon = math.radians(b[0] - a[0]), math.radians(b[1] - a[1])
-    h = (math.sin(dlat / 2) ** 2
-         + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0]))
-         * math.sin(dlon / 2) ** 2)
-    return round(6_371_000 * 2 * math.asin(math.sqrt(h)))
-
-
-def load_slice(path: Path, stops: int, outliers: int,
-               province: str | None) -> tuple[list[dict], dict]:
-    """A tight cluster near one depot, plus the furthest few deliveries.
-
-    The shape is the point. A uniformly tight day has no decision in it: every
-    stop is worth serving and every mode agrees. The outliers are what make the
-    objective's mode matter.
-    """
-    data = json.loads(path.read_text())
-    deliveries = data["deliveries"]
-    if province:
-        deliveries = [d for d in deliveries if d["province"] == province]
-        if not deliveries:
-            raise SystemExit(f"no deliveries in province {province!r}")
-
-    depot = min(
-        data["depots"],
-        key=lambda w: sum((d["latitude"] - w["latitude"]) ** 2
-                          + (d["longitude"] - w["longitude"]) ** 2
-                          for d in deliveries[:400]),
-    )
-    home = (depot["latitude"], depot["longitude"])
-    ranked = sorted(deliveries,
-                    key=lambda d: great_circle_metres(
-                        home, (d["latitude"], d["longitude"])))
-    near = ranked[:max(stops - outliers, 1)]
-    far = ranked[-outliers:] if outliers else []
-    return near + far, depot
 
 
 def fetch_matrix(depot: dict, deliveries: list[dict]) -> tuple[list[list], list[list]]:
@@ -164,7 +124,7 @@ def straight_line_matrix(depot: dict,
         for j in range(size):
             if i == j:
                 continue
-            metres = great_circle_metres(points[i], points[j])
+            metres = dataset.great_circle_metres(points[i], points[j])
             distances[i][j] = metres
             durations[i][j] = round(metres / 40_000 * 3600)
     return durations, distances
@@ -316,13 +276,11 @@ def main() -> int:
     parser.add_argument("--dataset", type=Path, default=DATASET)
     args = parser.parse_args()
 
-    if not args.dataset.exists():
-        raise SystemExit(f"no dataset at {args.dataset}; see docs/dataset_prep.md")
 
-    deliveries, depot = load_slice(args.dataset, args.stops, args.outliers,
-                                   args.province)
+    corpus = dataset.load(args.dataset).by_province(args.province)
+    deliveries, depot = corpus.cluster_with_outliers(args.stops, args.outliers)
     home = (depot["latitude"], depot["longitude"])
-    furthest = max(great_circle_metres(home, (d["latitude"], d["longitude"]))
+    furthest = max(dataset.great_circle_metres(home, (d["latitude"], d["longitude"]))
                    for d in deliveries)
     print(f"depot {depot['name']} -- {len(deliveries)} stops"
           f"{f' in {args.province}' if args.province else ''}, "

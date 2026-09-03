@@ -10,6 +10,7 @@ This repository is designed to be maintained and expanded by AI developer agents
    - **DO NOT** install global Python packages using raw `pip`.
    - All Python code must be developed and run within a virtual environment managed by **uv**.
    - Standard command prefix: `uv run`
+   - Rust work goes through `cargo`, always with `--manifest-path gateway/Cargo.toml`.
 2. **Execution Control**:
    - Before modifying any file or executing any modifying shell command, you **must** present a plan and ask for explicit user confirmation.
 3. **Behavior Preservation**:
@@ -20,7 +21,13 @@ This repository is designed to be maintained and expanded by AI developer agents
 
 ## 🏛️ Architecture and Stack
 
-- **Tech Stack**: Python 3.13+, FastAPI, Redis, OSRM, NetworkX, Ruff.
+- **Tech Stack**: Rust (axum) for the gateway in `gateway/`; Python 3.13+ for the
+  vehicle-routing platform in `vrp/`, the tests, the parity harness and the example
+  clients; Redis and OSRM as the backing services; `cargo` and `ruff` for quality.
+  There is no FastAPI gateway any more — it was ported to Rust in August 2026, and
+  a document referring to `src/app/` predates the port. The gateway does not depend
+  on NetworkX either; `/matrix-graph` reproduces `networkx.node_link_data`'s output
+  shape so existing consumers keep working.
 - **Core Principles**:
   - **Separation of Concerns (SoC)**: Keep routing and handlers (`main.rs`, `handlers.rs`), the upstream adapter (`osrm/client.rs`), and the optimisation algorithms (`vrp/allocate.rs`, `vrp/solve.rs`) completely separated.
   - **Statelessness**: Compute endpoints must be stateless, delegating state cache to Redis or OSRM backend.

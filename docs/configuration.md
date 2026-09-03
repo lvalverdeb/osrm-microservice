@@ -71,7 +71,7 @@ if the value must differ per deployment.
 | `APP_NAME` | `OSRM API Gateway` | Application name shown in logs and `/health` response. |
 | `DEBUG` | `false` | When `true`, sets log level to `DEBUG`. |
 | `OSRM_BASE_URL` | `http://localhost:5000` | Internal URL of the OSRM C++ backend (used by the gateway). |
-| `OSRM_API_URL` | `http://localhost:8080` | Public URL of the FastAPI gateway (used by examples/clients). |
+| `OSRM_API_URL` | `http://localhost:8080` | Public URL of the gateway (used by examples/clients). |
 
 ---
 

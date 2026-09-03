@@ -44,10 +44,13 @@ The included `run_clustering_workflow.py` script has been updated to demonstrate
 
 ```bash
 # Generate the payload with IDs
-python examples/clustering/generate_payload.py
+uv run --package osrm-api-gateway-examples examples/src/clustering/generate_payload.py
 
 # Run the full workflow visualization
-python examples/clustering/run_clustering_workflow.py
+uv run --package osrm-api-gateway-examples examples/src/clustering/run_clustering_workflow.py
 ```
+
+`--package` is required: the workspace shares one `.venv` at the repository root,
+and a bare `uv run` there evicts the dependencies these scripts need.
 
 The resulting `.html` maps successfully use the IDs to lookup coordinates for visualisation, demonstrating the robustness of this new approach.

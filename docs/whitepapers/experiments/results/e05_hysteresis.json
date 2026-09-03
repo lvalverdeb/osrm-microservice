@@ -1,0 +1,137 @@
+{
+  "gateway": "http://10.211.55.33:8000",
+  "mode": "distance",
+  "national": {
+    "bands": [
+      {
+        "extra_per_held_stop_m": 0,
+        "extra_road_distance_m": 0,
+        "held_at_anchor": 0,
+        "held_pct": 0.0,
+        "hysteresis_m": 0.0
+      },
+      {
+        "extra_per_held_stop_m": 0,
+        "extra_road_distance_m": 0,
+        "held_at_anchor": 0,
+        "held_pct": 0.0,
+        "hysteresis_m": 250.0
+      },
+      {
+        "extra_per_held_stop_m": 0,
+        "extra_road_distance_m": 0,
+        "held_at_anchor": 0,
+        "held_pct": 0.0,
+        "hysteresis_m": 500.0
+      },
+      {
+        "extra_per_held_stop_m": 0,
+        "extra_road_distance_m": 0,
+        "held_at_anchor": 0,
+        "held_pct": 0.0,
+        "hysteresis_m": 1000.0
+      },
+      {
+        "extra_per_held_stop_m": 1312,
+        "extra_road_distance_m": 2624,
+        "held_at_anchor": 2,
+        "held_pct": 0.5,
+        "hysteresis_m": 2000.0
+      },
+      {
+        "extra_per_held_stop_m": 2007,
+        "extra_road_distance_m": 8028,
+        "held_at_anchor": 4,
+        "held_pct": 1.0,
+        "hysteresis_m": 4000.0
+      },
+      {
+        "extra_per_held_stop_m": 5288,
+        "extra_road_distance_m": 58169,
+        "held_at_anchor": 11,
+        "held_pct": 2.75,
+        "hysteresis_m": 8000.0
+      },
+      {
+        "extra_per_held_stop_m": 8828,
+        "extra_road_distance_m": 238369,
+        "held_at_anchor": 27,
+        "held_pct": 6.75,
+        "hysteresis_m": 16000.0
+      }
+    ],
+    "depots": 6,
+    "radial": {
+      "extra_road_distance_m": 996425,
+      "held_at_anchor": 36
+    },
+    "stops": 400
+  },
+  "seed": 20260902,
+  "urban": {
+    "bands": [
+      {
+        "extra_per_held_stop_m": 0,
+        "extra_road_distance_m": 0,
+        "held_at_anchor": 0,
+        "held_pct": 0.0,
+        "hysteresis_m": 0.0
+      },
+      {
+        "extra_per_held_stop_m": 95,
+        "extra_road_distance_m": 285,
+        "held_at_anchor": 3,
+        "held_pct": 0.75,
+        "hysteresis_m": 250.0
+      },
+      {
+        "extra_per_held_stop_m": 151,
+        "extra_road_distance_m": 603,
+        "held_at_anchor": 4,
+        "held_pct": 1.0,
+        "hysteresis_m": 500.0
+      },
+      {
+        "extra_per_held_stop_m": 151,
+        "extra_road_distance_m": 603,
+        "held_at_anchor": 4,
+        "held_pct": 1.0,
+        "hysteresis_m": 1000.0
+      },
+      {
+        "extra_per_held_stop_m": 1223,
+        "extra_road_distance_m": 20788,
+        "held_at_anchor": 17,
+        "held_pct": 4.25,
+        "hysteresis_m": 2000.0
+      },
+      {
+        "extra_per_held_stop_m": 2156,
+        "extra_road_distance_m": 62516,
+        "held_at_anchor": 29,
+        "held_pct": 7.25,
+        "hysteresis_m": 4000.0
+      },
+      {
+        "extra_per_held_stop_m": 2218,
+        "extra_road_distance_m": 66530,
+        "held_at_anchor": 30,
+        "held_pct": 7.5,
+        "hysteresis_m": 8000.0
+      },
+      {
+        "extra_per_held_stop_m": 2218,
+        "extra_road_distance_m": 66530,
+        "held_at_anchor": 30,
+        "held_pct": 7.5,
+        "hysteresis_m": 16000.0
+      }
+    ],
+    "depots": 4,
+    "radial": {
+      "extra_road_distance_m": 66530,
+      "held_at_anchor": 30
+    },
+    "stops": 400
+  }
+}

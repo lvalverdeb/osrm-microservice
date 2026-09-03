@@ -48,7 +48,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -56,6 +55,7 @@ from pathlib import Path
 # Importing config puts OSRM_API_URL into the environment and the repository
 # root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
+import dataset
 
 from vrp.evaluator import ObjectiveWeights, evaluate
 from vrp.model import (
@@ -72,7 +72,7 @@ from vrp.solve.pyvrp_adapter import solve
 from vrp.verify import verify
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
-DATASET = Path("data/deliveries_cr.json")
+DATASET = dataset.DEFAULT_PATH
 HOUR = 3600
 SHIFT = TimeWindow(start=6 * HOUR, end=20 * HOUR)
 
@@ -80,15 +80,6 @@ SHIFT = TimeWindow(start=6 * HOUR, end=20 * HOUR)
 # delivery and a second visit. §6.2 asks for exactly this asymmetry.
 EARLINESS_PER_SEC = 1
 LATENESS_PER_SEC = 12
-
-
-def load(path: Path, stops: int) -> tuple[list[dict], dict]:
-    data = json.loads(path.read_text())
-    depot = data["depots"][0]
-    nearest = sorted(data["deliveries"],
-                     key=lambda d: (d["latitude"] - depot["latitude"]) ** 2
-                     + (d["longitude"] - depot["longitude"]) ** 2)
-    return nearest[:stops], depot
 
 
 def windows_for(scenario: str, index: int) -> tuple[TimeWindow, ...]:
@@ -171,10 +162,7 @@ def main() -> int:
     parser.add_argument("--dataset", type=Path, default=DATASET)
     args = parser.parse_args()
 
-    if not args.dataset.exists():
-        raise SystemExit(f"no dataset at {args.dataset}; see docs/dataset_prep.md")
-
-    deliveries, depot = load(args.dataset, args.stops)
+    deliveries, depot = dataset.load(args.dataset).nearest(args.stops)
     print(f"depot {depot['name']} -- {len(deliveries)} stops")
     print(f"fetching a road matrix from {GATEWAY}")
     points = [(depot["latitude"], depot["longitude"])]

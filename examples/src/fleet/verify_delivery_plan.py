@@ -31,7 +31,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -39,6 +38,7 @@ from pathlib import Path
 # Importing config puts OSRM_API_URL into the environment and the repository
 # root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
+import dataset
 import httpx
 
 from vrp.evaluator import ObjectiveWeights, evaluate, route_metrics
@@ -57,38 +57,10 @@ from vrp.model import (
 from vrp.verify import verify
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
-DATASET = Path("data/deliveries_cr.json")
+DATASET = dataset.DEFAULT_PATH
 
 # A working day, in whole seconds from midnight.
 SHIFT = TimeWindow(start=6 * 3600, end=18 * 3600)
-
-
-def load_slice(path: Path, stops: int, province: str | None) -> tuple[list[dict], dict]:
-    """Take a solvable slice of the dataset, nearest first to one depot.
-
-    50,000 deliveries is a planning corpus, not one request: the gateway caps a
-    solve at VRP_MAX_STOPS and a dense matrix is quadratic besides. Slicing by
-    proximity to a single depot gives a realistic day's work rather than points
-    scattered across the country.
-    """
-    data = json.loads(path.read_text())
-    deliveries = data["deliveries"]
-    if province:
-        deliveries = [d for d in deliveries if d["province"] == province]
-        if not deliveries:
-            raise SystemExit(f"no deliveries in province {province!r}")
-
-    # The depot with the most of this work nearby.
-    depot = min(
-        data["depots"],
-        key=lambda w: sum((d["latitude"] - w["latitude"]) ** 2
-                          + (d["longitude"] - w["longitude"]) ** 2
-                          for d in deliveries[:400]),
-    )
-    nearest = sorted(deliveries,
-                     key=lambda d: (d["latitude"] - depot["latitude"]) ** 2
-                     + (d["longitude"] - depot["longitude"]) ** 2)
-    return nearest[:stops], depot
 
 
 def fetch_matrix(depot: dict, deliveries: list[dict]) -> tuple[list[list], list[list]]:
@@ -208,7 +180,8 @@ def main() -> int:
               f"generate it first -- see docs/dataset_prep.md", file=sys.stderr)
         return 2
 
-    deliveries, depot = load_slice(args.dataset, args.stops, args.province)
+    corpus = dataset.load(args.dataset).by_province(args.province)
+    deliveries, depot = corpus.nearest(args.stops, corpus.busiest_depot())
     print(f"gateway  {GATEWAY}")
     print(f"depot    {depot['name']}")
     print(f"stops    {len(deliveries)}"

@@ -135,25 +135,35 @@ When `OTLP_ENDPOINT` is set, the gateway exports request spans to an OTLP-compat
 **Architecture:**
 
 ```
-Client ──> FastAPI Gateway ──> OSRM Backend
-            │                    │
-            ├── Root Span        │
-            │   POST /vrp        │
-            │                    │
-            ├── Child Span       │
-            │   GET /table/v1/.. │ ──────> OSRM
-            │                    │
-            ├── Child Span       │
-            │   GET /trip/v1/..  │ ──────> OSRM
-            │                    │
-            └── Child Span       │
-                GET /trip/v1/..  │ ──────> OSRM
+Client ──> Rust Gateway ──> OSRM Backend
+            │                 │
+            ├── Root Span     │
+            │   POST /vrp     │
+            │                 │
+            ├── Child Span    │
+            │   GET /table/.. │ ──────> OSRM
+            │                 │
+            ├── Child Span    │
+            │   GET /trip/..  │ ──────> OSRM
+            │                 │
+            └── Child Span    │
+                GET /trip/..  │ ──────> OSRM
 ```
 
-**Auto-instrumentation:**
-- `FastAPIInstrumentor` creates a root span per inbound request (method, path, status).
-- `HTTPXClientInstrumentor` creates child spans for each outbound OSRM call.
-- W3C `traceparent` headers propagate trace context across service boundaries.
+**Instrumentation.** There is no auto-instrumentation layer; the gateway creates
+its spans itself, which is why they exist at all — a `tracing_opentelemetry`
+layer installed over a service that opens no spans exports an empty trace.
+
+- The `observe` middleware (`gateway/src/main.rs`) opens one `http.server` span
+  per inbound request, named `{method} {handler}` and recording the response
+  status. `handler` is the matched route, so `/tile` collapses to one label
+  rather than one per tile.
+- It adopts the caller's context first, so a client that sends `traceparent`
+  gets its span as the parent instead of a detached root.
+- `telemetry::inject_context` writes `traceparent` onto every outbound OSRM
+  request, so the engine's spans join the same trace. Without a propagator
+  installed this silently writes nothing, so one is registered at startup
+  whenever `OTLP_ENDPOINT` is set.
 
 **Configuration:**
 

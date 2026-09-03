@@ -1,0 +1,83 @@
+{
+  "capacity": 20,
+  "caught": 6,
+  "clean_plan_verified": true,
+  "gateway": "http://10.211.55.33:8000",
+  "mutations": [
+    {
+      "detected": true,
+      "expected_invariant": "INV-1",
+      "first_detail": "INV-1 [-/ORD-038107] neither served nor listed unassigned",
+      "invariants_fired": [
+        "INV-1",
+        "INV-4",
+        "INV-9"
+      ],
+      "mutation": "order_dropped",
+      "named_the_right_one": true
+    },
+    {
+      "detected": true,
+      "expected_invariant": "INV-1",
+      "first_detail": "INV-1 [-/ORD-038107] served 2 times, expected 1",
+      "invariants_fired": [
+        "INV-1",
+        "INV-4",
+        "INV-9"
+      ],
+      "mutation": "order_on_two_routes",
+      "named_the_right_one": true
+    },
+    {
+      "detected": true,
+      "expected_invariant": "INV-4",
+      "first_detail": "INV-3 [VEH-1/ORD-036820] service starts 461 before arrival 1361",
+      "invariants_fired": [
+        "INV-3",
+        "INV-4"
+      ],
+      "mutation": "arrival_arithmetic_broken",
+      "named_the_right_one": true
+    },
+    {
+      "detected": true,
+      "expected_invariant": "INV-3",
+      "first_detail": "INV-3 [VEH-1/ORD-036820] service starts -139 before arrival 461",
+      "invariants_fired": [
+        "INV-3"
+      ],
+      "mutation": "service_before_arrival",
+      "named_the_right_one": true
+    },
+    {
+      "detected": true,
+      "expected_invariant": "INV-5",
+      "first_detail": "INV-5 [VEH-1/ORD-036820] load stops=25 exceeds capacity 20",
+      "invariants_fired": [
+        "INV-5"
+      ],
+      "mutation": "capacity_exceeded",
+      "named_the_right_one": true
+    },
+    {
+      "detected": true,
+      "expected_invariant": "INV-9",
+      "first_detail": "INV-9 [-/-] reported distance=325332, recomputed 350332",
+      "invariants_fired": [
+        "INV-9"
+      ],
+      "mutation": "objective_misreported",
+      "named_the_right_one": true
+    }
+  ],
+  "not_applicable": [
+    "INV-13",
+    "INV-14",
+    "INV-15",
+    "INV-7",
+    "INV-8"
+  ],
+  "seed": 20260902,
+  "stops": 60,
+  "total": 6
+}

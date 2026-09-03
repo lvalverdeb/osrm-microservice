@@ -42,11 +42,16 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
+import os
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.model import (
     Location,
@@ -54,9 +59,9 @@ from vrp.model import (
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
+from vrp.osrm import build_matrix
 from vrp.scenarios import (
     FULL,
     Mix,
@@ -68,29 +73,53 @@ from vrp.scenarios import (
 )
 from vrp.scenarios import _recovery_cost as round_trip
 
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 DAY = TimeWindow(start=0, end=10 * 3600)
 POOL, TYPICAL, DAYS = 18, 12, 30
 CAPACITY, DAY_RATE = 30, 12_000
 
 
-def base_problem(stops: int = POOL) -> Problem:
-    size = stops + 1
-    locations = tuple(
-        Location(id="D" if i == 0 else f"C{i}", lat=9.9 + i / 200, lon=-84.0,
-                 matrix_index=i)
-        for i in range(size))
-    grid = tuple(tuple(0 if i == j else 5_000 + abs(i - j) * 500
-                       for j in range(size)) for i in range(size))
-    times = tuple(tuple(cell // 10 for cell in row) for row in grid)
+def base_problem(stops: int = POOL, path: Path | None = None,
+                 gateway: str = "") -> Problem:
+    """The order pool the demand days are drawn from, on real road travel.
+
+    US-4 asks for a sweep over "a set of historical or generated demand days",
+    and the sizing answer is only as good as the geography underneath it: a
+    pool laid out along one line of longitude makes every van's day the same
+    shape, so the marginal van always costs the same and the Pareto front is a
+    straight line by construction. Real deliveries around a real depot put the
+    curvature back.
+
+    Demand stays a constant weight per drop on purpose. The sweep's variables
+    are which drops fall on a day and how many vans are owned; letting the
+    weights vary too would add a dimension the report does not show.
+
+    Args:
+        stops: Size of the order pool.
+        path: Where the delivery corpus lives.
+        gateway: Base URL of the OSRM API gateway, for the road matrix.
+
+    Returns:
+        A `Problem` over real coordinates and real road travel.
+    """
+    deliveries, depot = dataset.load(path or dataset.DEFAULT_PATH).nearest(stops)
+    points = [(depot["latitude"], depot["longitude"])]
+    points += [(d["latitude"], d["longitude"]) for d in deliveries]
+    matrix, _ = build_matrix(gateway or GATEWAY, points)
+
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=d["product_id"], lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i + 1)
+        for i, d in enumerate(deliveries))
     orders = tuple(
-        Order(id=f"O{i}", kind="JOB", quantities={"kg": 10},
-              delivery=StopSpec(location_id=f"C{i}", time_windows=(DAY,),
-                                service_fixed=120))
-        for i in range(1, stops + 1))
+        Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": 10},
+              delivery=StopSpec(location_id=d["product_id"],
+                                time_windows=(DAY,),
+                                service_fixed=d["service_minutes"] * 60))
+        for i, d in enumerate(deliveries))
     return Problem(id="sizing", locations=locations, orders=orders,
-                   vehicles=(_van("V1"),),
-                   matrix=TravelMatrix(version="s", durations=times,
-                                       distances=grid))
+                   vehicles=(_van("V1"),), matrix=matrix)
 
 
 def _van(vehicle_id: str) -> Vehicle:
@@ -209,7 +238,12 @@ def show_the_condition(problem, days, mixes) -> None:
 
 
 def main() -> int:
-    problem = base_problem()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=Path, default=dataset.DEFAULT_PATH)
+    args = parser.parse_args()
+
+    print(f"fetching a road matrix from {GATEWAY}")
+    problem = base_problem(POOL, args.dataset, GATEWAY)
     days = generate_scenarios(problem, days=DAYS, seed=0, typical=TYPICAL)
     mixes = candidates()
 
