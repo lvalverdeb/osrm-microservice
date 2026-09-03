@@ -51,6 +51,7 @@ Usage:
 from __future__ import annotations
 
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -58,6 +59,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+import config  # noqa: F401  -- loads examples/.env into the environment
 import dataset
 
 from vrp.battery import FULL_PPT, ChargingCurve, charge_seconds
@@ -76,12 +78,13 @@ from vrp.model import (
 )
 from vrp.verify import verify
 
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
+
 HOUR = 3600
 KM = 1000
 STOPS = 3
 ORDERS = [f"O{i}" for i in range(1, STOPS + 1)]
-# A large electric van, and what one uses hauling freight through hills.
-BATTERY_WH = 75_000
+# What a van uses hauling freight through hills.
 CONSUMPTION_WH_PER_KM = 250
 
 
@@ -94,8 +97,14 @@ def geometry() -> tuple:
     """The real round, and the depots standing in as chargers.
 
     Returns:
-        `(locations, matrix, deliveries, depot, charger_names)`, where the
-        chargers are every depot except the one the van starts from.
+        `(locations, matrix, on_road, deliveries, depot, charger_names)`, where
+        the chargers are every depot except the one the van starts from and
+        `on_road` says whether the matrix came from the gateway.
+
+    Road distances when a gateway is there, straight lines when it is not, and
+    the difference is the whole example rather than a detail: range is spent
+    per kilometre, and straight lines undercount Costa Rican kilometres by
+    about 40% on this round. A planar run therefore flatters every battery.
     """
     locations, _, deliveries, depot = dataset.planar_sites(
         STOPS, "furthest", "ev")
@@ -108,7 +117,8 @@ def geometry() -> tuple:
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
     points += [(d["latitude"], d["longitude"]) for d in others]
-    return (locations + extra, _matrix_over(points, depot), deliveries, depot,
+    matrix, on_road = dataset.road_matrix_or_planar(points, GATEWAY, "ev")
+    return (locations + extra, matrix, on_road, deliveries, depot,
             {f"CH{i}": d["name"] for i, d in enumerate(others, 1)})
 
 
@@ -131,13 +141,38 @@ def _matrix_over(points: list[tuple[float, float]], depot: dict) -> PlanarMatrix
     return PlanarMatrix(version="ev-v1", coordinates=coordinates)
 
 
-LOCATIONS, MATRIX, DELIVERIES, DEPOT, CHARGERS = geometry()
+LOCATIONS, MATRIX, ON_ROAD, DELIVERIES, DEPOT, CHARGERS = geometry()
 
 
 def tour_metres() -> int:
     """What the round costs if it is driven in the order it is given."""
     legs = MATRIX.distance(0, 1) + MATRIX.distance(STOPS, 0)
     return legs + sum(MATRIX.distance(i, i + 1) for i in range(1, STOPS))
+
+
+def energy_for_the_round() -> int:
+    """Watt-hours to drive the whole round once, with nothing spare."""
+    return tour_metres() // 1000 * CONSUMPTION_WH_PER_KM
+
+
+def fleet_ladder() -> tuple[int, ...]:
+    """Four vans, sized against what this round actually asks for.
+
+    Returns:
+        Usable capacities in watt-hours, smallest first.
+
+    Fractions rather than four round numbers in kilowatt-hours, because the
+    round is 603 km by road and 430 in a straight line, and a ladder pinned to
+    the road figures makes every van hopeless on a planar run while one pinned
+    to the planar figures leaves the 75 kWh van -- which used to be this
+    example's headline -- stranded the moment a gateway appears. Sizing against
+    the measured round is the only version that is right in both.
+    """
+    need = energy_for_the_round()
+    return tuple(int(need * f / 1_000) * 1_000 for f in (0.2, 0.5, 0.75, 1.25))
+
+
+BATTERY_WH = fleet_ladder()[2]
 
 
 def a_round(battery_wh: int = BATTERY_WH,
@@ -276,24 +311,43 @@ def the_impossible_round() -> None:
     heading("5.", "What the same work asks of the fleet")
     print(f"\n   {tour_metres() // KM} km, and every van that could be sent "
           "at it:\n")
-    for battery in (30_000, 50_000, BATTERY_WH, 120_000):
+    said = []
+    for battery in fleet_ladder():
         reach = battery // CONSUMPTION_WH_PER_KM
-        print(f"      {battery // 1000:3d} kWh ({reach:3d} km)  "
-              f"{what_battery_buys(battery)}")
-    print("\n   The two refusals are different sentences because they are")
-    print("   different problems. The 50 kWh van is stranded somewhere")
-    print("   specific and a charger nearer that stop would fix it; the")
-    print("   30 kWh van cannot do this work at any charge, and no charger")
-    print("   helps. Neither is a plan with a flat battery in it, and neither")
-    print("   is a plan quietly missing a stop -- which is what a dispatcher")
-    print("   needs at eight in the morning, when hiring a diesel van is")
-    print("   still possible and un-stranding a driver is not.")
+        verdict = what_battery_buys(battery)
+        said.append(verdict)
+        print(f"      {battery // 1000:3d} kWh ({reach:3d} km)  {verdict}")
+
+    stranded = any("cannot reach" in line for line in said)
+    flat = any("runs flat" in line for line in said)
+    if stranded and flat:
+        print("\n   The two refusals are different sentences because they are")
+        print("   different problems. One van is stranded somewhere specific")
+        print("   and a charger nearer that stop would fix it; the smaller one")
+        print("   cannot do this work at any charge, and no charger helps.")
+    else:
+        # Which refusals appear depends on the round, and the round depends on
+        # whether a gateway was there. Claiming both when only one showed up
+        # would be describing the road version's output on a planar run.
+        print("\n   Only one kind of refusal on this round: every van that")
+        print("   cannot do the work fails the same way. The other kind --")
+        print("   reaching no charger from one specific stop -- appears when")
+        print("   the round is long enough for a van to get itself cornered.")
+    print("\n   Neither is a plan with a flat battery in it, and neither is a")
+    print("   plan quietly missing a stop -- which is what a dispatcher needs")
+    print("   at eight in the morning, when hiring a diesel van is still")
+    print("   possible and un-stranding a driver is not.")
 
 
 def main() -> int:
     print(__doc__.strip().split("\n")[0])
     print(f"\nFR-20 and INV-16. Real stops from {DEPOT['name']}; "
           "chargers and curve invented.")
+    print("distances: " + ("the road network, via the gateway."
+                           if ON_ROAD else
+                           "straight lines -- no gateway. Roads here are about "
+                           "40% longer, so every battery below looks better "
+                           "than it is."))
     problem = a_round()
     the_curve()
     beyond_the_battery(problem)

@@ -37,7 +37,7 @@ Usage:
 
 from __future__ import annotations
 
-import math
+import os
 import sys
 from pathlib import Path
 
@@ -45,11 +45,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+import config  # noqa: F401  -- loads examples/.env into the environment
 import dataset
 
 from vrp.hos import EU_561
 from vrp.hos.schedule import schedule_route
-from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
@@ -63,6 +63,8 @@ from vrp.model import (
     service_time,
 )
 from vrp.verify import verify
+
+GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 
 DAY = TimeWindow(start=0, end=12 * 3600)
 
@@ -83,23 +85,26 @@ METRO = dataset.planar_sites(4, "spread", "mt-metro")
 
 
 def _regional() -> tuple:
-    """The depot and two real deliveries far enough out to cost a duty."""
+    """The depot and two real deliveries far enough out to cost a duty.
+
+    Road distances when a gateway is there. Section 2 weighs a day against
+    EU-561's nine driving hours, and a straight line is the wrong ruler for
+    that: Guadalupe to Perez Zeledon is 148 minutes as the crow flies and 216
+    by road, so a planar run reports a comfortable margin where the real one
+    is thin.
+    """
     corpus = dataset.load()
     depot = corpus.depots[0]
     around, _ = corpus.around_each_depot(24)
     chosen = [around[20], around[16]]
-    lat_km = 110.57
-    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
-    coordinates = [(0.0, 0.0)] + [
-        ((d["longitude"] - depot["longitude"]) * lon_km,
-         (d["latitude"] - depot["latitude"]) * lat_km) for d in chosen]
     locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
                           matrix_index=0),) + tuple(
         Location(id=f"C{i}", lat=d["latitude"], lon=d["longitude"],
                  matrix_index=i) for i, d in enumerate(chosen, 1))
-    return (locations, PlanarMatrix(version="mt-regional",
-                                    coordinates=tuple(coordinates)),
-            chosen, depot)
+    matrix, on_road = dataset.road_matrix_or_planar(
+        [(d["latitude"], d["longitude"]) for d in [depot] + chosen],
+        GATEWAY, "mt-regional")
+    return locations, matrix, chosen, depot, on_road
 
 
 REGIONAL = _regional()
@@ -214,11 +219,15 @@ def show_the_cost() -> None:
 
     one = schedule_route(problem, "V1", ["O1"], EU_561)
     both = schedule_route(problem, "V1", ["O1", "O2"], EU_561)
-    matrix = REGIONAL[1]
+    matrix, on_road = REGIONAL[1], REGIONAL[4]
     single = (matrix.duration(0, 1) + matrix.duration(1, 0)) / 3600
     pair = (matrix.duration(0, 1) + matrix.duration(1, 2)
             + matrix.duration(2, 0)) / 3600
     print("   Perez Zeledon and Liberia, EU-561's 9-hour driving limit")
+    print("   distances: " + ("the road network, via the gateway."
+                              if on_road else
+                              "straight lines -- no gateway, so these hours "
+                              "are the wrong ruler for a driving limit."))
     print(f"   one trip  ({single:.1f}h driving): legal={one.legal}")
     print(f"   two trips ({pair:.1f}h driving): legal={both.legal}")
     print("   Planned separately, each trip is a perfectly good day's work and")
