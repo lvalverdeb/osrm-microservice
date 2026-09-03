@@ -726,7 +726,8 @@ def _route_for(problem: Problem, vehicle_id: str, order_ids: list[str],
 
 def concatenate(problem: Problem, clusters: list[SubProblem], seed: int = 0,
                 stagger: bool = True,
-                weights: ObjectiveWeights | None = None) -> Solution:
+                weights: ObjectiveWeights | None = None,
+                workers: int = 1) -> Solution:
     """Solve each cluster and recombine into one plan. DEC-1, DEC-3.
 
     Args:
@@ -738,15 +739,34 @@ def concatenate(problem: Problem, clusters: list[SubProblem], seed: int = 0,
             fail, or the staggering is being credited for a constraint the
             instance never posed.
         weights: the canonical objective's weights.
+        workers: §7.7's work queue -- how many sub-problems may be in flight at
+            once. One is CON-4's reproducible mode and the default, so an
+            existing caller's run is unchanged.
 
     Returns:
         A Solution scored by the canonical evaluator. Never by summing the
         sub-problem objectives: DEC-3 forbids it, because per-vehicle fixed
         costs and every global term are counted once per cluster that way.
+
+    Raises:
+        ValueError: on a worker count below one.
+
+    **Widening the queue cannot move the plan**, for two reasons worth keeping
+    apart. Each sub-solve carries its own seed, `seed + cluster.index`, so its
+    result is a function of the cluster rather than of when it ran. And the
+    merge is safe because `_assign_vehicles` gives every cluster its own
+    vehicles: `assignment.update` would otherwise let the last writer win and
+    completion order would decide the plan. Results are still collected in
+    cluster order -- it costs nothing and means the guarantee does not rest on
+    that disjointness alone -- but the disjointness is the load-bearing half,
+    and `test_clusters_own_disjoint_vehicles` is what fails if it ever stops
+    holding.
     """
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1; got {workers}")
     weights = weights or ObjectiveWeights()
-    assignment: dict[str, list[str]] = {}
-    for cluster in clusters:
+
+    def attempt(cluster: SubProblem) -> dict[str, list[str]]:
         solved = _solve_cluster(problem, cluster.order_ids, cluster.vehicle_ids,
                                 seed=seed + cluster.index)
         if not solved:
@@ -754,9 +774,35 @@ def concatenate(problem: Problem, clusters: list[SubProblem], seed: int = 0,
             # its first vehicle rather than dropped. A worse plan is a plan; a
             # missing cluster is missing demand.
             solved = {cluster.vehicle_ids[0]: list(cluster.order_ids)}
+        return solved
+
+    assignment: dict[str, list[str]] = {}
+    for solved in _queued(attempt, clusters, workers):
         assignment.update(solved)
 
     return _finish(problem, assignment, stagger=stagger, weights=weights)
+
+
+def _queued(attempt, clusters: list[SubProblem], workers: int):
+    """Run `attempt` over the clusters, yielding results in cluster order.
+
+    §7.7's "decomposition sub-problems in a work queue", bounded. Threads
+    rather than processes because every sub-solve goes through PyVRP, which is
+    C++ and releases the GIL -- the measurement `T-86` recorded for the
+    portfolio's pure-Python members does not apply here, and the one this task
+    took is in the backlog row.
+
+    A pool of one runs inline: CON-4's reproducible mode is single-threaded,
+    and a one-worker pool is still a worker thread.
+    """
+    if workers == 1:
+        return [attempt(cluster) for cluster in clusters]
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers,
+                            thread_name_prefix="cluster") as pool:
+        return list(pool.map(attempt, clusters))
 
 
 def _finish(problem: Problem, assignment: dict[str, list[str]], stagger: bool,
@@ -784,7 +830,8 @@ def _finish(problem: Problem, assignment: dict[str, list[str]], stagger: bool,
 
 def solve_decomposed(problem: Problem, target_size: int = 200, seed: int = 0,
                      rounds: int = 3, radius: int = 2,
-                     weights: ObjectiveWeights | None = None) -> Solution:
+                     weights: ObjectiveWeights | None = None,
+                     workers: int = 1) -> Solution:
     """The whole of §7.6: partition, solve, re-optimise, repair, schedule.
 
     Args:
@@ -794,6 +841,8 @@ def solve_decomposed(problem: Problem, target_size: int = 200, seed: int = 0,
         rounds: POPMUSIC seed routes to try.
         radius: neighbouring routes per POPMUSIC sub-problem.
         weights: the canonical objective's weights.
+        workers: §7.7's bounded work queue for the sub-problems. One is CON-4's
+            reproducible mode and the default.
 
     Returns:
         A Solution over the whole instance, scored by the canonical evaluator
@@ -802,7 +851,8 @@ def solve_decomposed(problem: Problem, target_size: int = 200, seed: int = 0,
     weights = weights or ObjectiveWeights()
     clusters = partition(problem, target_size=target_size, seed=seed)
 
-    combined = concatenate(problem, clusters, seed=seed, weights=weights)
+    combined = concatenate(problem, clusters, seed=seed, weights=weights,
+                           workers=workers)
     assignment = {route.vehicle_id:
                   [s.order_id for s in route.steps if s.order_id]
                   for route in combined.routes}
