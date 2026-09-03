@@ -24,6 +24,8 @@ nobody runs is the situation this replaces.
 
 from __future__ import annotations
 
+import ast
+import re
 import subprocess
 from pathlib import Path
 
@@ -175,3 +177,93 @@ def test_every_example_is_indexed_somewhere():
     assert not missing, (
         "these examples appear in no index, so nobody can find them and "
         "nothing says what they are for: " + ", ".join(sorted(missing)))
+
+
+# --------------------------------------------------------------------------
+# The launcher, which is how anybody finds an example in the first place
+# --------------------------------------------------------------------------
+
+MENU_WIDTH = 68
+
+
+def expected_title(path: Path) -> str:
+    """What the menu should call this example.
+
+    The rule, restated here rather than imported: `examples/main.py` cannot be
+    imported by the test suite. It reaches for `config`, which exists only when
+    the examples workspace package is installed, and `make test` runs plain
+    pytest. So the menu is driven as a subprocess -- the way a person drives it
+    -- and this is the rule its output is checked against.
+    """
+    try:
+        first = (ast.get_docstring(ast.parse(path.read_text(encoding="utf-8")))
+                 or "").strip().split("\n")[0].strip()
+    except (OSError, SyntaxError):
+        first = ""
+    if not first:
+        return path.stem.replace("_", " ").title()
+    return first if len(first) <= MENU_WIDTH else first[:MENU_WIDTH - 1] + "…"
+
+
+@pytest.fixture(scope="module")
+def menu() -> list[str]:
+    """The launcher's own output, with stdin closed.
+
+    EOF on the prompt is a supported exit -- `main` catches it and returns
+    zero -- so this drives the real program rather than a fragment of it.
+    """
+    result = subprocess.run(RUNNER + [str(REPO / "examples" / "main.py")],
+                            cwd=REPO, capture_output=True, text=True,
+                            timeout=120, stdin=subprocess.DEVNULL, check=False)
+    assert result.returncode == 0, result.stderr[-800:]
+    return result.stdout.splitlines()
+
+
+def listed(menu: list[str]) -> list[str]:
+    return [m.group(1) for m in
+            (re.match(r"^\s+\d+\.\s(.*)$", line) for line in menu) if m]
+
+
+@pytest.mark.slow
+def test_the_menu_lists_every_example(menu):
+    """The regression this exists for: `discover_examples` walked one level
+    and hid thirty-one of fifty-one examples, every rich-VRP, allocation and
+    dynamic-dispatch one among them. An example nobody can find from the menu
+    is documentation, not a demo."""
+    assert len(listed(menu)) == len(ALL), (
+        f"the menu lists {len(listed(menu))} of {len(ALL)} examples")
+
+
+@pytest.mark.slow
+def test_the_menu_titles_come_from_the_examples_not_the_filenames(menu):
+    """Title-casing the filename gave "Ev Recharging" and "Tw Multiple
+    Windows". Every example states what it shows in its first docstring line,
+    and that is what a person choosing one should read."""
+    assert sorted(listed(menu)) == sorted(expected_title(p) for p in ALL)
+
+
+@pytest.mark.slow
+def test_a_long_title_is_truncated_rather_than_wrapped(menu):
+    """A menu line has to stay inside a terminal or the numbering is lost in
+    the wrap."""
+    assert any(title.endswith("…") for title in listed(menu)), (
+        "nothing was truncated, so this instance cannot show the width rule "
+        "doing anything")
+    assert all(len(line) <= 80 for line in menu), (
+        "a menu line runs past eighty columns: "
+        + next(line for line in menu if len(line) > 80))
+
+
+@pytest.mark.slow
+def test_the_shared_machinery_is_not_offered_as_an_example(menu):
+    """`config.py` and `dataset.py` sit at the top of `src/` and running either
+    does nothing. They are excluded on purpose rather than by the accident of
+    a one-level walk."""
+    titles = listed(menu)
+    for name in ("config.py", "dataset.py"):
+        machinery = EXAMPLES / name
+        # By the title the menu *would* give it, not by its filename: both
+        # carry docstrings, so `"Config" not in titles` was true whether or not
+        # the exclusion worked -- which the perturbation showed.
+        assert expected_title(machinery) not in titles, (
+            f"{name} is offered as an example; running it does nothing")
