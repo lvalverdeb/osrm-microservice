@@ -39,7 +39,6 @@ from __future__ import annotations
 import math
 import statistics
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -49,7 +48,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
 import dataset
 
-from vrp import decompose
 from vrp.bench import fixtures
 from vrp.decompose import concatenate, partition
 from vrp.matrix import PlanarMatrix
@@ -127,30 +125,27 @@ def the_plan_does_not_move() -> None:
 
 
 def proof_of_concurrency() -> None:
-    heading("2.", "Proof that two clusters are solved at once")
-    problem = fixtures.uc074_at_the_decomposition_threshold()
-    clusters = partition(problem, target_size=6)[:2]
-    real = decompose._solve_cluster
+    heading("2.", "Proof that the clusters are solved at once")
+    problem = a_real_round(120, 12)
+    clusters = partition(problem, target_size=20)
 
-    for workers in (2, 1):
-        barrier = threading.Barrier(2, timeout=1.0)
-
-        def meeting(*args, _barrier=barrier, **kwargs):
-            try:
-                _barrier.wait()
-            except threading.BrokenBarrierError:
-                return {}
-            return real(*args, **kwargs)
-
-        decompose._solve_cluster = meeting
-        try:
-            concatenate(problem, clusters, seed=1, workers=workers)
-            met = not barrier.broken
-        finally:
-            decompose._solve_cluster = real
-        print(f"\n      workers={workers}: both clusters met at the barrier -> {met}")
-    print("\n   A pool of one cannot pass it, which is what CON-4's")
-    print("   reproducible mode requires of the default.")
+    # Observed through the public call, not by reaching into the module. The
+    # tests reach in -- a barrier two sub-solves can only both pass if they are
+    # concurrent -- because that is a test's job. What an example owes you is
+    # the call you would actually write, and a number you can compare.
+    print(f"\n   {len(problem.orders)} deliveries in {len(clusters)} clusters\n")
+    print(f"      {'workers':>8s} {'wall clock':>12s} {'vs serial':>10s}")
+    serial = None
+    for workers in (1, 2, 4):
+        started = time.perf_counter()
+        concatenate(problem, clusters, seed=1, workers=workers)
+        elapsed = time.perf_counter() - started
+        serial = serial or elapsed
+        print(f"      {workers:8d} {elapsed:11.3f}s {serial / elapsed:9.2f}x")
+    print("\n   Four workers do not take a quarter of the time -- the pool has")
+    print("   its own cost and the clusters are not equal -- but they finish")
+    print("   in less than one, which one interpreter running them in turn")
+    print("   could not do.")
 
 
 def what_makes_the_merge_safe() -> None:

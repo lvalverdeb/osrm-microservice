@@ -62,8 +62,8 @@ from vrp.model import (
     Vehicle,
     travel_between,
 )
-from vrp.polish import MAX_DP_STOPS, _floor, tsptw_sequence
-from vrp.timedependent import SpeedProfile
+from vrp.polish import MAX_DP_STOPS, tsptw_sequence
+from vrp.timedependent import SpeedProfile, fastest_possible
 
 HOUR = 3600
 DEADLINE = 11 * HOUR
@@ -157,7 +157,10 @@ def the_filter() -> None:
     span = range(7 * HOUR, 20 * HOUR, 1800)
     print("\n   arc D->C5 priced at each departure, against the bound:\n")
     print(f"      {'depart':8s} {'costs':>8s} {'bound':>8s}   bound holds")
-    bound = _floor(problem, 0, 5)
+    # `fastest_possible` is the public form of what the DP prunes on: the arc
+    # at the best speed the profile ever offers. If you are writing your own
+    # filter over a profile, this is the function to build it from.
+    bound = fastest_possible(problem.matrix.duration(0, 5), problem.speed_profile)
     for depart in list(span)[:8]:
         exact = travel_between(problem, 0, 5, depart)
         print(f"      {clock(depart):8s} {exact // 60:5d} min {bound // 60:5d} min"
