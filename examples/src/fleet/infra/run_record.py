@@ -39,16 +39,30 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.bench import fixtures
 from vrp.lns import lns_search, plan_cost
-from vrp.matrix import PairCache
-from vrp.model import Route, Solution, Step
+from vrp.matrix import PairCache, PlanarMatrix
+from vrp.model import (
+    Location,
+    Order,
+    Problem,
+    Route,
+    Solution,
+    Step,
+    StopSpec,
+    TimeWindow,
+    Vehicle,
+)
 from vrp.observe import NFR_06_FIELDS, Recorder
 from vrp.verify import verify
 
@@ -57,11 +71,51 @@ SEED = 4
 
 
 def a_round():
-    problem = fixtures.uc075_delivery_station_sequencing()
+    """A real day's deliveries, as one long route for the search to improve."""
+    problem = a_real_round(stops=40, vans=4)
     index = {location.id: location.matrix_index for location in problem.locations}
     stops = [index[(order.delivery or order.pickup).location_id]
              for order in problem.orders]
     return problem, [stops]
+
+
+
+def a_real_round(stops: int, vans: int) -> Problem:
+    """A day of real deliveries around one depot, priced planar.
+
+    Real coordinates rather than a fixture: the timings below are about how
+    much work a member is, and real stops cluster along roads and around towns
+    in a way a uniform scatter does not.
+    """
+    corpus = dataset.load(dataset.DEFAULT_PATH)
+    deliveries, depot = corpus.nearest(stops)
+    day = TimeWindow(start=0, end=14 * 3600)
+
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    coords = [(0.0, 0.0)] + [
+        ((d["longitude"] - depot["longitude"]) * lon_km,
+         (d["latitude"] - depot["latitude"]) * lat_km) for d in deliveries]
+
+    heaviest = max((d["units"] for d in deliveries), default=1)
+    return Problem(
+        id=f"real-{stops}",
+        locations=(Location(id="D", lat=depot["latitude"],
+                            lon=depot["longitude"], matrix_index=0),) + tuple(
+            Location(id=d["product_id"], lat=d["latitude"], lon=d["longitude"],
+                     matrix_index=i + 1)
+            for i, d in enumerate(deliveries)),
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"units": d["units"]},
+                  delivery=StopSpec(location_id=d["product_id"],
+                                    time_windows=(day,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
+        vehicles=tuple(
+            Vehicle(id=f"V{n}", capacities={"units": heaviest * 30}, shift=day,
+                    start_location_id="D", end_location_id="D")
+            for n in range(1, vans + 1)),
+        matrix=PlanarMatrix(version="real-v1", coordinates=tuple(coords)))
 
 
 def heading(number: str, title: str) -> None:

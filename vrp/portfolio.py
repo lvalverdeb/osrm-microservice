@@ -119,8 +119,9 @@ def _solved(problem: Problem, engines: list[Portfolio], workers: int,
     **Threads, so §7.7's "separate cores" holds for some engines and not
     others.** PyVRP and OR-Tools are C++ and release the GIL while they solve,
     and they do scale: four members of a portfolio on a 24-stop instance
-    measured 2.97x at four workers. The repository's own LNS is pure Python and
-    measured **1.00x** -- four threads taking turns at one interpreter. That is
+    measured 3.13x at four workers on a real round. The repository's own LNS is
+    pure Python and measured **1.00x** -- four threads taking turns at one
+    interpreter. That is
     a property of the engine rather than of this function, and pretending
     otherwise would have somebody sizing a box on a speed-up that only half the
     portfolio can have. Process-based parallelism is what would fix it, and is
@@ -163,7 +164,7 @@ def _in_processes(problem: Problem, engines: list[Portfolio], workers: int
     """The same run, on separate interpreters. NFR-05, §7.7, T-91.
 
     Worth it only for an engine that holds the GIL, and measurably so: the
-    repository's own LNS went from 1.02x across four threads to 3.38x across
+    repository's own LNS went from 0.99x across four threads to 3.32x across
     four processes. PyVRP is already parallel in threads and gains nothing here
     but the spawn cost.
 
@@ -239,9 +240,9 @@ def run_portfolio(problem: Problem, engines: list[Portfolio],
             tests", and is the default because a library that parallelised
             unasked would make every existing caller's run non-reproducible.
         executor: "thread" or "process". Threads give separate cores only to
-            engines that release the GIL: `T-86` measured 3.00x for PyVRP and
+            engines that release the GIL: `T-86` measured 3.13x for PyVRP and
             1.00x for the repository's own pure-Python LNS. Processes give them
-            to everything -- 3.38x for that same LNS -- at the cost of two
+            to everything -- 3.32x for that same LNS -- at the cost of two
             constraints named under `UnsendableEngine` and in `T-91`'s row.
             "thread" is the default because it imposes neither.
 

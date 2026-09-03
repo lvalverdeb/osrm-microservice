@@ -23,9 +23,11 @@ Four things, in order:
 
 3. **A refusal, when there is no room.** Not a very large number.
 
-4. **The latency, measured** — NFR-02's clause, on a fleet worth the name.
+4. **The latency, measured** — NFR-02's clause, on a real day's work: four
+   hundred Costa Rica deliveries across forty vans.
 
-Runs offline.
+Runs offline. No gateway required: the matrix is planar over real
+coordinates.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -34,14 +36,19 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.evaluator import ObjectiveWeights, evaluate
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
@@ -77,6 +84,45 @@ def a_round(stops: int = 12, vans: int = 4, capacity: int = 100,
                                end_location_id="D", cost_per_metre=1)
                        for n in range(1, vans + 1)),
         matrix=TravelMatrix(version="q", durations=grid, distances=grid))
+
+
+def a_real_day(stops: int, vans: int) -> Problem:
+    """A day of real deliveries around one depot, priced planar.
+
+    Real geography rather than stops on a line. The synthetic version of this
+    needed its legs shortened to four seconds before a four-hundredth stop was
+    reachable inside a shift at all -- a fudge that says more about the
+    generator than about quoting, and one a real catchment does not need.
+    """
+    corpus = dataset.load(dataset.DEFAULT_PATH)
+    deliveries, depot = corpus.nearest(stops)
+
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    coords = [(0.0, 0.0)] + [
+        ((d["longitude"] - depot["longitude"]) * lon_km,
+         (d["latitude"] - depot["latitude"]) * lat_km) for d in deliveries]
+
+    heaviest = max((d["units"] for d in deliveries), default=1)
+    return Problem(
+        id=f"real-{stops}",
+        locations=(Location(id="D", lat=depot["latitude"],
+                            lon=depot["longitude"], matrix_index=0),) + tuple(
+            Location(id=d["product_id"], lat=d["latitude"], lon=d["longitude"],
+                     matrix_index=i + 1)
+            for i, d in enumerate(deliveries)),
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"units": d["units"]},
+                  delivery=StopSpec(location_id=d["product_id"],
+                                    time_windows=(DAY,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
+        vehicles=tuple(
+            Vehicle(id=f"V{n}", capacities={"units": heaviest * 30}, shift=DAY,
+                    start_location_id="D", end_location_id="D",
+                    cost_per_metre=1)
+            for n in range(1, vans + 1)),
+        matrix=PlanarMatrix(version="real-v1", coordinates=tuple(coords)))
 
 
 def spread(problem: Problem, vans: int, reserve: int = 1) -> dict:
@@ -160,7 +206,7 @@ def and_a_saving() -> None:
     print(f"\n   dropping {victim} from {saving.vehicle_id}: "
           f"{saving.price:,} ({saving.route})")
 
-    big = a_round(stops=400, vans=40, leg=4)
+    big = a_real_day(stops=400, vans=40)
     plan = spread(big, vans=40)
     timings = []
     for _ in range(20):
@@ -169,8 +215,8 @@ def and_a_saving() -> None:
         timings.append(time.monotonic() - started)
     timings.sort()
     p95 = timings[int(len(timings) * 0.95) - 1]
-    print(f"\n   {len(big.orders)} stops across {len(big.vehicles)} vans, "
-          f"20 quotes:")
+    print(f"\n   {len(big.orders)} real deliveries across "
+          f"{len(big.vehicles)} vans, 20 quotes:")
     print(f"      p95 {p95 * 1000:.0f} ms   worst {max(timings) * 1000:.0f} ms"
           f"   budget {2000} ms")
 
