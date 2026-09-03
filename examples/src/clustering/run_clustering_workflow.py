@@ -1,9 +1,16 @@
 import json
-import random
+import sys
+from functools import lru_cache
+from pathlib import Path
 
 import folium
 import requests
 from config import settings
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 # Configuration
 API_URL = settings.OSRM_API_URL
@@ -15,140 +22,71 @@ PAYLOAD_FILE = f"{OUTPUT_DIR}/clustering_payload.json"
 # See docs/configuration.md; raise both together if you need a bigger run.
 MAX_STOPS = 2000
 
-# Core Warehouse Configuration (6 Depots)
-WAREHOUSES = [
-    {"name": "Guadalupe (San Jose)", "latitude": 9.9472, "longitude": -84.0531},
-    {"name": "Grecia (Alajuela)", "latitude": 10.0734, "longitude": -84.3121},
-    {"name": "Guapiles (Limon)", "latitude": 10.2128, "longitude": -83.7847},
-    {"name": "San Carlos (Alajuela North)", "latitude": 10.3228, "longitude": -84.4253},
-    {"name": "Liberia (Guanacaste)", "latitude": 10.6333, "longitude": -85.5333},
-    {"name": "Perez Zeledon (San Jose South)", "latitude": 9.3734, "longitude": -83.7029},
-]
+# The depots, the districts and the country outline all used to be written out
+# here: six hard-coded warehouses, a fifty-entry table of province hubs, and a
+# ray-casting polygon to reject points that fell in the sea. The corpus has all
+# three -- the same six depots, 50,000 deliveries already snapped to roads, and
+# each one's province and hub -- so none of it needs restating and nothing can
+# land offshore.
 
-# Expanded Province-District Coordinates Hubs
-PROVINCES_HUBS = {
-    "San Jose": [
-        {"name": "San Jose Central", "latitude": 9.9333, "longitude": -84.0833, "valle_central": True},
-        {"name": "Escazu", "latitude": 9.9200, "longitude": -84.1400, "valle_central": True},
-        {"name": "Desamparados", "latitude": 9.8900, "longitude": -84.0600, "valle_central": True},
-        {"name": "Santa Ana", "latitude": 9.9300, "longitude": -84.1800, "valle_central": True},
-        {"name": "Perez Zeledon", "latitude": 9.3734, "longitude": -83.7029, "valle_central": False},
-        {"name": "Puriscal", "latitude": 9.8500, "longitude": -84.3200, "valle_central": False},
-    ],
-    "Alajuela": [
-        {"name": "Alajuela Central", "latitude": 10.0163, "longitude": -84.2139, "valle_central": True},
-        {"name": "Grecia", "latitude": 10.0734, "longitude": -84.3121, "valle_central": True},
-        {"name": "San Ramon", "latitude": 10.0800, "longitude": -84.4700, "valle_central": True},
-        {"name": "San Carlos", "latitude": 10.3228, "longitude": -84.4253, "valle_central": False},
-        {"name": "Upala", "latitude": 10.8833, "longitude": -85.0167, "valle_central": False},
-    ],
-    "Cartago": [
-        {"name": "Cartago Central", "latitude": 9.8644, "longitude": -83.9194, "valle_central": True},
-        {"name": "Paraiso", "latitude": 9.8378, "longitude": -83.8656, "valle_central": True},
-        {"name": "La Union", "latitude": 9.9100, "longitude": -83.9800, "valle_central": True},
-        {"name": "Turrialba", "latitude": 9.9048, "longitude": -83.6841, "valle_central": False},
-    ],
-    "Heredia": [
-        {"name": "Heredia Central", "latitude": 9.9982, "longitude": -84.1167, "valle_central": True},
-        {"name": "San Rafael", "latitude": 10.0100, "longitude": -84.1000, "valle_central": True},
-        {"name": "Belen", "latitude": 9.9833, "longitude": -84.1833, "valle_central": True},
-        {"name": "Sarapiqui", "latitude": 10.4503, "longitude": -84.0089, "valle_central": False},
-    ],
-    "Guanacaste": [
-        {"name": "Liberia", "latitude": 10.6350, "longitude": -85.4407, "valle_central": False},
-        {"name": "Canas", "latitude": 10.4310, "longitude": -85.0931, "valle_central": False},
-        {"name": "Nicoya", "latitude": 10.1500, "longitude": -85.4500, "valle_central": False},
-        {"name": "Santa Cruz", "latitude": 10.2611, "longitude": -85.5847, "valle_central": False},
-    ],
-    "Puntarenas": [
-        {"name": "Puntarenas Central", "latitude": 9.9763, "longitude": -84.8384, "valle_central": False},
-        {"name": "Esparza", "latitude": 9.9912, "longitude": -84.6647, "valle_central": False},
-        {"name": "Jaco", "latitude": 9.6144, "longitude": -84.6289, "valle_central": False},
-        {"name": "Quepos", "latitude": 9.4300, "longitude": -84.1600, "valle_central": False},
-    ],
-    "Limon": [
-        {"name": "Limon Centre", "latitude": 9.9913, "longitude": -83.0415, "valle_central": False},
-        {"name": "Guapiles", "latitude": 10.2128, "longitude": -83.7847, "valle_central": False},
-        {"name": "Siquirres", "latitude": 10.1000, "longitude": -83.5000, "valle_central": False},
-        {"name": "Bribri", "latitude": 9.6200, "longitude": -82.8500, "valle_central": False},
-    ]
-}
+@lru_cache(maxsize=1)
+def depot_names() -> tuple[str, ...]:
+    """The depots' names, in payload order, for labelling the map.
 
-def is_in_costa_rica(lat, lon):
-    """Precise ray casting algorithm for Costa Rica mainland."""
-    poly = [
-        (11.217, -85.1), (11.0, -83.6), (10.2, -82.7), 
-        (9.5, -82.55), (8.1, -82.8), (8.046, -83.3), 
-        (8.4, -83.8), (10.2, -85.94), (11.1, -85.8)
-    ]
-    n = len(poly)
-    inside = False
-    px, py = lon, lat
-    p1x, p1y = poly[0][1], poly[0][0]
-    for i in range(n + 1):
-        p2x, p2y = poly[i % n][1], poly[i % n][0]
-        if min(p1y, p2y) < py <= max(p1y, p2y) and px <= max(p1x, p2x):
-            if p1y != p2y:
-                xints = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-            if p1x == p2x or px <= xints:
-                inside = not inside
-        p1x, p1y = p2x, p2y
-    return inside
+    The `/vrp` payload carries coordinates only, so the names come from the
+    corpus rather than from a copy of them kept beside it.
+    """
+    return tuple(d["name"] for d in dataset.load().depots)
+
 
 def generate_payload(total_stops=MAX_STOPS):
-    """Generate stops with a 60/40 Valle Central distribution and precision snapping."""
-    depots = [{"latitude": w["latitude"], "longitude": w["longitude"]} for w in WAREHOUSES]
-    
-    stops = []
-    metadata = []
-    
-    valle_hubs = []
-    rest_hubs = []
-    
-    for prov, hubs in PROVINCES_HUBS.items():
-        for hub in hubs:
-            h = hub.copy()
-            h["province"] = prov
-            if hub.get("valle_central"):
-                valle_hubs.append(h)
-            else:
-                rest_hubs.append(h)
-                
-    valle_target = int(total_stops * 0.6)
-    rest_target = total_stops - valle_target
-    
-    print(f"Generating {valle_target} stops for Valle Central districts...")
-    while len(stops) < valle_target:
-        hub = random.choice(valle_hubs)
-        # Tight offset (approx 1km) to ensure road snapping
-        lat = hub["latitude"] + random.uniform(-0.01, 0.01)
-        lon = hub["longitude"] + random.uniform(-0.01, 0.01)
-        if is_in_costa_rica(lat, lon):
-            stop_id = f"VC-{len(stops):04d}"
-            stops.append({"id": stop_id, "latitude": lat, "longitude": lon})
-            metadata.append({"id": stop_id, "province": hub["province"], "district": hub["name"], "zone": "Valle Central"})
-        
-    print(f"Generating {rest_target} stops for Rest of Country districts...")
-    while len(stops) < total_stops:
-        hub = random.choice(rest_hubs)
-        # Offset ~2km for rural areas
-        lat = hub["latitude"] + random.uniform(-0.02, 0.02)
-        lon = hub["longitude"] + random.uniform(-0.02, 0.02)
-        if is_in_costa_rica(lat, lon):
-            stop_id = f"RC-{len(stops):04d}"
-            stops.append({"id": stop_id, "latitude": lat, "longitude": lon})
-            metadata.append({"id": stop_id, "province": hub["province"], "district": hub["name"], "zone": "Rest of Country"})
-        
-    payload = {
-        "depots": depots,
-        "stops": stops,
-        #"capacity": 35
-    }
-    
+    """Real deliveries spread across every depot, in the shape `/vrp` expects.
+
+    Args:
+        total_stops: How many deliveries to take, shared across the depots.
+
+    Returns:
+        `(payload, metadata)`. The metadata carries each stop's province, hub
+        and whether it is in the Greater Metropolitan Area -- the corpus's own
+        `gam` flag, which is what the old "Valle Central" split was reaching
+        for when it generated 60% of its stops around a list of hubs.
+
+    `contested` rather than `around_each_depot`, and the difference is the
+    whole example. Taking each depot's nearest share gives a payload where
+    every stop is already nearest the depot that will get it: both clustering
+    modes then return exactly 333 stops each and agree on every one of them,
+    so a comparison of road distance against travel time compares nothing.
+    These are the stops between depots, and the two modes disagree about
+    roughly one in sixteen of them.
+    """
+    corpus = dataset.load()
+    deliveries, depots = corpus.contested(total_stops)
+
+    stops, metadata = [], []
+    for delivery in deliveries:
+        stops.append({"id": delivery["product_id"],
+                      "latitude": delivery["latitude"],
+                      "longitude": delivery["longitude"]})
+        metadata.append({
+            "id": delivery["product_id"], "province": delivery["province"],
+            "district": delivery["hub"],
+            "zone": "Valle Central" if delivery["gam"] else "Rest of Country"})
+
+    inside = sum(1 for m in metadata if m["zone"] == "Valle Central")
+    print(f"{len(stops)} real deliveries across {len(depots)} depots: "
+          f"{inside} in the Valle Central, {len(stops) - inside} outside "
+          f"({inside / max(len(stops), 1):.0%}/"
+          f"{1 - inside / max(len(stops), 1):.0%}).")
+    print("That split is the corpus's, not a target -- the old generator aimed "
+          "for 60/40 and got it by construction.")
+
+    payload = {"depots": [{"latitude": d["latitude"],
+                           "longitude": d["longitude"]} for d in depots],
+               "stops": stops}
     with open(PAYLOAD_FILE, "w") as f:
         json.dump(payload, f, indent=2)
-    
     return payload, metadata
+
 
 def run_clustering(payload, mode="road", hysteresis=2000.0):
     """Send request to the /vrp/allocate endpoint."""
@@ -174,7 +112,7 @@ def visualize_results(payload, results, output_file):
     colors = ['blue', 'green', 'red', 'purple', 'orange', 'darkred']
     
     for i, depot in enumerate(payload["depots"]):
-        name = WAREHOUSES[i]['name']
+        name = depot_names()[i]
         folium.Marker(
             [depot["latitude"], depot["longitude"]],
             popup=f"Warehouse: {name}",

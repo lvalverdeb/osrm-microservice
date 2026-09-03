@@ -87,6 +87,27 @@ def great_circle_metres(a: tuple[float, float], b: tuple[float, float]) -> int:
     return round(6_371_000 * 2 * math.asin(math.sqrt(h)))
 
 
+def contest_ppt(delivery: dict[str, Any],
+                depots: list[dict[str, Any]]) -> int:
+    """How evenly two depots could claim a delivery, in parts per thousand.
+
+    Args:
+        delivery: The delivery to judge.
+        depots: Every depot in the fleet.
+
+    Returns:
+        The second-nearest depot's distance over the nearest one's, x1000.
+        `1000` means the two are equidistant and either could serve it; a large
+        number means the nearest depot is the obvious one.
+
+    Integer, so the ranking is stable and a slice of the corpus reproduces it.
+    """
+    origin = (delivery["latitude"], delivery["longitude"])
+    metres = sorted(great_circle_metres(origin, (d["latitude"], d["longitude"]))
+                    for d in depots)
+    return metres[1] * 1000 // max(metres[0], 1)
+
+
 def _square_degrees(delivery: dict[str, Any], depot: dict[str, Any]) -> float:
     """Squared degree distance from a delivery to a depot, for ranking only."""
     return ((delivery["latitude"] - depot["latitude"]) ** 2
@@ -198,6 +219,30 @@ class Dataset:
         near = ranked[:max(stops - outliers, 1)]
         far = ranked[-outliers:] if outliers else []
         return near + far, home
+
+    def contested(self, stops: int
+                  ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The deliveries two depots could each reasonably claim.
+
+        Args:
+            stops: How many deliveries to take.
+
+        Returns:
+            The most contested deliveries, and every depot.
+
+        The shape is the point, as with `cluster_with_outliers`. A round taken
+        from each depot's own doorstep -- which is what `around_each_depot`
+        gives -- has no allocation decision in it: every stop is nearest the
+        depot that was going to get it, and two clustering modes that disagree
+        about nothing look identical. These are the stops that sit between
+        depots, where the answer depends on which question you asked.
+
+        In this corpus they are about an eighth of the whole, and they are in
+        the towns you would guess: Belen, Esparza, Alajuela Central, Jaco.
+        """
+        ranked = sorted(self.deliveries,
+                        key=lambda d: contest_ppt(d, self.depots))
+        return ranked[:stops], self.depots
 
     def spread(self, stops: int, pool: int = 2_000,
                depot: dict[str, Any] | None = None

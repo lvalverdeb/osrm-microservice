@@ -79,6 +79,11 @@ rust-spike/target/
 # (comparison_map.html, simple_vrp_map.html) and churned whenever anyone ran the
 # examples.
 examples/**/*.html
+# The clustering payloads are written by the examples that post them, and are
+# now derived from the committed corpus slice rather than from `random`. They
+# used to be tracked, and every run of an example rewrote them.
+examples/src/clustering/clustering_payload.json
+examples/src/clustering/stress_test_payload.json
 # match_example.py is the only script that writes to the working directory
 # rather than beside itself, so it lands at the repository root. Named
 # explicitly rather than matching /*.html, which would silently swallow any

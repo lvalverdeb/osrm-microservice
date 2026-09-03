@@ -1,41 +1,49 @@
-import random
+import sys
+from pathlib import Path
 
 import folium
 import requests
 from config import settings
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
+
 # Configuration
 API_URL = settings.OSRM_API_URL
 OUTPUT_FILE = "examples/src/clustering/simple_vrp_map.html"
 
-def generate_multi_vehicle_data(num_depots=10, stops_per_depot=30):
-    """Generate sample data for a larger-scale VRP simulation."""
-    # Center around San José, Costa Rica
-    base_lat, base_lon = 9.9281, -84.0907
-    
-    depots = []
-    for i in range(num_depots):
-        depots.append({
-            "id": f"DEPOT-{i}",
-            "latitude": base_lat + random.uniform(-0.05, 0.05),
-            "longitude": base_lon + random.uniform(-0.05, 0.05)
-        })
-        
-    stops = []
-    for i in range(num_depots * stops_per_depot):
-        stops.append({
-            "id": f"ORD-{1000 + i}",
-            "latitude": base_lat + random.uniform(-0.1, 0.1),
-            "longitude": base_lon + random.uniform(-0.1, 0.1)
-        })
-        
-    return depots, stops
+def generate_multi_vehicle_data(stops=300):
+    """Real depots and a share of the work near each.
+
+    Args:
+        stops: How many deliveries to take, shared across the depots.
+
+    Returns:
+        `(depots, stops)` in the shape `/vrp` expects, with the corpus's own
+        delivery ids so the response's `stop_ids` can be looked back up.
+
+    Both used to be `random.uniform` offsets around San Jose -- ten depots that
+    were not the fleet's and stops that were not deliveries. The corpus has six
+    real depots and the work around them, which is also why the vehicle count
+    below is whatever capacity implies rather than a number chosen in advance.
+    """
+    corpus = dataset.load()
+    deliveries, warehouses = corpus.around_each_depot(stops)
+    depots = [{"id": f"DEPOT-{i}", "latitude": d["latitude"],
+               "longitude": d["longitude"]}
+              for i, d in enumerate(warehouses)]
+    stops_out = [{"id": d["product_id"], "latitude": d["latitude"],
+                  "longitude": d["longitude"]} for d in deliveries]
+    return depots, stops_out
+
 
 def run_enhanced_vrp_demo():
-    """Run a 10-vehicle VRP simulation and generate a map visualization."""
+    """Run a multi-depot VRP over real deliveries and map the result."""
     
-    print("--- Generating 10-Vehicle VRP Simulation Data ---")
-    depots, stops = generate_multi_vehicle_data(num_depots=10, stops_per_depot=30)
+    print("--- Building the run from the delivery corpus ---")
+    depots, stops = generate_multi_vehicle_data()
     
     payload = {
         "depots": depots,

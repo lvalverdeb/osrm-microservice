@@ -1,41 +1,67 @@
+"""The payload the other clustering examples post, built from the real corpus.
+
+Writes `stress_test_payload.json`: the six depots the fleet actually runs from
+and a share of real deliveries near each, in the shape `/vrp` expects.
+
+It used to invent both. The depots were six hard-coded pairs of coordinates --
+the same six, copied -- and the stops were `random.uniform` offsets around
+them, unseeded, so every run produced a different file and the committed
+payload changed whenever anybody executed an example. The corpus has the depots
+and 50,000 road-snapped deliveries, so none of that needed inventing and none
+of it needed committing.
+
+Usage:
+    uv run --package osrm-api-gateway-examples \\
+        examples/src/clustering/generate_payload.py
+"""
+
+from __future__ import annotations
+
 import json
-import random
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
+
+OUTPUT = PROJECT_ROOT / "examples" / "src" / "clustering" / "stress_test_payload.json"
+STOPS = 50
+CAPACITY = 35
 
 
-def generate_example_payload():
-    # Warehouses
-    depots = [
-        {"latitude": 9.9469, "longitude": -84.0558},    # Guadalupe
-        {"latitude": 10.0734, "longitude": -84.3121},   # Grecia
-        {"latitude": 10.2128, "longitude": -83.7847},   # Guapiles
-        {"latitude": 10.3228, "longitude": -84.4253},   # San Carlos
-        {"latitude": 10.6333, "longitude": -85.5333},   # Liberia
-        {"latitude": 9.3734, "longitude": -83.7029},    # Perez Zeledon
-    ]
-    
-    # Generate 50 stops near these warehouses
-    stops = []
-    for i in range(50):
-        base = random.choice(depots)
-        # Random offset within approx ~10km (0.1 decimal degrees is roughly 11km)
-        lat = base["latitude"] + random.uniform(-0.05, 0.05)
-        lon = base["longitude"] + random.uniform(-0.05, 0.05)
-        stops.append({
-            "id": f"S-{1000 + i}",
-            "latitude": lat,
-            "longitude": lon
-        })
-        
-    payload = {
-        "depots": depots,
-        "stops": stops,
-        "capacity": 35
-        # max_radius_km removed to allow global road-distance clustering
+def build(stops: int = STOPS) -> dict:
+    """A `/vrp` payload over real depots and real deliveries.
+
+    Args:
+        stops: How many deliveries to take, shared across the depots.
+
+    Returns:
+        The payload: every depot, a share of the work near each, and a vehicle
+        capacity. No `max_radius_km`, so clustering is global.
+    """
+    corpus = dataset.load()
+    deliveries, depots = corpus.around_each_depot(stops)
+    return {
+        "depots": [{"latitude": d["latitude"], "longitude": d["longitude"]}
+                   for d in depots],
+        "stops": [{"id": d["product_id"], "latitude": d["latitude"],
+                   "longitude": d["longitude"]} for d in deliveries],
+        "capacity": CAPACITY,
     }
-    
-    with open("examples/src/clustering/stress_test_payload.json", "w") as f:
-        json.dump(payload, f, indent=2)
-    print("Generated examples/src/clustering/stress_test_payload.json with 6 depots and 50 stops.")
+
+
+def main() -> int:
+    payload = build()
+    OUTPUT.write_text(json.dumps(payload, indent=2))
+    print(f"Wrote {OUTPUT.relative_to(PROJECT_ROOT)}: "
+          f"{len(payload['depots'])} depots, {len(payload['stops'])} stops, "
+          f"capacity {payload['capacity']}.")
+    print("Deterministic: the same corpus gives the same file, so this is an "
+          "artifact rather than something to commit.")
+    return 0
+
 
 if __name__ == "__main__":
-    generate_example_payload()
+    raise SystemExit(main())

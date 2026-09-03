@@ -137,8 +137,8 @@ These call the gateway rather than the library, and need one running.
 | `infra/health_and_metrics.py` | `/health`, `/ready` and the Prometheus scrape |
 | `fleet/clustering_mode_comparison.py` | the clustering modes, side by side |
 | `fleet/hysteresis_demo.py` | the hysteresis band that stops a stop flapping between depots |
-| `clustering/run_clustering_workflow.py` | a clustering request end to end |
-| `clustering/simple_id_example.py` | custom stop identifiers through the API |
+| `clustering/run_clustering_workflow.py` | road distance against travel time, on the 2,000 deliveries two depots could each claim |
+| `clustering/simple_id_example.py` | custom stop identifiers through the API, using the corpus's own delivery ids |
 
 ## Benchmarks and tools
 
@@ -154,7 +154,7 @@ reader looking for "how do I use this" does not have to sift them out.
 | `fleet/stress_test_vrp.py` | drives the VRP endpoint at volume |
 | `fleet/visualize_vrp.py` | renders a plan to an HTML map |
 | `routing/visualize_routes.py` | renders routes to an HTML map |
-| `clustering/generate_payload.py` | builds a clustering request payload |
+| `clustering/generate_payload.py` | builds a clustering payload from the corpus — deterministic, so it is an artifact rather than a commit |
 | `benchmarking/compare_tsp.py` | compares TSP results across engines |
 
 ---

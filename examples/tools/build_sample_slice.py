@@ -21,6 +21,17 @@ Both are real limits rather than bugs -- the examples' own defaults stay inside
 the contract, and an example that needs more should be added to `MANIFEST` and
 the slice rebuilt.
 
+`contested(2_000)` is the expensive entry and is here deliberately. Stops that
+sit *between* depots share nothing with the neighbourhoods the rest of the
+manifest keeps, so it adds about 800 KB on its own. Leaving it out was the
+first plan, on the reasoning that the example needs a gateway anyway and would
+"degrade gracefully" to the slice's own most-contested stops. That reasoning
+was wrong and measuring it said so: without the entry the slice holds 64
+genuinely contested deliveries against the corpus's 6,470, so a 2,000-stop
+`contested` call returns 97% stops no depot is competing for -- which is
+exactly the allocation-with-no-decision the selection exists to avoid. An
+example that quietly demonstrates nothing is worse than a larger artifact.
+
 Usage:
     uv run python examples/tools/build_sample_slice.py
 """
@@ -57,6 +68,11 @@ SPREAD_POOL = 2_000
 # `SPREAD_POOL` changes is a property worth keeping.
 MANIFEST: tuple[tuple[str, tuple[Any, ...], dict[str, Any]], ...] = (
     ("around_each_depot", (24,), {}),
+    # The two smaller clustering payloads.
+    ("around_each_depot", (300,), {}),
+    # The clustering workflow's stress run: the stops two depots could each
+    # claim. Worth its ~800 KB -- see the module docstring.
+    ("contested", (2_000,), {}),
     ("cluster_with_outliers", (20, 2), {}),
     ("furthest", (3,), {}),
     ("furthest", (8,), {}),
@@ -149,10 +165,33 @@ def needed_for(corpus: dataset.Dataset, strategy: str, args: tuple,
         outliers = args[1]
         return ranked[:max(count - outliers, 1)] + (ranked[-outliers:]
                                                     if outliers else [])
+    if strategy == "contested":
+        return sorted(corpus.deliveries,
+                      key=lambda d: dataset.contest_ppt(d, corpus.depots))[:count]
     if strategy == "around_each_depot":
+        # Walk the selection rather than bound it. `Dataset.around_each_depot`
+        # takes `stops // depots` from each depot, skipping what an earlier
+        # depot already claimed, so the rank each depot reaches depends on that
+        # overlap. Assuming the worst case -- `count` from every depot -- costs
+        # six times the deliveries and, at the 2,000 the clustering workflow
+        # asks for, would have put 12,000 of them in a committed artifact that
+        # needs 1,998.
+        per_depot = max(1, count // len(corpus.depots))
         keep: list[dict[str, Any]] = []
+        taken: set[str] = set()
         for each in corpus.depots:
-            keep += _ranked_by_degrees(corpus, each)[:count]
+            ranked = _ranked_by_degrees(corpus, each)
+            got, reached = 0, 0
+            for position, delivery in enumerate(ranked):
+                if delivery["product_id"] in taken:
+                    continue
+                taken.add(delivery["product_id"])
+                got, reached = got + 1, position
+                if got == per_depot:
+                    break
+            # Everything ranked above the last one taken, or the slice ranks a
+            # different delivery into that position.
+            keep += ranked[:reached + 1]
         return keep
     raise ValueError(f"the slice cannot underwrite {strategy!r}")
 
