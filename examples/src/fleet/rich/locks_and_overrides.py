@@ -49,10 +49,12 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.locks import is_feasible_under_locks, minimal_conflict
 from vrp.model import (
-    Location,
     Lock,
     Order,
     Problem,
@@ -61,37 +63,57 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
+    service_time,
 )
 from vrp.verify import verify
 
 DAY = TimeWindow(start=0, end=12 * 3600)
 
 
+# Twelve real deliveries around the Guadalupe depot; a section takes as many
+# as it needs. Quantities are the corpus's own parcel counts, so a lock that
+# conflicts with capacity conflicts with a real load.
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.planar_sites(
+    12, "spread", "locks")
+
+# FREEZE_UNTIL's honoured case needs a freeze that has expired by the time the
+# van reaches its first stop, so the instant has to come from the geometry.
+# Hard-coding it does not survive contact with real distances: 100 seconds was
+# comfortably inside a 600-second invented leg and comfortably outside C1,
+# which the corpus puts nine seconds from the depot.
+FROZEN_UNTIL = MATRIX.duration(0, 2) // 2
+
+
 def instance(locks: tuple[Lock, ...] = (), stops: int = 3, vans: int = 2,
              capacity: int = 100, weights: tuple[int, ...] = ()) -> Problem:
-    size = stops + 1
-    locations = tuple(
-        Location(id="D" if i == 0 else f"C{i}", lat=9.9 + i / 1000, lon=-84.0,
-                 matrix_index=i)
-        for i in range(size))
-    grid = tuple(tuple(abs(i - j) * 600 for j in range(size))
-                 for i in range(size))
+    """The instance, over as many of the real sites as a section needs.
+
+    Args:
+        locks: The operator instructions under test.
+        stops: How many deliveries to expose.
+        vans: How many vehicles.
+        capacity: Parcel capacity per vehicle.
+        weights: Overrides the corpus quantities, for the one section whose
+            subject is an infeasibility capacity causes rather than a lock.
+
+    Returns:
+        The instance.
+    """
     orders = tuple(
         Order(id=f"O{i}", kind="JOB",
-              quantities={"kg": weights[i - 1] if weights else 1},
-              delivery=StopSpec(location_id=f"C{i}", time_windows=(DAY,),
-                                service_fixed=60))
-        for i in range(1, size))
+              quantities={"parcels": weights[i - 1] if weights
+                          else DELIVERIES[i - 1]["units"]},
+              delivery=StopSpec(
+                  location_id=f"C{i}", time_windows=(DAY,),
+                  service_fixed=DELIVERIES[i - 1]["service_minutes"] * 60))
+        for i in range(1, stops + 1))
     fleet = tuple(
-        Vehicle(id=f"V{n}", capacities={"kg": capacity}, shift=DAY,
+        Vehicle(id=f"V{n}", capacities={"parcels": capacity}, shift=DAY,
                 start_location_id="D", end_location_id="D")
         for n in range(1, vans + 1))
-    return Problem(id="locks", locations=locations, orders=orders,
-                   vehicles=fleet, locks=locks,
-                   matrix=TravelMatrix(version="l", durations=grid,
-                                       distances=grid))
+    return Problem(id="locks", locations=LOCATIONS[:stops + 1], orders=orders,
+                   vehicles=fleet, locks=locks, matrix=MATRIX)
 
 
 def plan(assignment: dict[str, list[str]], problem: Problem) -> Solution:
@@ -99,16 +121,24 @@ def plan(assignment: dict[str, list[str]], problem: Problem) -> Solution:
     for vehicle_id, order_ids in assignment.items():
         steps = [Step(type="START", location_id="D", arrival=0,
                       start_service=0, departure=0)]
-        clock = 0
+        index = {location.id: location.matrix_index
+                 for location in problem.locations}
+        vehicle = problem.vehicle(vehicle_id)
+        clock, here = 0, index["D"]
         for order_id in order_ids:
-            clock += 600
-            stop = problem.order(order_id).delivery
-            steps.append(Step(type="DELIVERY", location_id=stop.location_id,
+            order = problem.order(order_id)
+            site = order.delivery.location_id
+            clock += problem.matrix.duration(here, index[site])
+            # Travel from the matrix, service from `service_time`: only the
+            # lock under test may fail, not the plan's own arithmetic.
+            service = service_time(order, vehicle, problem.location(site))
+            steps.append(Step(type="DELIVERY", location_id=site,
                               order_id=order_id, arrival=clock,
-                              start_service=clock, departure=clock + 60))
-            clock += 60
-        steps.append(Step(type="END", location_id="D", arrival=clock + 600,
-                          start_service=clock + 600, departure=clock + 600))
+                              start_service=clock, departure=clock + service))
+            clock, here = clock + service, index[site]
+        clock += problem.matrix.duration(here, index["D"])
+        steps.append(Step(type="END", location_id="D", arrival=clock,
+                          start_service=clock, departure=clock))
         routes.append(Route(vehicle_id=vehicle_id, steps=tuple(steps)))
     served = {o for ids in assignment.values() for o in ids}
     return Solution(
@@ -156,8 +186,8 @@ def show_every_kind() -> None:
          (Lock(kind="PIN_DEPOT", order_id="O1", depot_id="D"),),
          {"V1": ["O1"]}, None),
         ("FREEZE_UNTIL",
-         (Lock(kind="FREEZE_UNTIL", instant=100),),
-         {"V1": ["O1"]}, None),
+         (Lock(kind="FREEZE_UNTIL", instant=FROZEN_UNTIL),),
+         {"V1": ["O2"]}, None),
     )
 
     for name, locks, keeps, breaks in cases:
@@ -248,7 +278,7 @@ def show_not_the_locks() -> None:
     lock = Lock(kind="PIN_ORDER_TO_VEHICLE", order_id="O1", vehicle_id="V1")
     too_heavy = instance((lock,), stops=2, capacity=10, weights=(500, 1))
 
-    print("   a 500 kg order, 10 kg vans, one innocent pin")
+    print("   a 500-parcel order, 10-parcel vans, one innocent pin")
     print(f"   feasible: {is_feasible_under_locks(too_heavy)}")
     print(f"   locks blamed: {minimal_conflict(too_heavy) or 'none'}")
     print("   Infeasible whatever the operator did, so the locks are not")
