@@ -42,19 +42,23 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+import dataset
+
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
     precedence,
 )
@@ -64,25 +68,40 @@ from vrp.verify import verify
 DAY = TimeWindow(start=0, end=12 * 3600)
 
 
+# Two real deliveries around the Guadalupe depot. Their positions and service
+# times are the corpus's; the parcel counts below are not, and deliberately so
+# -- every section here turns on capacity being exactly scarce enough that one
+# order has to go, which is a property of the instance rather than of the data.
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.planar_sites(
+    4, "spread", "prizes")
+RACK = 6
+
+
 def instance(orders: tuple[Order, ...], capacity: int, stops: int) -> Problem:
-    size = stops + 1
-    locations = tuple(
-        Location(id="D" if i == 0 else f"C{i}", lat=9.9 + i / 1000, lon=-84.0,
-                 matrix_index=i)
-        for i in range(size))
-    grid = tuple(tuple(abs(i - j) * 600 for j in range(size))
-                 for i in range(size))
+    """The instance, over real sites, with capacity the section chooses.
+
+    Args:
+        orders: What is on offer.
+        capacity: Parcels the single van can carry.
+        stops: How many of the real sites to expose.
+
+    Returns:
+        The instance.
+    """
     return Problem(
-        id="prz", locations=locations, orders=orders,
-        vehicles=(Vehicle(id="V1", capacities={"kg": capacity}, shift=DAY,
+        id="prz", locations=LOCATIONS[:stops + 1], orders=orders,
+        vehicles=(Vehicle(id="V1", capacities={"parcels": capacity}, shift=DAY,
                           start_location_id="D", end_location_id="D"),),
-        matrix=TravelMatrix(version="p", durations=grid, distances=grid))
+        matrix=MATRIX)
 
 
-def an_order(order_id: str, stop: str, kg: int, **kwargs) -> Order:
-    return Order(id=order_id, kind="JOB", quantities={"kg": kg},
-                 delivery=StopSpec(location_id=stop, time_windows=(DAY,),
-                                   service_fixed=60), **kwargs)
+def an_order(order_id: str, stop: str, parcels: int, **kwargs) -> Order:
+    """One order at a real address, with the corpus's own service time."""
+    delivery = DELIVERIES[int(stop[1:]) - 1]
+    return Order(id=order_id, kind="JOB", quantities={"parcels": parcels},
+                 delivery=StopSpec(
+                     location_id=stop, time_windows=(DAY,),
+                     service_fixed=delivery["service_minutes"] * 60), **kwargs)
 
 
 def declined(solution) -> set[str]:
@@ -92,24 +111,63 @@ def declined(solution) -> set[str]:
 def show_declining() -> None:
     """FR-12: capacity is scarce, so some work is not worth taking."""
     print("\n1. More work than the van can carry")
-    orders = (an_order("VALUABLE", "C1", kg=60, prize=100_000, priority_tier=2),
-              an_order("CHEAP", "C2", kg=60, prize=1, priority_tier=2))
-    problem = instance(orders, capacity=60, stops=2)
+    orders = (an_order("VALUABLE", "C1", parcels=RACK, prize=100_000, priority_tier=2),
+              an_order("CHEAP", "C2", parcels=RACK, prize=1, priority_tier=2))
+    problem = instance(orders, capacity=RACK, stops=2)
     solution = solve(problem, iterations=600, seed=0)
 
-    print("   capacity 60 kg, two 60 kg orders, both tier 2")
+    print(f"   a {RACK}-parcel rack, two {RACK}-parcel orders, both tier 2")
     print(f"   prizes: VALUABLE {orders[0].prize:,}, CHEAP {orders[1].prize}")
     print(f"   declined: {declined(solution)}")
     print(f"   the plan verifies: {verify(problem, solution).ok}")
 
-    required = (an_order("A", "C1", kg=60), an_order("B", "C2", kg=60))
-    same = instance(required, capacity=60, stops=2)
+    required = (an_order("A", "C1", parcels=RACK), an_order("B", "C2", parcels=RACK))
+    same = instance(required, capacity=RACK, stops=2)
     outcome = solve(same, iterations=600, seed=0)
     print(f"   the same instance with no prizes -> status {outcome.status}, "
           f"declined {declined(outcome)}")
     print("   A prizeless order has no price at which declining it is correct,")
     print("   so the shortage becomes the caller's problem rather than being")
     print("   quietly absorbed.")
+
+
+def _uneconomic() -> tuple[Problem, int, str]:
+    """One real delivery far enough out that serving it loses money.
+
+    The old version invented a five-hour leg. It did not have to: the corpus
+    reaches Guanacaste, and a single order at the end of a real six-hour run is
+    exactly the shape this section needs -- an order whose prize cannot cover
+    the driving, kept only because tier 0 is a promise.
+
+    Returns:
+        `(instance, one-way seconds, the hub it is near)`.
+    """
+    corpus = dataset.load()
+    depot = corpus.depots[0]
+    around, _ = corpus.around_each_depot(24)
+    remote = around[16]
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    matrix = PlanarMatrix(version="uneconomic-v1", coordinates=(
+        (0.0, 0.0),
+        ((remote["longitude"] - depot["longitude"]) * lon_km,
+         (remote["latitude"] - depot["latitude"]) * lat_km)))
+    shift = TimeWindow(start=0, end=24 * 3600)
+    problem = Problem(
+        id="uneconomic",
+        locations=(Location(id="D", lat=depot["latitude"],
+                            lon=depot["longitude"], matrix_index=0),
+                   Location(id="C1", lat=remote["latitude"],
+                            lon=remote["longitude"], matrix_index=1)),
+        orders=(Order(id="MUST", kind="JOB", quantities={"parcels": 1},
+                      prize=1, priority_tier=0,
+                      delivery=StopSpec(
+                          location_id="C1", time_windows=(shift,),
+                          service_fixed=remote["service_minutes"] * 60)),),
+        vehicles=(Vehicle(id="V1", capacities={"parcels": 100}, shift=shift,
+                          start_location_id="D", end_location_id="D"),),
+        matrix=matrix)
+    return problem, matrix.duration(0, 1), remote["hub"]
 
 
 def show_tier_zero() -> None:
@@ -119,10 +177,10 @@ def show_tier_zero() -> None:
 
     print(f"   {'order':<34}{'declinable?':>12}")
     for label, order in (
-            ("tier 3, prize 5", an_order("D", "C1", kg=1, prize=5,
+            ("tier 3, prize 5", an_order("D", "C1", parcels=1, prize=5,
                                          priority_tier=3)),
-            ("tier 3, no prize", an_order("C", "C1", kg=1, priority_tier=3)),
-            ("tier 0, prize 100,000", an_order("A", "C1", kg=1, prize=100_000,
+            ("tier 3, no prize", an_order("C", "C1", parcels=1, priority_tier=3)),
+            ("tier 0, prize 100,000", an_order("A", "C1", parcels=1, prize=100_000,
                                                priority_tier=0))):
         print(f"   {label:<34}{not must_be_served(order)!s:>12}")
 
@@ -132,22 +190,10 @@ def show_tier_zero() -> None:
     print("   marks it required. Perturbation proved that -- reverting the fix")
     print("   passed every end-to-end test.")
 
-    leg = 5 * 3600
-    far = Problem(
-        id="uneconomic",
-        locations=(Location(id="D", lat=9.9, lon=-84.0, matrix_index=0),
-                   Location(id="C1", lat=9.9, lon=-84.0, matrix_index=1)),
-        orders=(Order(id="MUST", kind="JOB", quantities={"kg": 1}, prize=1,
-                      priority_tier=0,
-                      delivery=StopSpec(location_id="C1", time_windows=(DAY,),
-                                        service_fixed=60)),),
-        vehicles=(Vehicle(id="V1", capacities={"kg": 100}, shift=DAY,
-                          start_location_id="D", end_location_id="D"),),
-        matrix=TravelMatrix(version="u", durations=((0, leg), (leg, 0)),
-                            distances=((0, leg * 20), (leg * 20, 0))))
+    far, leg, where = _uneconomic()
     solution = solve(far, iterations=400, seed=0)
-    print(f"\n   a tier-0 order 5 hours out, prize 1: declined "
-          f"{declined(solution)}")
+    print(f"\n   a tier-0 order near {where}, {leg // 3600} hours out, "
+          f"prize 1: declined {declined(solution)}")
     print("   Here `required` does real work. Serving it loses money even after")
     print("   the tier bonus, so an optional order would be dropped. A promise")
     print("   is not renegotiated because it turned out to be a bad one.")
@@ -160,8 +206,8 @@ def show_lexicographic() -> None:
           f"{'protected':>11}")
 
     for magnitude in (10 ** 3, 10 ** 6, 10 ** 9, 10 ** 12, 10 ** 15):
-        orders = (an_order("HIGH", "C1", kg=1, prize=1, priority_tier=1),
-                  an_order("LOW", "C2", kg=1, prize=magnitude, priority_tier=4))
+        orders = (an_order("HIGH", "C1", parcels=1, prize=1, priority_tier=1),
+                  an_order("LOW", "C2", parcels=1, prize=magnitude, priority_tier=4))
         bonuses = tier_bonuses(instance(orders, capacity=100, stops=2))
         # Keyed by `precedence`, not by the bare tier: FR-25 ranks a statutory
         # order above an SLA one on the same tier, so the key is a (tier,
@@ -183,11 +229,11 @@ def show_the_engine_limit() -> None:
     print(f"   {'prize on tier 5':>18}{'status':>14}{'declined':>22}")
 
     for magnitude in (10 ** 3, 10 ** 6, 10 ** 9):
-        orders = (an_order("TIER1", "C1", kg=60, prize=magnitude,
+        orders = (an_order("TIER1", "C1", parcels=RACK, prize=magnitude,
                            priority_tier=1),
-                  an_order("TIER5", "C2", kg=60, prize=magnitude,
+                  an_order("TIER5", "C2", parcels=RACK, prize=magnitude,
                            priority_tier=5))
-        problem = instance(orders, capacity=60, stops=2)
+        problem = instance(orders, capacity=RACK, stops=2)
         solution = solve(problem, iterations=600, seed=0)
         print(f"   {magnitude:>18,}{solution.status:>14}"
               f"{sorted(declined(solution))!s:>22}")
