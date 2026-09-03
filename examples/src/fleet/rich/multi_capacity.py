@@ -78,17 +78,47 @@ VAN_KG = 1_200
 VAN_M3 = 10
 
 
+# Categories the corpus actually contains, split by how much space a kilo of
+# them takes. Which side each falls on is invented -- the corpus records no
+# volume and marks nothing as bulky -- but that they differ is not decoration:
+# see `cube_of`.
+BULKY_CATEGORIES = ("Apparel", "Household")
+
+
 def cube_of(delivery: dict) -> int:
     """Volume in whole tenths of a cubic metre.
 
-    The dataset carries weight but not volume, so this derives one: a category
-    the dataset already marks as bulky gets a poor density, everything else a
-    dense one. Invented, and said so -- the point is that two dimensions bind
-    differently, which needs them to disagree, not to be accurate.
+    The corpus carries weight but not volume, so this derives one: a kilo of
+    apparel takes more space than a kilo of hardware.
+
+    The split has to be real or the round below is theatre. This tested for
+    `FURNITURE`, `APPLIANCE` and `GARDEN`, none of which are among the corpus's
+    seven categories, so nothing was ever bulky, every stop got the dense
+    figure, and volume came out a fixed multiple of weight. Two dimensions that
+    are a fixed multiple of each other cannot bind differently -- round 2 was
+    round 1 with larger numbers, under a docstring claiming the plan changes.
     """
-    bulky = delivery.get("category", "") in ("FURNITURE", "APPLIANCE", "GARDEN")
+    bulky = delivery.get("category", "") in BULKY_CATEGORIES
     kilos = max(1, round(delivery["weight_kg"]))
     return max(1, round(kilos / (8 if bulky else 60) * 10))
+
+
+def density_split(deliveries: list[dict]) -> tuple[int, int]:
+    """How many of these stops are bulky, and how many dense.
+
+    Args:
+        deliveries: The round's deliveries.
+
+    Returns:
+        `(bulky, dense)`.
+
+    Printed rather than assumed. A round that happens to contain no bulky
+    freight demonstrates nothing about a second dimension, and should say so
+    instead of printing two rounds that agree.
+    """
+    bulky = sum(1 for d in deliveries
+                if d.get("category", "") in BULKY_CATEGORIES)
+    return bulky, len(deliveries) - bulky
 
 
 def build(depot: dict, deliveries: list[dict], matrix: TravelMatrix,
@@ -174,8 +204,17 @@ def main() -> int:
     args = parser.parse_args()
 
     deliveries, depot = dataset.load(args.dataset).nearest(args.stops)
+    bulky, dense = density_split(deliveries)
     print(f"depot {depot['name']} -- {len(deliveries)} stops, "
           f"van {VAN_KG} kg / {VAN_M3} m3")
+    if not bulky:
+        raise SystemExit(
+            f"none of these {dense} stops is in {' or '.join(BULKY_CATEGORIES)}, "
+            "so cube is a fixed multiple of weight and round 2 cannot differ "
+            "from round 1. Take more stops, or fix BULKY_CATEGORIES.")
+    print(f"{bulky} bulky and {dense} dense by category "
+          f"({', '.join(BULKY_CATEGORIES)} against the rest), so the two "
+          "dimensions can disagree")
     print(f"fetching a road matrix from {GATEWAY}")
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
