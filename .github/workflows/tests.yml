@@ -6,6 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+# One run per branch at a time. Pushing again supersedes whatever is still in
+# flight, which is the common case when several commits go up in quick
+# succession: the earlier runs are testing a tree nobody will look at. Three
+# were once in flight together here, and four of eleven finished after they had
+# been overtaken.
+#
+# `cancel-in-progress` is safe on this workflow because nothing it does is
+# published -- no deploy, no release, no artifact another job waits on. A
+# cancelled run leaves nothing half-done.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
