@@ -95,7 +95,7 @@ def test_low_value_work_is_declined_when_capacity_is_scarce():
 # FR-13: tiers, and the bug optionality hid
 # --------------------------------------------------------------------------
 
-def test_tier_zero_is_required_regardless_of_its_prize():
+def test_tier_zeromust_be_served_regardless_of_its_prize():
     """§4.1: "0 = must-serve". Asserted on the predicate itself.
 
     Through a solve this is untestable in the ordinary case, because the tier
@@ -103,15 +103,15 @@ def test_tier_zero_is_required_regardless_of_its_prize():
     -- so it is kept whether or not anything marks it required. Perturbation
     proved that: reverting the fix passed every end-to-end test here.
     """
-    from vrp.solve.pyvrp_adapter import _is_required
+    from vrp.model import must_be_served
 
-    assert _is_required(an_order("A", "C1", kg=1, prize=100_000,
+    assert must_be_served(an_order("A", "C1", kg=1, prize=100_000,
                                  priority_tier=0)), \
         "a tier-0 order carrying a prize was made declinable"
-    assert _is_required(an_order("B", "C1", kg=1, priority_tier=0))
-    assert _is_required(an_order("C", "C1", kg=1, priority_tier=3)), \
+    assert must_be_served(an_order("B", "C1", kg=1, priority_tier=0))
+    assert must_be_served(an_order("C", "C1", kg=1, priority_tier=3)), \
         "no prize means no price at which declining is acceptable"
-    assert not _is_required(an_order("D", "C1", kg=1, prize=5, priority_tier=3))
+    assert not must_be_served(an_order("D", "C1", kg=1, prize=5, priority_tier=3))
 
 
 def test_an_uneconomic_tier_zero_order_is_still_served():
@@ -285,8 +285,7 @@ def test_a_statutory_obligation_may_not_be_declined_at_any_price():
     is prohibited"."""
     import pytest
 
-    from vrp.model import ValidationError
-    from vrp.solve.pyvrp_adapter import _is_required
+    from vrp.model import ValidationError, must_be_served
 
     obliged = an_order("USO", "C1", kg=1, priority_tier=3,
                        priority_source="STATUTORY")
@@ -301,11 +300,11 @@ def test_a_statutory_obligation_may_not_be_declined_at_any_price():
         an_order("BOTH", "C1", kg=1, priority_source="STATUTORY", prize=1)
 
     assert obliged.prize == 0, "there is no price, because none may be set"
-    assert _is_required(obliged), (
+    assert must_be_served(obliged), (
         "and an order with no price is one the solver may not decline, at any "
         "tier. Before FR-25 the only way to say this was to claim the address "
         "was tier 0, which conflates a legal duty with the top commercial one")
-    assert not _is_required(paid_for), "a prize is a price, and this one has one"
+    assert not must_be_served(paid_for), "a prize is a price, and this one has one"
 
 
 def test_an_sla_window_is_computed_from_when_the_fault_was_reported():

@@ -70,6 +70,36 @@ def precedence(order) -> tuple[int, int]:
     return (order.priority_tier, PRIORITY_SOURCES.index(order.priority_source))
 
 
+def must_be_served(order) -> bool:
+    """Whether an order may be declined at all. FR-12, FR-25, §4.1.
+
+    Args:
+        order: the order.
+
+    Returns:
+        True when no plan may leave it out.
+
+    Tier 0 is must-serve whatever it is worth. Everything else is declinable
+    once it carries a prize -- an order with no prize has no price at which
+    declining is acceptable, so a plan must place it or report infeasible.
+
+    A statutory obligation needs no clause of its own, and adding one was a
+    mistake worth recording: `Order` refuses a `STATUTORY` order that carries a
+    prize, so every such order reaches this prizeless and is already covered.
+    The extra condition read like enforcement and enforced nothing --
+    perturbing it away changed no result, which is how it was caught.
+    `UC-046`'s "no address may be declined" is carried by the model invariant,
+    where a contradiction belongs, rather than by a solver detail.
+
+    Lived in `vrp.solve.pyvrp_adapter` as `_is_required` until `T-91`'s
+    follow-up. It is a rule about an `Order` and depends on nothing PyVRP
+    knows, so an adapter was the wrong home and the underscore made a domain
+    question look like an implementation detail -- three examples imported it
+    anyway, because it is the question a reader has.
+    """
+    return order.priority_tier == 0 or order.prize == 0
+
+
 def sla_window(reported_at: int, respond_within: int,
                opens_at: int = 0) -> TimeWindow:
     """The window an SLA implies. FR-25, `UC-116`.

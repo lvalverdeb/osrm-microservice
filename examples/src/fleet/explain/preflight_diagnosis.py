@@ -43,7 +43,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -152,10 +151,14 @@ def main() -> int:
     args = parser.parse_args()
 
 
-    data = json.loads(args.dataset.read_text())
-    deliveries, depot = dataset.load(args.dataset).nearest(args.stops)
+    # One read, through `dataset.load`. Reading the file directly as well meant
+    # an absent corpus surfaced as a bare FileNotFoundError from the first line
+    # rather than `load`'s message naming the command that builds it -- the
+    # guard was there and this walked around it.
+    corpus = dataset.load(args.dataset)
+    deliveries, depot = corpus.nearest(args.stops)
     home = (depot["latitude"], depot["longitude"])
-    far = max(data["deliveries"],
+    far = max(corpus.deliveries,
               key=lambda d: (d["latitude"] - home[0]) ** 2
               + (d["longitude"] - home[1]) ** 2)
 

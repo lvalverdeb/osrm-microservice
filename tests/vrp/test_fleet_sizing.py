@@ -52,7 +52,7 @@ from vrp.scenarios import (
     recommend,
     sweep,
 )
-from vrp.scenarios import _recovery_cost as _round_trip
+from vrp.scenarios import recovery_cost as _round_trip
 
 DAY = TimeWindow(start=0, end=10 * 3600)
 LEG = 5_000

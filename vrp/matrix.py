@@ -175,9 +175,9 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
                        cache: PairCache | None = None,
                        snap_threshold_m: float = DEFAULT_SNAP_THRESHOLD_M,
                        extract_version: str = "unknown",
-                       timeout: float = 120.0) -> tuple[TravelMatrix, list[Snap]]:
+                       timeout: float = 120.0,
+                       snap=None, fetch=None) -> tuple[TravelMatrix, list[Snap]]:
     """Build a matrix of any size by tiling, reusing cached pairs. MTX-7, MTX-10.
-
     The result is identical to an unchunked `build_matrix` over the same
     locations -- same cells, same version -- which is E-11's acceptance
     condition and the thing worth checking rather than assuming.
@@ -192,16 +192,25 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
         snap_threshold_m: beyond this a `SnapWarning` is raised (MTX-4).
         extract_version: OSM extract identifier, folded into the version.
         timeout: per-request timeout in seconds.
+        snap: how to snap the locations, defaulting to the OSRM call. Injectable
+            so a caller can exercise `NFR-04`'s degraded path without a
+            gateway, and without reaching into this module -- which is what
+            `examples/.../degraded_matrix.py` used to do, and what anybody
+            testing their own resilience to a matrix outage needs.
+        fetch: how to fetch one tile, same reasoning. Raise from it to simulate
+            a provider that stops answering part-way through a build.
 
     Returns:
         The matrix and one `Snap` per location, in the same order.
     """
+    snap = snap or _snap_all
+    fetch = fetch or _fetch_tile
     if not locations:
         raise ValueError("cannot build a matrix over no locations")
     cache = cache if cache is not None else PairCache()
     size = len(locations)
 
-    snaps = _snap_all(gateway, locations, profile, snap_threshold_m, timeout)
+    snaps = snap(gateway, locations, profile, snap_threshold_m, timeout)
     coordinates = [{"latitude": lat, "longitude": lon} for lat, lon in locations]
 
     durations = [[UNREACHABLE] * size for _ in range(size)]
@@ -224,7 +233,7 @@ def build_large_matrix(gateway: str, locations: list[tuple[float, float]],
             continue
 
         try:
-            body = _fetch_tile(gateway, coordinates, tile, profile, timeout)
+            body = fetch(gateway, coordinates, tile, profile, timeout)
         except Exception as failure:
             # NFR-04: "If the matrix provider is unavailable, fall back to a
             # cached matrix and mark the plan `DEGRADED`." Raising here was

@@ -98,9 +98,15 @@ amounts in different places, so a number from a planar matrix is not the number
 the road gives; an example that swapped them silently would be a worse lie than
 the one it replaced.
 
-**Result: 74 passed, nothing skipped, nothing xfailed.** Every example runs with
-no infrastructure at all, where before five could not run without a gateway and
-two could not run at all.
+**Result: 74 passed locally. 52 passed and 22 skipped under CI's conditions**,
+which is the honest figure and was not the one first reported here.
+
+`examples/.env` is gitignored and points at the FreeBSD jail, which is live from
+the machine this was written on. Twenty-two examples were reaching a real
+gateway, or the local 12 MB delivery corpus, or both. "Runs with no
+infrastructure" was measured on a machine that had the infrastructure. The gate
+is now verified by hiding `data/deliveries_cr.json` and `examples/.env` and
+running it again -- reproducing CI rather than guessing at it.
 
 ### What Phase 0's gate got wrong, and CI caught
 
@@ -118,7 +124,23 @@ flattering: `folium` and `config` failures would have counted as failures on a
 clean machine. The conclusions about *which* examples were broken still hold,
 because those two failed for their own reasons.
 
-## Phase 2 — Purpose 2: only the public API
+CI then taught two more things, and both were invisible here:
+
+- **The delivery corpus is absent.** 12 MB, generated, not committed -- and
+  generating it snaps fifty thousand points through OSRM, so CI cannot make one
+  either. Skipped, not generated. `preflight_diagnosis.py` also read the file
+  directly *as well as* through `dataset.load`, so an absent corpus surfaced as
+  a bare `FileNotFoundError` instead of the guard's message naming the build
+  command. The guard existed and the example walked around it.
+- **`error_handling_demo.py` handles a missing gateway** and exits non-zero
+  with a sentence about it, which is better behaviour than a traceback and read
+  as a failure to the first version of the skip rule.
+
+The rule now recognises three kinds of missing prerequisite -- no service, a
+handled absence, no corpus -- rather than only a refused connection, and is
+named `MISSING_PREREQUISITE` to say so.
+
+## Phase 2 — Purpose 2: only the public API — **DONE**
 
 Eight examples reach into privates. They are three different problems and the
 fix differs:
@@ -142,9 +164,24 @@ fix differs:
   fetcher, or move the fault-injection to `tests/` and have the example show
   what a `DEGRADED` plan looks like to a caller.
 
-- **Done when** `grep -rn "import .*\b_[a-z]\|\._[a-z]" examples/src/` is empty,
-  and each promoted symbol has a docstring written for an integrator rather
-  than for the module it came from.
+**A fourth turned up that the survey missed.** `ride_time.py` imported
+`pyvrp_adapter._delivery_deadline`, and it wanted a *fourth* answer again: made
+public, but deliberately **left in the adapter** rather than moved to the model
+like `must_be_served`. Its own docstring says `INV-14` is the exact check and
+this is "the search's safe approximation" -- it exists because `add_shipment`
+cannot state a ride bound. Among the model's rules a reader would take it for
+the authoritative deadline, which it is not.
+
+`must_be_served` is the positive form on purpose: the three examples that drove
+this all said `not _is_required(order)`, and now say `not must_be_served(order)`
+-- the domain statement, negated where the question is whether work can be
+declined.
+
+- **Done:** no example reaches into `vrp` internals. Verified with
+  `grep -rn "from vrp[a-z_.]* import.*\b_[a-z]\|vrp\.[a-z_.]*\._[a-z]" examples/src`,
+  which is narrower than the plan's original pattern -- that one also matched
+  `import os as _os`, and a check with false positives is one people learn to
+  ignore.
 
 ## Phase 3 — Purpose 1: coverage somebody can navigate
 

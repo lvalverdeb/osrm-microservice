@@ -70,7 +70,7 @@ from vrp.scenarios import (
     recommend,
     sweep,
 )
-from vrp.scenarios import _recovery_cost as round_trip
+from vrp.scenarios import recovery_cost as round_trip
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 DAY = TimeWindow(start=0, end=10 * 3600)

@@ -11,7 +11,7 @@ it to a router; here the router decides both at once, because whether a request
 is worth sending now depends on the route it would join, and that is exactly
 what a solver already computes.
 
-The mechanism is entirely T-27's. `_is_required` makes an order droppable when
+The mechanism is entirely T-27's. `must_be_served` makes an order droppable when
 it carries a prize and sits above priority tier 0, and `PRIZE_COLLECTING` puts
 forgone prize and routing cost in one currency. So an epoch becomes: must-go
 work required, deferrable work priced, solve, and whatever the solver chose to
@@ -45,7 +45,7 @@ def epoch_problem(problem: Problem, open_ids: Sequence[str],
                   split: Classification, prize: int) -> Problem:
     """The open work as a prize-collecting instance. §8.2 step 2.
 
-    Must-go requests keep prize 0, which `_is_required` reads as "not for
+    Must-go requests keep prize 0, which `must_be_served` reads as "not for
     sale" -- AC-3.1 in the model rather than bolted on afterwards. Everything
     else is priced at the tuned constant and sits above tier 0, so the solver
     is free to decline it.

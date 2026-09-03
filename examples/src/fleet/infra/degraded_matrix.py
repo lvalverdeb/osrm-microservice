@@ -57,10 +57,18 @@ from vrp.solve.pyvrp_adapter import solve
 COORDS = [(9.90 + i / 100, -84.0) for i in range(6)]
 
 
-def stub_provider(answers: int):
-    """Answer `answers` tiles, then stop responding. Returns a restore hook."""
-    original_snap = matrix_module._snap_all
-    original_fetch = matrix_module._fetch_tile
+def failing_provider(answers: int):
+    """A provider that answers `answers` tiles and then stops.
+
+    Returns:
+        The call counter, and the `snap`/`fetch` pair to hand `build_large_matrix`.
+
+    Injected through the public seam rather than assigned over the module's
+    globals. That is not tidiness: an integrator who wants to know how their
+    own service behaves when the matrix provider dies needs exactly this, and
+    a demonstration that reached inside `vrp.matrix` would have shown them a
+    technique they cannot use in their own code.
+    """
     calls = {"n": 0}
 
     def snap(*_args, **_kwargs):
@@ -75,14 +83,7 @@ def stub_provider(answers: int):
         return {"durations": [[60] * size for _ in range(size)],
                 "distances": [[600] * size for _ in range(size)]}
 
-    matrix_module._snap_all = snap
-    matrix_module._fetch_tile = fetch
-
-    def restore():
-        matrix_module._snap_all = original_snap
-        matrix_module._fetch_tile = original_fetch
-
-    return calls, restore
+    return calls, snap, fetch
 
 
 def heading(number: str, title: str) -> None:
@@ -92,12 +93,9 @@ def heading(number: str, title: str) -> None:
 def what_survives() -> None:
     heading("1.", "What survives")
     answers = 1
-    calls, restore = stub_provider(answers=answers)
-    try:
-        matrix, _snaps = matrix_module.build_large_matrix(
-            "http://gateway", COORDS, max_cells=9)
-    finally:
-        restore()
+    calls, snap, fetch = failing_provider(answers=answers)
+    matrix, _snaps = matrix_module.build_large_matrix(
+        "http://gateway", COORDS, max_cells=9, snap=snap, fetch=fetch)
 
     cells = [cell for row in matrix.durations for cell in row]
     known = sum(1 for cell in cells if cell != UNREACHABLE)
@@ -113,12 +111,9 @@ def what_survives() -> None:
 
 def what_the_matrix_says() -> None:
     heading("2.", "What the matrix says about itself")
-    _calls, restore = stub_provider(answers=1)
-    try:
-        matrix, _snaps = matrix_module.build_large_matrix(
-            "http://gateway", COORDS, max_cells=9)
-    finally:
-        restore()
+    _calls, snap, fetch = failing_provider(answers=1)
+    matrix, _snaps = matrix_module.build_large_matrix(
+        "http://gateway", COORDS, max_cells=9, snap=snap, fetch=fetch)
 
     print(f"\n   degraded: {matrix.degraded}")
     print("\n   A sentence rather than a flag. `degraded=True` tells an operator")

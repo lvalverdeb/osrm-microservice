@@ -57,7 +57,7 @@ from vrp.model import (
     TravelMatrix,
     Vehicle,
 )
-from vrp.solve.pyvrp_adapter import _delivery_deadline, solve
+from vrp.solve.pyvrp_adapter import delivery_deadline, solve
 from vrp.verify import verify
 
 DAY = TimeWindow(start=0, end=12 * 3600)
@@ -120,7 +120,7 @@ def what_the_search_is_told() -> None:
     problem = instance((shipment("URGENT", "C1", "C4", ride=bound),
                         job("ONWAY1", "C2"), job("ONWAY2", "C3")))
     order = problem.order("URGENT")
-    deadline = _delivery_deadline(problem, order)
+    deadline = delivery_deadline(problem, order)
     print(f"\n   bound {bound // 60} min; the van is a minute from the pickup "
           f"and a minute of service")
     print(f"   derived delivery deadline: {deadline}s "

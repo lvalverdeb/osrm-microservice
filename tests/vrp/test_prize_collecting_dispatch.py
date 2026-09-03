@@ -10,7 +10,7 @@ hands it to a router; here the router decides both at once, because whether a
 request is worth sending now depends on the route it would join -- which is
 exactly what a solver already computes.
 
-The mechanism is entirely T-27's, which is the pleasant part: `_is_required`
+The mechanism is entirely T-27's, which is the pleasant part: `must_be_served`
 already makes an order droppable when it carries a prize above tier 0, and
 `PRIZE_COLLECTING` already puts forgone prize and routing cost in one currency.
 An epoch is therefore just an instance with the must-go work required and the
@@ -79,19 +79,19 @@ WAVE = Epoch(index=1, start=HOUR, end=2 * HOUR)
 # --------------------------------------------------------------------------
 
 def test_must_go_work_is_priced_as_required():
-    """AC-3.1 expressed in the model rather than bolted on after. `_is_required`
+    """AC-3.1 expressed in the model rather than bolted on after. `must_be_served`
     reads prize 0 at tier 0 as "not for sale", so the solver is never offered
     the chance to decline it."""
-    from vrp.solve.pyvrp_adapter import _is_required
+    from vrp.model import must_be_served
 
     sub = epoch_problem(problem(), OPEN, SPLIT, prize=5_000)
 
-    assert _is_required(sub.order("O1"))
-    assert not any(_is_required(sub.order(o)) for o in SPLIT.deferrable)
+    assert must_be_served(sub.order("O1"))
+    assert not any(must_be_served(sub.order(o)) for o in SPLIT.deferrable)
 
     # And it is tier 0, because §4.1 defines that as "must-serve" and the epoch
     # sub-problem should be a faithful domain object rather than one that
-    # happens to behave right. Prize 0 alone would satisfy `_is_required` --
+    # happens to behave right. Prize 0 alone would satisfy `must_be_served` --
     # perturbation showed the tier doing no work until this line existed.
     assert sub.order("O1").priority_tier == 0
     assert all(sub.order(o).priority_tier != 0 for o in SPLIT.deferrable)

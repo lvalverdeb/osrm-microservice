@@ -33,6 +33,7 @@ from vrp.model import (
     Step,
     has_skills_for,
     may_enter,
+    must_be_served,
     precedence,
     service_time,
 )
@@ -74,24 +75,6 @@ def shift_end_of(problem: Problem) -> int:
     return max(v.shift.end for v in problem.vehicles)
 
 
-def _is_required(order) -> bool:
-    """Whether the solver may decline this order at all. FR-12, FR-25, §4.1.
-
-    Tier 0 is must-serve whatever it is worth. Everything else is declinable
-    once it carries a prize -- an order with no prize has no price at which
-    declining is acceptable, so the solver must place it or report infeasible.
-
-    A statutory obligation needs no clause of its own here, and adding one was
-    a mistake worth recording: `Order` refuses a `STATUTORY` order that carries
-    a prize, so every such order reaches this function prizeless and the second
-    test below already covers it. The extra condition read like enforcement and
-    enforced nothing -- perturbing it away changed no result, which is how it
-    was caught. `UC-046`'s "no address may be declined" is carried by the model
-    invariant, where a contradiction belongs, rather than by a solver detail.
-    """
-    return order.priority_tier == 0 or order.prize == 0
-
-
 def tier_bonuses(problem: Problem) -> dict[int, int]:
     """Prize bonuses making priority tiers lexicographic. FR-13.
 
@@ -126,7 +109,7 @@ def tier_bonuses(problem: Problem) -> dict[int, int]:
     return bonuses
 
 
-def _delivery_deadline(problem: Problem, order) -> int:
+def delivery_deadline(problem: Problem, order) -> int:
     """When a shipment must be delivered by. FR-04 and, if set, FR-24.
 
     `add_shipment` takes no ride-time bound, so the only lever is the delivery
@@ -150,6 +133,14 @@ def _delivery_deadline(problem: Problem, order) -> int:
     school stop, a booked ward round -- the two coincide. Where they do not,
     `INV-14` is the exact check and this is the search's safe approximation of
     it.
+
+    Public, and deliberately still here rather than in `vrp.model`. The
+    arithmetic is domain arithmetic, but the *choice* is an adapter's: it exists
+    because `add_shipment` cannot state a ride bound, and a reader who found it
+    among the model's rules would reasonably take it for the authoritative
+    deadline. It is not -- `INV-14` is. It went public because
+    `examples/.../ride_time.py` needed it to show what the search is actually
+    told, which is a question about this adapter.
     """
     window_end = (order.delivery.time_windows[0].end
                   if order.delivery.time_windows else shift_end_of(problem))
@@ -446,12 +437,12 @@ def compile_problem(problem: Problem) -> _Compiled:
                     order, problem.vehicles[0], collect),
                 delivery_tw_early=order.delivery.time_windows[0].start
                 if order.delivery.time_windows else shift_start_of(problem),
-                delivery_tw_late=_delivery_deadline(problem, order),
+                delivery_tw_late=delivery_deadline(problem, order),
                 delivery_service_duration=service_time(
                     order, problem.vehicles[0], drop),
                 amount=[order.quantities.get(name, 0) for name in dimensions],
                 prize=order.prize + bonuses[precedence(order)],
-                required=_is_required(order),
+                required=must_be_served(order),
                 name=order.id,
             )
             order_by_shipment[len(order_by_shipment)] = order.id
@@ -508,7 +499,7 @@ def compile_problem(problem: Problem) -> _Compiled:
                 # order must not quietly make it optional -- which is what
                 # `prize == 0` alone did.
                 required=(False if group is not None
-                          else _is_required(order)),
+                          else must_be_served(order)),
                 group=group,
                 name=order.id,
             )

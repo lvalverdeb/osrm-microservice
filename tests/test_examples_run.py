@@ -44,17 +44,29 @@ RUNNER = ["uv", "run", "--package", "osrm-api-gateway-examples"]
 # the gateway URL. Both are imported by examples and neither is one.
 NOT_AN_EXAMPLE = {"dataset.py", "config.py"}
 
-# Anything that means "no service was listening", in the spellings httpx and
-# the standard library actually produce.
-UNREACHABLE = (
+# Signs that a prerequisite is absent rather than that the example is broken.
+# Three kinds, each learned from a CI run rather than guessed:
+#
+#   * no service listening -- the spellings httpx and the standard library
+#     actually produce;
+#   * an example that *handles* the missing gateway and exits non-zero with a
+#     sentence about it, which is better behaviour than a traceback and must not
+#     read as a failure;
+#   * no delivery corpus. `data/deliveries_cr.json` is 12 MB, generated, and
+#     not committed; generating it snaps fifty thousand points through OSRM, so
+#     CI cannot make one either.
+#
+# The `.env` that points at a gateway is itself gitignored, which is why a
+# laptop with a reachable jail and a clean CI checkout disagree about which of
+# these examples can run at all.
+MISSING_PREREQUISITE = (
     "ConnectError", "Connection refused", "ConnectionRefusedError",
     "Failed to establish a new connection", "Max retries exceeded",
     "NewConnectionError", "Cannot connect to host",
+    "not reachable", "Gateway not reachable",
+    "no dataset at", "deliveries_cr.json",
 )
 
-# Known broken, pinned rather than hidden. Strict: fixing one fails this file
-# until the entry is removed, which is what stops a repair going unrecorded.
-# Phase 1 of `docs/planning/VRP_EXAMPLES_PLAN.md` clears both.
 BROKEN: dict[str, str] = {}
 """Examples known broken, pinned rather than hidden.
 
@@ -105,8 +117,8 @@ def test_the_example_runs(path: Path):
         return
 
     output = (result.stderr or "") + (result.stdout or "")
-    if any(marker in output for marker in UNREACHABLE):
-        pytest.skip("needs a gateway or routing engine that is not running")
+    if any(marker in output for marker in MISSING_PREREQUISITE):
+        pytest.skip("a prerequisite is absent: a gateway, or the generated\n        delivery corpus. Neither is a fault in the example")
 
     tail = "\n".join(output.strip().splitlines()[-12:])
     pytest.fail(f"{name_of(path)} exited {result.returncode}:\n{tail}")

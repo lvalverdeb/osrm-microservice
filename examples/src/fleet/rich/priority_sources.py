@@ -58,10 +58,11 @@ from vrp.model import (
     Order,
     StopSpec,
     ValidationError,
+    must_be_served,
     precedence,
     sla_window,
 )
-from vrp.solve.pyvrp_adapter import _is_required, tier_bonuses
+from vrp.solve.pyvrp_adapter import tier_bonuses
 
 HOUR = 3600
 
@@ -115,9 +116,9 @@ def only_one_is_negotiable() -> None:
     obliged = an_order("uso", tier=3, source="STATUTORY")
     paid = an_order("paid", tier=3, source="COMMERCIAL", prize=10_000)
     print(f"\n   statutory, tier 3, prize {obliged.prize}  -> "
-          f"declinable: {not _is_required(obliged)}")
+          f"declinable: {not must_be_served(obliged)}")
     print(f"   commercial, tier 3, prize {paid.prize:,} -> "
-          f"declinable: {not _is_required(paid)}")
+          f"declinable: {not must_be_served(paid)}")
     try:
         an_order("both", tier=3, source="STATUTORY", prize=1)
     except ValidationError as refusal:

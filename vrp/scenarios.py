@@ -187,7 +187,7 @@ def sweep(problem: Problem, mixes: Sequence[Mix],
     """
     if not scenarios:
         raise ValueError("a sweep needs at least one scenario day")
-    price = recovery or _recovery_cost
+    price = recovery or recovery_cost
     return [_measure(problem, mix, scenarios, solve, price) for mix in mixes]
 
 
@@ -216,7 +216,7 @@ def _measure(problem: Problem, mix: Mix, scenarios: Sequence[Scenario],
         served=served, offered=offered)
 
 
-def _recovery_cost(problem: Problem, order: Order) -> int:
+def recovery_cost(problem: Problem, order: Order) -> int:
     """§7.8's route failure: "a vehicle running out of capacity and needing a
     recovery trip".
 

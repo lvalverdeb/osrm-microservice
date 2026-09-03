@@ -115,7 +115,7 @@ def show_declining() -> None:
 def show_tier_zero() -> None:
     """FR-13's floor: tier 0 is not a bid."""
     print("\n2. Tier 0 is a promise")
-    from vrp.solve.pyvrp_adapter import _is_required
+    from vrp.model import must_be_served
 
     print(f"   {'order':<34}{'declinable?':>12}")
     for label, order in (
@@ -124,7 +124,7 @@ def show_tier_zero() -> None:
             ("tier 3, no prize", an_order("C", "C1", kg=1, priority_tier=3)),
             ("tier 0, prize 100,000", an_order("A", "C1", kg=1, prize=100_000,
                                                priority_tier=0))):
-        print(f"   {label:<34}{not _is_required(order)!s:>12}")
+        print(f"   {label:<34}{not must_be_served(order)!s:>12}")
 
     print("   Asserted on the predicate because through a solve it is invisible:")
     print("   the tier bonus already makes a tier-0 order the most valuable")

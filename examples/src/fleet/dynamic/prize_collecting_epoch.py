@@ -89,15 +89,15 @@ def instance(stops: int = 8, vans: int = 2) -> Problem:
 
 def show_the_sub_problem(problem: Problem) -> None:
     print("\n1. An epoch is just an instance, priced")
-    from vrp.solve.pyvrp_adapter import _is_required
+    from vrp.model import must_be_served
 
     sub = epoch_problem(problem, OPEN, SPLIT, prize=4_000)
     print(f"   {'order':<8}{'prize':>9}{'tier':>6}{'required?':>12}")
     for order in sub.orders:
         print(f"   {order.id:<8}{order.prize:>9,}{order.priority_tier:>6}"
-              f"{_is_required(order)!s:>12}")
+              f"{must_be_served(order)!s:>12}")
     print("   Must-go work is prize 0 at tier 0, which §4.1 calls must-serve and")
-    print("   `_is_required` reads as \"not for sale\" -- AC-3.1 expressed in the")
+    print("   `must_be_served` reads as \"not for sale\" -- AC-3.1 expressed in the")
     print("   model rather than bolted on afterwards. Everything else is priced")
     print("   and the solver may decline it.")
     print("   No new objective, no new solver mode. E-27 built PRIZE_COLLECTING")
