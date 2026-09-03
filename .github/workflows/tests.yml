@@ -55,6 +55,12 @@ jobs:
       - name: Test with pytest
         run: make test
 
+      # Its own step because `make test` filters `-m "not slow"` and this sweep
+      # is ~170 s. Without it nothing executes an example, which is how two of
+      # them came to be broken against a fully green suite.
+      - name: Check the examples still run
+        run: make examples-check
+
       - name: Lint
         run: make lint
 
