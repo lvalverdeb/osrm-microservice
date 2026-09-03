@@ -10,31 +10,38 @@ source: nobody here has charger locations or a manufacturer's charging curve.
 Its definition of done asks for range never violated on a **generated** EV
 corpus, and generating one needs neither -- which is why it was buildable.
 
+The round is real. Three deliveries in Guanacaste, roughly 190 km from the
+Guadalupe depot in San Jose, which is a 430 km day and the kind of work a
+regional distributor actually sends a van on. The chargers are the fleet's own
+depots: a distributor with six sites has electricity at all of them, so the
+question is not where to build a charger but which one the round can reach.
+
 Five things, in order:
 
 1. **The curve, which is the requirement.** A battery that charged at a
    constant rate would make the charging time a division. Real cells taper
    near the top, which is why a driver charges to eighty percent and drives on.
 
-2. **A round beyond the battery.** Four stops, thirty kilometres apart, and a
-   van that runs out on the way home. The state of charge is in the timeline,
-   so the shortfall is visible at the step where it happens.
+2. **A round beyond the battery.** The state of charge is in the timeline, so
+   the shortfall is visible at the step where it happens rather than as a total
+   that is merely wrong.
 
-3. **The stop, placed.** Late rather than early -- an emptier battery takes
-   current faster -- and charged to what the rest of the round needs rather
-   than to full, because the last fifth is the expensive fifth.
+3. **The stop, placed.** At whichever depot the van can still reach, and
+   charged to what the rest of the round needs rather than to full, because the
+   last fifth is the expensive fifth.
 
 4. **Why it has to be a step.** The charge pushes every later arrival by its
    own duration. That is the difference between modelling the constraint and
    accounting for it: an hour in a report cannot break a time window.
 
-5. **The round nobody can drive.** A smaller battery makes the work
-   impossible rather than the plan wrong, and it is refused by name. A
-   dispatcher can hire a diesel van in ten minutes and cannot un-strand a
-   driver.
+5. **The round nobody can drive.** A smaller battery makes the work impossible
+   rather than the plan wrong, and it is refused by name -- with two different
+   refusals, because "no charger in range from here" and "flat even after
+   charging everywhere" are different problems for a dispatcher.
 
-Runs offline. The chargers and the curve are invented, and the corpus is
-generated -- which is the point rather than an apology.
+Runs offline, against the committed corpus slice. The stops, their spacing and
+their service times are the corpus's; the charging curve and the decision to
+put a charger at every depot are invented, which is what the DoD asked for.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -43,15 +50,20 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.battery import FULL_PPT, ChargingCurve, charge_seconds
 from vrp.electric import RESERVE_PPT, NoChargerReachable, plan_charging
 from vrp.evaluator import build_timeline
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
@@ -60,48 +72,100 @@ from vrp.model import (
     Solution,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.verify import verify
 
 HOUR = 3600
 KM = 1000
-ORDERS = ["O1", "O2", "O3", "O4"]
+STOPS = 3
+ORDERS = [f"O{i}" for i in range(1, STOPS + 1)]
+# A large electric van, and what one uses hauling freight through hills.
+BATTERY_WH = 75_000
+CONSUMPTION_WH_PER_KM = 250
 
 
 def curve() -> ChargingCurve:
-    """60 kW to eighty percent, 20 kW after. The shape every EV has."""
+    """Fast to eighty percent, then slow -- the shape that makes the decision."""
     return ChargingCurve(bands=((800, 60_000), (FULL_PPT, 20_000)))
 
 
-def a_round(battery_wh: int, hop_km: int = 30) -> Problem:
-    """Four stops out along a road, a charger beside the second."""
+def geometry() -> tuple:
+    """The real round, and the depots standing in as chargers.
+
+    Returns:
+        `(locations, matrix, deliveries, depot, charger_names)`, where the
+        chargers are every depot except the one the van starts from.
+    """
+    locations, _, deliveries, depot = dataset.planar_sites(
+        STOPS, "furthest", "ev")
+    corpus = dataset.load()
+    others = [d for d in corpus.depots if d["name"] != depot["name"]]
+    extra = tuple(
+        Location(id=f"CH{i}", lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=len(locations) + i - 1)
+        for i, d in enumerate(others, 1))
+    points = [(depot["latitude"], depot["longitude"])]
+    points += [(d["latitude"], d["longitude"]) for d in deliveries]
+    points += [(d["latitude"], d["longitude"]) for d in others]
+    return (locations + extra, _matrix_over(points, depot), deliveries, depot,
+            {f"CH{i}": d["name"] for i, d in enumerate(others, 1)})
+
+
+def _matrix_over(points: list[tuple[float, float]], depot: dict) -> PlanarMatrix:
+    """Degrees to kilometres about the depot, then a planar matrix.
+
+    Args:
+        points: `(latitude, longitude)` for every site, the depot first.
+        depot: The site the round starts from.
+
+    Returns:
+        A matrix whose distances are straight lines -- shorter than the road's,
+        and by different amounts in different places.
+    """
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    coordinates = tuple(((lon - depot["longitude"]) * lon_km,
+                         (lat - depot["latitude"]) * lat_km)
+                        for lat, lon in points)
+    return PlanarMatrix(version="ev-v1", coordinates=coordinates)
+
+
+LOCATIONS, MATRIX, DELIVERIES, DEPOT, CHARGERS = geometry()
+
+
+def tour_metres() -> int:
+    """What the round costs if it is driven in the order it is given."""
+    legs = MATRIX.distance(0, 1) + MATRIX.distance(STOPS, 0)
+    return legs + sum(MATRIX.distance(i, i + 1) for i in range(1, STOPS))
+
+
+def a_round(battery_wh: int = BATTERY_WH,
+            consumption_wh_per_km: int = CONSUMPTION_WH_PER_KM) -> Problem:
+    """The Guanacaste round, for a van of a given battery.
+
+    Args:
+        battery_wh: Usable capacity in watt-hours.
+        consumption_wh_per_km: What the van draws, loaded.
+
+    Returns:
+        A problem whose chargers are the fleet's other depots.
+    """
     day = TimeWindow(start=0, end=20 * HOUR)
-    ids = ["D", "C1", "C2", "C3", "C4", "CH"]
-    positions = [0, 1, 2, 3, 4, 2]
-    locations = tuple(
-        Location(id=site, lat=9.9 + index / 100, lon=-84.0, matrix_index=index)
-        for index, site in enumerate(ids))
-    metres = tuple(tuple(abs(a - b) * hop_km * KM for b in positions)
-                   for a in positions)
     orders = tuple(
         Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-              delivery=StopSpec(location_id=f"C{i}", service_fixed=300,
+              delivery=StopSpec(location_id=f"C{i}",
+                                service_fixed=d["service_minutes"] * 60,
                                 time_windows=(day,)))
-        for i in range(1, 5))
-    return Problem(
-        id=f"ev-{battery_wh}", locations=locations, orders=orders,
-        vehicles=(Vehicle(
-            id="V1", capacities={"kg": 100},
-            shift=TimeWindow(start=7 * HOUR, end=20 * HOUR),
-            start_location_id="D", end_location_id="D",
-            battery_wh=battery_wh, consumption_wh_per_km=250,
-            charger_locations=frozenset({"CH"}), charging_curve=curve()),),
-        matrix=TravelMatrix(
-            version="ev",
-            durations=tuple(tuple(m // 10 for m in row) for row in metres),
-            distances=metres))
+        for i, d in enumerate(DELIVERIES, 1))
+    vehicle = Vehicle(
+        id="V1", capacities={"kg": 100}, shift=TimeWindow(start=6 * HOUR,
+                                                          end=22 * HOUR),
+        start_location_id="D", end_location_id="D", battery_wh=battery_wh,
+        consumption_wh_per_km=consumption_wh_per_km,
+        charger_locations=frozenset(CHARGERS), charging_curve=curve())
+    return Problem(id=f"ev-{battery_wh}", locations=LOCATIONS, orders=orders,
+                   vehicles=(vehicle,), matrix=MATRIX)
 
 
 def clock(seconds: int) -> str:
@@ -125,11 +189,11 @@ def show(timeline) -> None:
 
 def the_curve() -> None:
     heading("1.", "Why the last fifth of a battery costs what it does")
-    battery = 50_000
-    print("\n   fifths of a 50 kWh battery, and what each costs to put in:\n")
+    print(f"\n   fifths of a {BATTERY_WH // 1000} kWh battery, and what each "
+          "costs to put in:\n")
     print(f"      {'from':>6s} {'to':>6s} {'takes':>8s}")
     for low in (0, 200, 400, 600, 800):
-        seconds = charge_seconds(battery, curve(), low, low + 200)
+        seconds = charge_seconds(BATTERY_WH, curve(), low, low + 200)
         print(f"      {low // 10:5d}% {(low + 200) // 10:5d}% "
               f"{seconds // 60:5d} min")
     print("\n   A model with a constant rate cannot prefer the shorter stop,")
@@ -142,17 +206,19 @@ def beyond_the_battery(problem: Problem) -> None:
     timeline = build_timeline(problem, "V1", ORDERS)
     show(timeline)
     flat = min(step.soc_after_ppt for step in timeline)
-    print(f"\n   240 km on 200 km of range: it ends {-flat / 10:.0f}% past")
-    print("   empty. The state of charge is in the timeline, so the shortfall")
-    print("   has a step to point at rather than being a total that is wrong.")
+    reach = BATTERY_WH // CONSUMPTION_WH_PER_KM
+    print(f"\n   {tour_metres() // KM} km on {reach} km of range: it ends "
+          f"{-flat / 10:.0f}% past empty.")
+    print("   The state of charge is in the timeline, so the shortfall has a")
+    print("   step to point at rather than being a total that is wrong.")
 
 
 def the_stop(problem: Problem):
     heading("3.", "Where the plan puts the charge, and how full")
     charges = plan_charging(problem, "V1", ORDERS)
     for index, stop in sorted(charges.items()):
-        print(f"\n   before {ORDERS[index]}: charge at {stop.location_id} to "
-              f"{stop.to_soc_ppt / 10:.0f}%")
+        print(f"\n   before {ORDERS[index]}: charge at "
+              f"{CHARGERS[stop.location_id]} to {stop.to_soc_ppt / 10:.0f}%")
     print(f"   ({RESERVE_PPT / 10:.0f}% reserve, and no more than the rest of")
     print("   the round needs -- filling to 100% would spend the slow end of")
     print("   the curve on charge nobody is going to use.)\n")
@@ -185,21 +251,50 @@ def why_a_step(problem: Problem, charges) -> None:
     print("   a constraint.")
 
 
-def the_impossible_round() -> None:
-    heading("5.", "The round that is not a planning problem")
+def what_battery_buys(battery: int) -> str:
+    """One line for one van: refused by name, or where it has to stop.
+
+    Args:
+        battery: Usable capacity in watt-hours.
+
+    Returns:
+        A description of the day that van gets.
+    """
     try:
-        plan_charging(a_round(battery_wh=30_000), "V1", ORDERS)
+        charges = plan_charging(a_round(battery_wh=battery), "V1", ORDERS)
     except NoChargerReachable as refusal:
-        print(f"\n   a 30 kWh van on the same work:\n\n      {refusal}")
-    print("\n   Not a plan with a flat battery in it, and not a plan quietly")
-    print("   missing a stop. The fleet is wrong for the work, which is a")
-    print("   thing a dispatcher can still fix at eight in the morning.")
+        return str(refusal)
+    if not charges:
+        return "drives it on one charge, no stop"
+    where = ", ".join(f"{CHARGERS[stop.location_id]} to "
+                      f"{stop.to_soc_ppt / 10:.0f}%"
+                      for _, stop in sorted(charges.items()))
+    return f"{len(charges)} stop: {where}"
+
+
+def the_impossible_round() -> None:
+    heading("5.", "What the same work asks of the fleet")
+    print(f"\n   {tour_metres() // KM} km, and every van that could be sent "
+          "at it:\n")
+    for battery in (30_000, 50_000, BATTERY_WH, 120_000):
+        reach = battery // CONSUMPTION_WH_PER_KM
+        print(f"      {battery // 1000:3d} kWh ({reach:3d} km)  "
+              f"{what_battery_buys(battery)}")
+    print("\n   The two refusals are different sentences because they are")
+    print("   different problems. The 50 kWh van is stranded somewhere")
+    print("   specific and a charger nearer that stop would fix it; the")
+    print("   30 kWh van cannot do this work at any charge, and no charger")
+    print("   helps. Neither is a plan with a flat battery in it, and neither")
+    print("   is a plan quietly missing a stop -- which is what a dispatcher")
+    print("   needs at eight in the morning, when hiring a diesel van is")
+    print("   still possible and un-stranding a driver is not.")
 
 
 def main() -> int:
     print(__doc__.strip().split("\n")[0])
-    print("\nFR-20 and INV-16. Chargers and curve invented; corpus generated.")
-    problem = a_round(battery_wh=50_000)
+    print(f"\nFR-20 and INV-16. Real stops from {DEPOT['name']}; "
+          "chargers and curve invented.")
+    problem = a_round()
     the_curve()
     beyond_the_battery(problem)
     charges = the_stop(problem)
