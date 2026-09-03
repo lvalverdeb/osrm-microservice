@@ -37,14 +37,19 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.hos import EU_561
 from vrp.hos.schedule import schedule_route
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
@@ -54,37 +59,83 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
+    service_time,
 )
 from vrp.verify import verify
 
 DAY = TimeWindow(start=0, end=12 * 3600)
 
+# Two geometries, because the four things below need different days.
+#
+# The metro round is four real deliveries around the Guadalupe depot. Parcels
+# rather than kilogrammes is the corpus's own `units`, and it is the honest
+# dimension: this is a 30 kg-at-heaviest parcel corpus, so what fills a cargo
+# bike is the rack, not the axle.
+#
+# The regional pair is one delivery near Perez Zeledon and one near Liberia,
+# opposite corners of the country. Section 2 needs a day long enough that
+# adding the second stop breaks EU-561, and inventing one would beg the
+# question -- the corpus has them. Two stops near *each other* would not do
+# it: serving both on one trip is simply efficient, which is what a first
+# attempt at this section discovered.
+METRO = dataset.planar_sites(4, "spread", "mt-metro")
 
-def instance(orders, vehicles, stops: int, leg: int = 600,
+
+def _regional() -> tuple:
+    """The depot and two real deliveries far enough out to cost a duty."""
+    corpus = dataset.load()
+    depot = corpus.depots[0]
+    around, _ = corpus.around_each_depot(24)
+    chosen = [around[20], around[16]]
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    coordinates = [(0.0, 0.0)] + [
+        ((d["longitude"] - depot["longitude"]) * lon_km,
+         (d["latitude"] - depot["latitude"]) * lat_km) for d in chosen]
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=f"C{i}", lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i) for i, d in enumerate(chosen, 1))
+    return (locations, PlanarMatrix(version="mt-regional",
+                                    coordinates=tuple(coordinates)),
+            chosen, depot)
+
+
+REGIONAL = _regional()
+
+
+def instance(orders, vehicles, geometry=METRO,
              depot: Location | None = None) -> Problem:
-    size = stops + 1
-    depot = depot or Location(id="D", lat=9.9, lon=-84.0, matrix_index=0)
-    locations = (depot, *(
-        Location(id=f"C{i}", lat=9.9 + i / 1000, lon=-84.0, matrix_index=i)
-        for i in range(1, size)))
-    grid = tuple(tuple(abs(i - j) * leg for j in range(size))
-                 for i in range(size))
+    """The instance over one of the two real geometries.
+
+    Args:
+        orders: What is to be delivered.
+        vehicles: The fleet.
+        geometry: `METRO` or `REGIONAL`.
+        depot: Replaces the depot location, for the dock-capacity section.
+
+    Returns:
+        The instance.
+    """
+    locations, matrix = geometry[0], geometry[1]
+    if depot is not None:
+        locations = (depot, *locations[1:])
     return Problem(id="mt", locations=locations, orders=orders,
-                   vehicles=vehicles,
-                   matrix=TravelMatrix(version="mt", durations=grid,
-                                       distances=grid))
+                   vehicles=vehicles, matrix=matrix)
 
 
-def an_order(order_id: str, stop: str, kg: int) -> Order:
-    return Order(id=order_id, kind="JOB", quantities={"kg": kg},
+def an_order(order_id: str, stop: str, geometry=METRO) -> Order:
+    """One real delivery: the corpus's own parcel count and service time."""
+    delivery = geometry[2][int(stop[1:]) - 1]
+    return Order(id=order_id, kind="JOB",
+                 quantities={"parcels": delivery["units"]},
                  delivery=StopSpec(location_id=stop, time_windows=(DAY,),
-                                   service_fixed=60))
+                                   service_fixed=delivery["service_minutes"] * 60))
 
 
 def a_van(**kwargs) -> Vehicle:
-    defaults = {"capacities": {"kg": 100}, "shift": DAY,
+    defaults = {"capacities": {"parcels": 6}, "shift": DAY,
                 "start_location_id": "D", "end_location_id": "D"}
     return Vehicle(id=kwargs.pop("id", "V1"), **{**defaults, **kwargs})
 
@@ -111,17 +162,24 @@ def two_trip_plan(problem: Problem, *, reload_at: str = "D",
                  *[("RELOAD", reload_at, None)] * reloads,
                  ("DELIVERY", "C2", "O2")]
 
+    vehicle = problem.vehicle("V1")
+    full = {"parcels": max(vehicle.capacities["parcels"], 0)}
     steps = [Step(type="START", location_id="D", arrival=0, start_service=0,
-                  departure=0, load_after={"kg": 60})]
+                  departure=0, load_after=full)]
     clock, here = 0, index["D"]
     for kind, location_id, order_id in itinerary:
         there = index[location_id]
         clock += problem.matrix.duration(here, there)
-        duration = 900 if kind == "RELOAD" else 60
+        # The order's own service, from the corpus, so INV-3 has nothing to
+        # say either -- only the reload rule under test may fail.
+        duration = (900 if kind == "RELOAD" else
+                    service_time(problem.order(order_id), vehicle,
+                                 problem.location(location_id)))
         steps.append(Step(type=kind, location_id=location_id,
                           order_id=order_id, arrival=clock, start_service=clock,
                           departure=clock + duration,
-                          load_after={"kg": 60 if kind == "RELOAD" else 0}))
+                          load_after=full if kind == "RELOAD"
+                          else {"parcels": 0}))
         clock, here = clock + duration, there
     clock += problem.matrix.duration(here, index["D"])
     steps.append(Step(type="END", location_id="D", arrival=clock,
@@ -134,11 +192,11 @@ def two_trip_plan(problem: Problem, *, reload_at: str = "D",
 
 def show_the_reload() -> None:
     """§6.8: a reload "resets load to zero (or to a newly loaded state)"."""
-    print("\n1. 120 kg through a 100 kg van")
-    orders = (an_order("O1", "C1", kg=60), an_order("O2", "C2", kg=60))
+    print("\n1. Twelve parcels through a six-parcel rack")
+    orders = (an_order("O1", "C3"), an_order("O2", "C4"))
     van = a_van(reload_locations=frozenset({"D"}), max_reloads=1,
                 reload_duration=900)
-    problem = instance(orders, (van,), stops=2)
+    problem = instance(orders, (van,))
 
     report_on(problem, two_trip_plan(problem), "two trips, reloading at D")
     print("   A verifier carrying the load across the reload would reject every")
@@ -149,16 +207,20 @@ def show_the_reload() -> None:
 def show_the_cost() -> None:
     """The prohibition: a second trip is not free."""
     print("\n2. What the second trip costs the driver")
-    orders = tuple(an_order(f"O{i}", f"C{i}", kg=60) for i in (1, 2))
+    orders = tuple(an_order(f"O{i}", f"C{i}", REGIONAL) for i in (1, 2))
     van = a_van(reload_locations=frozenset({"D"}), max_reloads=1,
                 reload_duration=3600, hos_rules="EU-561")
-    problem = instance(orders, (van,), stops=2, leg=4 * 3600)
+    problem = instance(orders, (van,), REGIONAL)
 
     one = schedule_route(problem, "V1", ["O1"], EU_561)
     both = schedule_route(problem, "V1", ["O1", "O2"], EU_561)
-    print("   4-hour legs, EU-561's 9-hour driving limit")
-    print(f"   one trip  (8h driving): legal={one.legal}")
-    print(f"   two trips (16h driving): legal={both.legal}")
+    matrix = REGIONAL[1]
+    single = (matrix.duration(0, 1) + matrix.duration(1, 0)) / 3600
+    pair = (matrix.duration(0, 1) + matrix.duration(1, 2)
+            + matrix.duration(2, 0)) / 3600
+    print("   Perez Zeledon and Liberia, EU-561's 9-hour driving limit")
+    print(f"   one trip  ({single:.1f}h driving): legal={one.legal}")
+    print(f"   two trips ({pair:.1f}h driving): legal={both.legal}")
     print("   Planned separately, each trip is a perfectly good day's work and")
     print("   the pair is impossible. That is exactly the approximation §6.8")
     print("   forbids: the driver's availability gets counted twice.")
@@ -167,47 +229,69 @@ def show_the_cost() -> None:
 def show_where_and_how_often() -> None:
     """INV-11, both halves."""
     print("\n3. Where a van may reload, and how often")
-    orders = (an_order("O1", "C1", kg=60), an_order("O2", "C2", kg=60))
+    orders = (an_order("O1", "C3"), an_order("O2", "C4"))
 
     permitted = instance(orders, (a_van(reload_locations=frozenset({"D"}),
-                                        max_reloads=1, reload_duration=900),),
-                         stops=2)
+                                        max_reloads=1, reload_duration=900),))
     report_on(permitted, two_trip_plan(permitted, reload_at="C1"),
               "reloading at a customer's doorstep")
 
     twice = instance(orders, (a_van(reload_locations=frozenset({"D"}),
-                                    max_reloads=1, reload_duration=900),),
-                     stops=2)
+                                    max_reloads=1, reload_duration=900),))
     report_on(twice, two_trip_plan(twice, reloads=2),
               "two reloads where one is permitted")
     print("   `reload_locations` names where stock actually is. A plan that")
     print("   reloads elsewhere is describing a depot that does not exist.")
 
 
+def _one_van_out_and_back(problem: Problem, vehicle_id: str,
+                          order: Order) -> Route:
+    """One van, one delivery, every leg exactly what the matrix says.
+
+    The half-hour START span is the subject -- three vans loading at once --
+    so everything else has to be beyond reproach, which means taking the
+    travel from the matrix and the service from `service_time` rather than
+    writing a clock by hand.
+
+    Args:
+        problem: The instance.
+        vehicle_id: Whose route this is.
+        order: The single delivery it makes.
+
+    Returns:
+        The route, depot to depot.
+    """
+    site = order.delivery.location_id
+    index = {location.id: location.matrix_index
+             for location in problem.locations}
+    vehicle = problem.vehicle(vehicle_id)
+    carried = dict(order.quantities)
+    out = 1800 + problem.matrix.duration(index["D"], index[site])
+    service = service_time(order, vehicle, problem.location(site))
+    home = out + service + problem.matrix.duration(index[site], index["D"])
+    return Route(vehicle_id=vehicle_id, steps=(
+        Step(type="START", location_id="D", arrival=0, start_service=0,
+             departure=1800, load_after=carried),
+        Step(type="DELIVERY", location_id=site, order_id=order.id,
+             arrival=out, start_service=out, departure=out + service,
+             load_after={"parcels": 0}),
+        Step(type="END", location_id="D", arrival=home, start_service=home,
+             departure=home, load_after={"parcels": 0})))
+
+
 def show_dock_capacity() -> None:
     """§6.9: "If 40 vehicles are planned to depart at 06:00 and there are 8
     bays, the plan is fiction"."""
     print("\n4. Loading bays")
-    orders = tuple(an_order(f"O{i}", f"C{i}", kg=10) for i in (1, 2, 3))
+    orders = tuple(an_order(f"O{i}", f"C{i}") for i in (1, 2, 3))
     fleet = tuple(a_van(id=f"V{n}") for n in (1, 2, 3))
 
     for bays in (1, 3, None):
         depot = Location(id="D", lat=9.9, lon=-84.0, matrix_index=0,
                          dock_capacity=bays)
-        problem = instance(orders, fleet, stops=3, depot=depot)
-        routes = tuple(
-            Route(vehicle_id=f"V{n}", steps=(
-                Step(type="START", location_id="D", arrival=0, start_service=0,
-                     departure=1800, load_after={"kg": 10}),
-                Step(type="DELIVERY", location_id=order.delivery.location_id,
-                     order_id=order.id, arrival=1800 + 600 * n,
-                     start_service=1800 + 600 * n, departure=1860 + 600 * n,
-                     load_after={"kg": 0}),
-                Step(type="END", location_id="D", arrival=1860 + 1200 * n,
-                     start_service=1860 + 1200 * n, departure=1860 + 1200 * n,
-                     load_after={"kg": 0}),
-            ))
-            for n, order in enumerate(orders, start=1))
+        problem = instance(orders, fleet, depot=depot)
+        routes = tuple(_one_van_out_and_back(problem, f"V{n}", order)
+                       for n, order in enumerate(orders, start=1))
         plan = Solution(problem_id=problem.id, routes=routes, unassigned=(),
                         objective_breakdown={}, status="FEASIBLE")
         label = "unlimited" if bays is None else f"{bays} bay(s)"
