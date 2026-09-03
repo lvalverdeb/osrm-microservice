@@ -106,7 +106,13 @@ def instance_signature(problem: Problem) -> str:
             f"|depots={min(depots, 3)}|hos={'y' if hours else 'n'}")
 
 
-def _solved(problem: Problem, engines: list[Portfolio], workers: int
+class UnsendableEngine(Exception):
+    """An engine a worker process could not import, named before the pool runs."""
+
+
+
+def _solved(problem: Problem, engines: list[Portfolio], workers: int,
+            executor: str = "thread"
             ) -> list[tuple[Portfolio, Solution | None, Exception | None]]:
     """Run the portfolio, returning results in engine order.
 
@@ -140,6 +146,9 @@ def _solved(problem: Problem, engines: list[Portfolio], workers: int
     if workers == 1:
         return [_attempt(engine, problem) for engine in engines]
 
+    if executor == "process":
+        return _in_processes(problem, engines, workers)
+
     from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(max_workers=workers,
@@ -147,6 +156,53 @@ def _solved(problem: Problem, engines: list[Portfolio], workers: int
         # `map` preserves input order, so the winner is a function of the
         # portfolio rather than of which member happened to finish first.
         return list(pool.map(lambda engine: _attempt(engine, problem), engines))
+
+
+def _in_processes(problem: Problem, engines: list[Portfolio], workers: int
+                  ) -> list[tuple[Portfolio, Solution | None, Exception | None]]:
+    """The same run, on separate interpreters. NFR-05, §7.7, T-91.
+
+    Worth it only for an engine that holds the GIL, and measurably so: the
+    repository's own LNS went from 1.02x across four threads to 3.38x across
+    four processes. PyVRP is already parallel in threads and gains nothing here
+    but the spawn cost.
+
+    **The caller needs `if __name__ == "__main__"`.** A spawned worker
+    re-imports the program's main module, and a program that starts a solve at
+    import time will start one in every worker. No library can fix that; this
+    one says so.
+    """
+    import pickle
+    from concurrent.futures import ProcessPoolExecutor
+
+    for engine in engines:
+        try:
+            pickle.dumps(engine.solve)
+        except Exception as failure:
+            raise UnsendableEngine(
+                f"engine {engine.name!r} cannot be sent to a worker process: "
+                f"{type(failure).__name__}: {failure}. A worker imports the "
+                "engine by name, so a lambda, a closure or a local function "
+                "cannot cross -- move it to module level, or run this "
+                "portfolio with executor='thread'") from failure
+
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        # The engines are re-attached here rather than sent back: `Portfolio`
+        # travels out and only the result comes home, so `map`'s input order
+        # is what pairs them up.
+        outcomes = list(pool.map(_attempt_remotely,
+                                 [(engine.solve, problem) for engine in engines]))
+    return [(engine, solution, failure)
+            for engine, (solution, failure) in zip(engines, outcomes)]
+
+
+def _attempt_remotely(work: tuple) -> tuple[Solution | None, Exception | None]:
+    """Run one engine in a worker. Module level, so a worker can import it."""
+    solve, problem = work
+    try:
+        return solve(problem), None
+    except Exception as failure:
+        return None, failure
 
 
 def _attempt(engine: Portfolio, problem: Problem
@@ -166,7 +222,7 @@ def _attempt(engine: Portfolio, problem: Problem
 def run_portfolio(problem: Problem, engines: list[Portfolio],
                   weights: ObjectiveWeights | None = None,
                   rates: WinRates | None = None,
-                  workers: int = 1) -> Outcome:
+                  workers: int = 1, executor: str = "thread") -> Outcome:
     """Run every engine, score the survivors on one scale, return the best.
 
     Args:
@@ -182,6 +238,12 @@ def run_portfolio(problem: Problem, engines: list[Portfolio],
             "single-threaded, iteration-limited... used for all regression
             tests", and is the default because a library that parallelised
             unasked would make every existing caller's run non-reproducible.
+        executor: "thread" or "process". Threads give separate cores only to
+            engines that release the GIL: `T-86` measured 3.00x for PyVRP and
+            1.00x for the repository's own pure-Python LNS. Processes give them
+            to everything -- 3.38x for that same LNS -- at the cost of two
+            constraints named under `UnsendableEngine` and in `T-91`'s row.
+            "thread" is the default because it imposes neither.
 
     Returns:
         The winner's name and plan, every engine's canonical score, and why any
@@ -190,10 +252,14 @@ def run_portfolio(problem: Problem, engines: list[Portfolio],
         one.
 
     Raises:
-        ValueError: on a worker count below one. Nought is not "no
-            parallelism": it is a pool that runs nothing, and clamping it
-            silently would report a run that solved no engines as a run whose
-            engines all declined.
+        ValueError: on a worker count below one, or an unknown executor. Nought
+            workers is not "no parallelism": it is a pool that runs nothing,
+            and clamping it silently would report a run that solved no engines
+            as a run whose engines all declined.
+        UnsendableEngine: in process mode, when an engine cannot be pickled --
+            a lambda or a closure. Checked before the pool starts so the error
+            names the member, rather than arriving as `BrokenProcessPool` from
+            three frames inside the standard library.
 
     An engine that raises is rejected rather than fatal. §7.3 runs several
     engines precisely so one can fail, and an adapter that declines an instance
@@ -210,12 +276,16 @@ def run_portfolio(problem: Problem, engines: list[Portfolio],
     """
     if workers < 1:
         raise ValueError(f"workers must be at least 1; got {workers}")
+    if executor not in ("thread", "process"):
+        raise ValueError(
+            f"unknown executor {executor!r}; use 'thread' or 'process'")
     weights = weights or ObjectiveWeights()
     scores: dict[str, int] = {}
     plans: dict[str, Solution] = {}
     rejected: dict[str, str] = {}
 
-    for engine, solution, failure in _solved(problem, engines, workers):
+    for engine, solution, failure in _solved(problem, engines, workers,
+                                            executor):
         if failure is not None:
             rejected[engine.name] = f"{type(failure).__name__}: {failure}"
             continue
