@@ -68,7 +68,7 @@ def heading(number: str, title: str) -> None:
 
 
 def a_real_round(stops: int, vehicles: int,
-                 path: Path = None) -> Problem:
+                 path: Path | None = None) -> Problem:
     """A round of real deliveries, nearest one depot first.
 
     Real coordinates rather than a scatter, because how much work a cluster is
