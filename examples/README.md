@@ -185,6 +185,19 @@ a technique they cannot use.
   than inventing coordinates, unless the instance itself is the subject — a
   maximal record for serialisation, an adversarial fixture, a known speed
   profile whose ground truth is the point.
+- **The corpus is here, in miniature.** The full 50,000-delivery
+  `data/deliveries_cr.json` is 12 MB and needs a live OSRM to build, so it is
+  not committed. `examples/data/deliveries_sample.json` is, and `dataset.load`
+  falls back to it. It is not a sample: it is the union of the slices the
+  examples take, built by
+  [`tools/build_sample_slice.py`](tools/build_sample_slice.py) so that every
+  selection returns the *same deliveries* it returns from the full corpus, and
+  an example prints the same numbers on a fresh clone as on a machine with the
+  generated dataset. `tests/test_sample_slice.py` holds that contract.
+  An example reaching for a selection the slice does not underwrite — a
+  `spread` pool past 2,000, a `by_province` restriction — should add it to that
+  file's `MANIFEST` and rebuild, rather than quietly print different numbers
+  depending on who is running it.
 - **The first docstring line is the title.** It is what the menu shows and what
   the tables above quote, so make it the problem, not the mechanism.
 - **Run it.** `make examples-check` executes every one and is a CI step.

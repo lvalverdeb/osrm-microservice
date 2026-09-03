@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: property-soak examples examples-check help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: property-soak examples examples-check examples-slice help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -55,6 +55,7 @@ help:
 	@echo "  clean-pkg      - Remove Python build artifacts"
 	@echo "  examples       - Interactive menu of the example client scripts (examples/)"
 	@echo "  examples-check - Run every example and check it still works"
+	@echo "  examples-slice - Rebuild the committed corpus slice from the full dataset"
 	@echo "  test           - Run the pytest suite"
 	@echo "  catalogue      - Rebuild the VRP scenario catalogue from vrp-catalogue-v2.1.src.md"
 	@echo "  corpus         - The P0 scenario corpus at all three sizes (slow)"
@@ -237,6 +238,13 @@ examples:
 # `docs/planning/VRP_EXAMPLES_PLAN.md`.
 examples-check:
 	uv run python -m pytest tests/test_examples_run.py -q --tb=short
+
+# Rebuild the committed corpus slice the examples fall back to. Needs the full
+# `data/deliveries_cr.json`; refuses to write a slice that answers any manifest
+# selection differently from it. `tests/test_sample_slice.py` holds the same
+# contract for anyone without the corpus to rebuild from.
+examples-slice:
+	uv run python examples/tools/build_sample_slice.py
 
 test:
 	uv run python -m pytest tests/ -q --tb=short -m "not slow"
