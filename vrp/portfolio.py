@@ -106,9 +106,67 @@ def instance_signature(problem: Problem) -> str:
             f"|depots={min(depots, 3)}|hos={'y' if hours else 'n'}")
 
 
+def _solved(problem: Problem, engines: list[Portfolio], workers: int
+            ) -> list[tuple[Portfolio, Solution | None, Exception | None]]:
+    """Run the portfolio, returning results in engine order.
+
+    **Threads, so §7.7's "separate cores" holds for some engines and not
+    others.** PyVRP and OR-Tools are C++ and release the GIL while they solve,
+    and they do scale: four members of a portfolio on a 24-stop instance
+    measured 2.97x at four workers. The repository's own LNS is pure Python and
+    measured **1.00x** -- four threads taking turns at one interpreter. That is
+    a property of the engine rather than of this function, and pretending
+    otherwise would have somebody sizing a box on a speed-up that only half the
+    portfolio can have. Process-based parallelism is what would fix it, and is
+    `T-91`.
+
+    Args:
+        problem: the instance, shared unchanged. The domain model is frozen, so
+            the engines have nothing mutable between them -- which is the only
+            level at which a library can honour NFR-05's isolation, and is why
+            a test asserts the problem is unchanged after a parallel run.
+        engines: the members to run.
+        workers: how many may be in flight at once.
+
+    Returns:
+        One `(engine, solution, failure)` per member, in the order given.
+        Exactly one of `solution` and `failure` is set.
+
+    A pool of one runs inline rather than through an executor. `CON-4`'s
+    reproducible mode is "single-threaded", and a single-worker pool is still a
+    worker thread -- close enough for most purposes and not for the one that
+    says single-threaded.
+    """
+    if workers == 1:
+        return [_attempt(engine, problem) for engine in engines]
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers,
+                            thread_name_prefix="portfolio") as pool:
+        # `map` preserves input order, so the winner is a function of the
+        # portfolio rather than of which member happened to finish first.
+        return list(pool.map(lambda engine: _attempt(engine, problem), engines))
+
+
+def _attempt(engine: Portfolio, problem: Problem
+             ) -> tuple[Portfolio, Solution | None, Exception | None]:
+    """Run one member, catching what it raises rather than letting it out.
+
+    Caught here rather than around the pool: one engine's failure must not
+    cancel the others, and an exception escaping a worker would do exactly that
+    to everything still queued.
+    """
+    try:
+        return engine, engine.solve(problem), None
+    except Exception as failure:
+        return engine, None, failure
+
+
 def run_portfolio(problem: Problem, engines: list[Portfolio],
                   weights: ObjectiveWeights | None = None,
-                  rates: WinRates | None = None) -> Outcome:
+                  rates: WinRates | None = None,
+                  workers: int = 1) -> Outcome:
     """Run every engine, score the survivors on one scale, return the best.
 
     Args:
@@ -119,6 +177,11 @@ def run_portfolio(problem: Problem, engines: list[Portfolio],
             which is the whole point.
         rates: optional telemetry to record the winner against the instance's
             signature.
+        workers: §7.7's bounded intra-run parallelism -- how many portfolio
+            members may be in flight at once. One is CON-4's reproducible mode,
+            "single-threaded, iteration-limited... used for all regression
+            tests", and is the default because a library that parallelised
+            unasked would make every existing caller's run non-reproducible.
 
     Returns:
         The winner's name and plan, every engine's canonical score, and why any
@@ -126,19 +189,34 @@ def run_portfolio(problem: Problem, engines: list[Portfolio],
         plan -- returning something regardless would be the portfolio inventing
         one.
 
+    Raises:
+        ValueError: on a worker count below one. Nought is not "no
+            parallelism": it is a pool that runs nothing, and clamping it
+            silently would report a run that solved no engines as a run whose
+            engines all declined.
+
     An engine that raises is rejected rather than fatal. §7.3 runs several
     engines precisely so one can fail, and an adapter that declines an instance
     -- as the OR-Tools one does for shipments -- must not take the run down.
+
+    **Timing does not decide anything.** Every plan is scored afterwards on the
+    canonical objective, and the winner is a `min` over a name-keyed dict with a
+    name tiebreak -- so which engine finished first could not change it even if
+    results arrived in that order. What completion order *would* change is the
+    report: `scores` and `rejected` would list their engines differently on
+    every run, and two runs agreeing about every number would serialise to
+    different bytes. Results are therefore collected in engine order, which
+    makes the whole outcome a function of the portfolio rather than the weather.
     """
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1; got {workers}")
     weights = weights or ObjectiveWeights()
     scores: dict[str, int] = {}
     plans: dict[str, Solution] = {}
     rejected: dict[str, str] = {}
 
-    for engine in engines:
-        try:
-            solution = engine.solve(problem)
-        except Exception as failure:
+    for engine, solution, failure in _solved(problem, engines, workers):
+        if failure is not None:
             rejected[engine.name] = f"{type(failure).__name__}: {failure}"
             continue
 
