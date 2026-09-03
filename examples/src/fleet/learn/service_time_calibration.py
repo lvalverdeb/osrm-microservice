@@ -36,20 +36,22 @@ Usage:
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.adherence import ExecutedRoute
 from vrp.calibrate import archetype_of, as_service_fixed, drift, fit, observations
 from vrp.model import (
-    Location,
     Order,
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 
@@ -59,33 +61,40 @@ LEG = 600
 
 
 def instance(stops: int = 4) -> Problem:
-    size = stops + 1
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
+    """Four real deliveries around the Guadalupe depot.
+
+    Their quantities and planned service times are the corpus's own, which is
+    what makes the archetype table below worth reading: the bands are drawn
+    over numbers somebody recorded rather than numbers chosen to make the
+    grouping come out tidy.
+
+    The access restriction on the third stop is added here and is not in the
+    corpus -- it records a delivery's address, not whether there is a barrier
+    across it. Stated rather than smuggled in, because an archetype the data
+    cannot support is exactly what §12.1 warns against.
+    """
+    locations, matrix, deliveries, _depot = dataset.planar_sites(
+        stops, strategy="spread", name="calib")
+    # A bulk drop among small ones, so the quantity band separates something.
+    units = [d["units"] for d in deliveries]
+    units[-1] = max(units) * 40
+
+    locations = tuple(
+        replace(loc, access_classes=frozenset({"BIKE"}))
+        if loc.id == "C3" else loc for loc in locations)
+
     return Problem(
-        id="calib",
-        locations=(Location(id="D", lat=9.9, lon=-84.0, matrix_index=0),
-                   Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1),
-                   Location(id="C2", lat=9.92, lon=-84.0, matrix_index=2),
-                   Location(id="C3", lat=9.93, lon=-84.0, matrix_index=3,
-                            access_classes=frozenset({"BIKE"})),
-                   Location(id="C4", lat=9.94, lon=-84.0, matrix_index=4)),
-        orders=(
-            Order(id="O1", kind="JOB", quantities={"kg": 20},
-                  delivery=StopSpec(location_id="C1", time_windows=(DAY,),
-                                    service_fixed=300)),
-            Order(id="O2", kind="JOB", quantities={"kg": 25},
-                  delivery=StopSpec(location_id="C2", time_windows=(DAY,),
-                                    service_fixed=300)),
-            Order(id="O3", kind="JOB", quantities={"kg": 20},
-                  delivery=StopSpec(location_id="C3", time_windows=(DAY,),
-                                    service_fixed=300)),
-            Order(id="O4", kind="JOB", quantities={"kg": 800},
-                  delivery=StopSpec(location_id="C4", time_windows=(DAY,),
-                                    service_fixed=300))),
-        vehicles=(Vehicle(id="V1", capacities={"kg": 1000}, shift=DAY,
-                          start_location_id="D", end_location_id="D"),),
-        matrix=TravelMatrix(version="c", durations=grid, distances=grid))
+        id="calib", locations=locations,
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": units[i]},
+                  delivery=StopSpec(location_id=f"C{i + 1}",
+                                    time_windows=(DAY,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
+        vehicles=(Vehicle(id="V1", capacities={"kg": max(units) * 50},
+                          shift=DAY, start_location_id="D",
+                          end_location_id="D"),),
+        matrix=matrix)
 
 
 def route(observed: dict[str, tuple[int, int]]) -> ExecutedRoute:

@@ -36,10 +36,12 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.adherence import ExecutedRoute
 from vrp.model import (
-    Location,
     Order,
     Problem,
     Route,
@@ -47,7 +49,6 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.rollout import Canary, Criterion, decide, divergences, shadow
@@ -60,23 +61,21 @@ REVERSED = list(reversed(ORDER))
 
 
 def instance(stops: int = 4) -> Problem:
-    size = stops + 1
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
+    """Four real deliveries around the Guadalupe depot.\n\n    A rollout is judged on plans over work the fleet actually does, so the\n    round it is judged on should be one."""
+    locations, matrix, deliveries, _depot = dataset.planar_sites(
+        stops, strategy="spread", name="rollout")
     return Problem(
-        id="rollout",
-        locations=tuple(Location(id="D" if i == 0 else f"C{i}",
-                                 lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                        for i in range(size)),
-        orders=tuple(Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-                           delivery=StopSpec(location_id=f"C{i}",
-                                             time_windows=(DAY,),
-                                             service_fixed=60))
-                     for i in range(1, size)),
-        vehicles=(Vehicle(id="V1", capacities={"kg": 100}, shift=DAY,
+        id="rollout", locations=locations,
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": d["units"]},
+                  delivery=StopSpec(location_id=f"C{i + 1}",
+                                    time_windows=(DAY,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
+        vehicles=(Vehicle(id="V1", capacities={"kg": 1000}, shift=DAY,
                           start_location_id="D", end_location_id="D",
                           cost_per_metre=1),),
-        matrix=TravelMatrix(version="r", durations=grid, distances=grid))
+        matrix=matrix)
 
 
 def plan(problem: Problem, order_ids: list[str]) -> Solution:

@@ -1,4 +1,4 @@
-"""Twenty days of drivers going south first.
+"""Twenty days of drivers leaving San Jose Central until last.
 
 Demonstrates the zone-sequence prior landed for E-64/T-64 (§12.4 step 2):
 
@@ -21,7 +21,9 @@ all learning."
 
 Four things, in order:
 
-1. **What the drivers do**, and what the matrix says instead.
+1. **What the drivers do**, and what the matrix says instead. Six real
+   deliveries around the Guadalupe depot, two in each of three districts the
+   round actually covers.
 
 2. **The prior learned from it**, with how much they agreed.
 
@@ -38,12 +40,17 @@ Usage:
 
 from __future__ import annotations
 
+import collections
+import math
 import sys
 from dataclasses import replace
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.adherence import ExecutedRoute, adherence
 from vrp.model import (
@@ -63,36 +70,76 @@ from vrp.zones import ZonePrior, learn_prior, order_by_prior, zone_of
 
 HOUR = 3600
 DAY = TimeWindow(start=0, end=12 * HOUR)
-LEG = 600
-ZONES = {"C1": "north", "C2": "north", "C3": "middle",
-         "C4": "middle", "C5": "south", "C6": "south"}
-NAIVE = ["O1", "O2", "O3", "O4", "O5", "O6"]
-DRIVEN = ["O5", "O6", "O3", "O4", "O1", "O2"]
+PER_HUB = 2
+HUBS = 3
 
 
-def instance(stops: int = 6) -> Problem:
-    size = stops + 1
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
-    return Problem(
-        id="zones",
-        locations=tuple(Location(id="D" if i == 0 else f"C{i}",
-                                 lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                        for i in range(size)),
-        orders=tuple(Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-                           delivery=StopSpec(location_id=f"C{i}",
-                                             time_windows=(DAY,),
-                                             service_fixed=60))
-                     for i in range(1, size)),
+def a_real_round():
+    """Six deliveries around the Guadalupe depot, across three districts.
+
+    Two stops in each of the three nearest districts, because a zone-ordering
+    prior has nothing to learn from a round that never leaves one. The
+    districts are the dataset's own -- San Jose Central, Desamparados, San
+    Rafael -- and the distances are the real ones between real addresses.
+
+    Returns:
+        The problem, the zone map (order to district), and the depot record.
+    """
+    corpus = dataset.load()
+    depot = corpus.depots[0]
+
+    def near(delivery):
+        return ((delivery["latitude"] - depot["latitude"]) ** 2
+                + (delivery["longitude"] - depot["longitude"]) ** 2)
+
+    by_hub = collections.defaultdict(list)
+    for delivery in sorted(corpus.deliveries, key=near):
+        by_hub[delivery["hub"]].append(delivery)
+    hubs = sorted((h for h, v in by_hub.items() if len(v) >= PER_HUB),
+                  key=lambda h: near(by_hub[h][0]))[:HUBS]
+    chosen = [d for hub in hubs for d in by_hub[hub][:PER_HUB]]
+
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    points = [(0.0, 0.0)] + [
+        ((d["longitude"] - depot["longitude"]) * lon_km,
+         (d["latitude"] - depot["latitude"]) * lat_km) for d in chosen]
+    grid = tuple(tuple(int(math.dist(a, b) * 1000) for b in points)
+                 for a in points)
+
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i + 1) for i, d in enumerate(chosen))
+    orders = tuple(
+        Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": 1},
+              delivery=StopSpec(location_id=f"C{i + 1}", time_windows=(DAY,),
+                                service_fixed=d["service_minutes"] * 60))
+        for i, d in enumerate(chosen))
+
+    problem = Problem(
+        id="zones", locations=locations, orders=orders,
         vehicles=(Vehicle(id="V1", capacities={"kg": 100}, shift=DAY,
                           start_location_id="D", end_location_id="D",
                           cost_per_metre=1),),
         matrix=TravelMatrix(version="z", durations=grid, distances=grid))
+    zones = {f"C{i + 1}": d["hub"] for i, d in enumerate(chosen)}
+    return problem, zones, depot, hubs
+
+
+PROBLEM, ZONES, DEPOT, HUBS_IN_ORDER = a_real_round()
+
+# What a distance matrix produces: the nearest district first. What the drivers
+# do: that district last, twenty days running.
+NAIVE = [order.id for order in PROBLEM.orders]
+DRIVEN = NAIVE[PER_HUB * (HUBS - 1):] + NAIVE[PER_HUB:PER_HUB * (HUBS - 1)] \
+    + NAIVE[:PER_HUB]
 
 
 def drove(sequence: list[str]) -> ExecutedRoute:
     return ExecutedRoute(
-        vehicle_id="V1", driver_id="ana", depot_id="D", territory="north",
+        vehicle_id="V1", driver_id="ana", depot_id="D",
+        territory=HUBS_IN_ORDER[0],
         sequence=tuple(sequence),
         arrivals={o: 600 * (n + 1) for n, o in enumerate(sequence)})
 
@@ -106,10 +153,16 @@ def plan(problem: Problem, order_ids: list[str]) -> Solution:
         stop = problem.order(order_id).delivery
         there = index[stop.location_id]
         now += problem.matrix.duration(here, there)
+        # The order's own service time, not a flat minute. These are real
+        # deliveries and they take between eight and twenty minutes each;
+        # assuming sixty seconds made the timeline disagree with the model and
+        # INV-3 fired on every plan, masking the window violation section 4 is
+        # about.
+        service = stop.service_fixed
         steps.append(Step(type="DELIVERY", location_id=stop.location_id,
                           order_id=order_id, arrival=now, start_service=now,
-                          departure=now + 60))
-        now, here = now + 60, there
+                          departure=now + service))
+        now, here = now + service, there
     now += problem.matrix.duration(here, index["D"])
     steps.append(Step(type="END", location_id="D", arrival=now,
                       start_service=now, departure=now))
@@ -129,12 +182,15 @@ def zones_of(problem: Problem, sequence: list[str]) -> str:
 
 def show_the_disagreement(problem: Problem) -> None:
     print("\n1. What the matrix says, and what the drivers do")
+    print(f"   depot:    {DEPOT['name']}")
     print(f"   planned:  {zones_of(problem, NAIVE)}")
     print(f"   driven:   {zones_of(problem, DRIVEN)}   (20 days running)")
-    print("   The matrix is not wrong about distance -- north really is nearest")
-    print("   the depot. The drivers know something it does not: §12.4 lists")
-    print("   \"roads that are hard to navigate, when traffic is bad, where")
-    print("   parking is findable\". None of that is in a distance matrix.")
+    print(f"   The matrix is not wrong: {HUBS_IN_ORDER[0]} really is")
+    print("   nearest the depot. The drivers know something it does not.")
+    print("   §12.4 lists what: \"roads that are hard to navigate, when")
+    print("   traffic is bad, where parking is findable\" -- a bay you can")
+    print("   only get into before the morning fills up, a street that is")
+    print("   one-way at school run. None of it is in a distance matrix.")
     print("   §12.4 is explicit about how to read this: \"Systematic, repeated")
     print("   deviation is a model defect, not driver misbehaviour.\"")
 
@@ -143,7 +199,7 @@ def show_the_prior(problem: Problem) -> None:
     print("\n2. The prior learned from it (§12.4 step 2)")
     for label, history in (
             ("20 days, all the same", [drove(DRIVEN)] * 20),
-            ("12 north-first, 8 south-first",
+            (f"12 days {HUBS_IN_ORDER[0][:12]}-first, 8 the other way",
              [drove(NAIVE)] * 12 + [drove(DRIVEN)] * 8),
             ("3 days, all different",
              [drove(NAIVE), drove(DRIVEN),
@@ -151,7 +207,7 @@ def show_the_prior(problem: Problem) -> None:
             ("no history at all", [])):
         prior = learn_prior(problem, history, ZONES)
         shown = " -> ".join(prior.sequence) if prior.sequence else "(empty)"
-        print(f"   {label:<32}{shown:<28}{prior.confidence / 10:>5.0f}%")
+        print(f"   {label:<38}{shown:<50}{prior.confidence / 10:>5.0f}%")
 
     print("   Drivers disagree, so the majority wins and the confidence says")
     print("   how close it was -- a prior that refused to commit would be no")
@@ -180,17 +236,24 @@ def show_adherence(problem: Problem) -> None:
 
 def show_the_guardrail(problem: Problem) -> None:
     print("\n4. The guardrail (§12.4: advisory only)")
+    # The first stop -- in the district nearest the depot -- gets a receiving
+    # bay that shuts ninety minutes into the shift. The prior-ordered round
+    # reaches that district at a hundred minutes, so the ordering the drivers
+    # taught it is, for this one stop, no longer legal.
+    closes = 90 * 60
+    first = NAIVE[0]
     tight = replace(problem, orders=tuple(
         replace(order, delivery=replace(order.delivery, time_windows=(
-            TimeWindow(start=0, end=2 * LEG),)))
-        if order.id == "O1" else order for order in problem.orders))
+            TimeWindow(start=0, end=closes),)))
+        if order.id == first else order for order in problem.orders))
 
-    prior = ZonePrior(sequence=("south", "middle", "north"), confidence=1000)
+    prior = ZonePrior(sequence=tuple(reversed(HUBS_IN_ORDER)), confidence=1000)
     advised = order_by_prior(tight, NAIVE, prior, ZONES)
     report = verify(tight, plan(tight, advised))
 
-    print(f"   O1's window now closes at {2 * LEG} s")
-    print(f"   the prior still puts it last: {advised}")
+    print(f"   {first} is in {ZONES['C1']}; its bay shuts "
+          f"{closes // 60} minutes into the shift")
+    print(f"   the prior still leaves that district until last: {advised}")
     print(f"   the plan verifies: {report.ok}")
     for violation in report.violations[:1]:
         print(f"     {violation.invariant}: {violation.detail}")
@@ -208,7 +271,7 @@ def show_the_guardrail(problem: Problem) -> None:
 
 
 def main() -> int:
-    problem = instance()
+    problem = PROBLEM
     show_the_disagreement(problem)
     show_the_prior(problem)
     show_adherence(problem)

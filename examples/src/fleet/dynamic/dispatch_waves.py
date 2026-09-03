@@ -24,8 +24,8 @@ Four things, in order:
    one -- because the requests in the last forty minutes are still requests.
 
 2. **Must-go, and why it is about arrival rather than the clock.** A stop
-   thirty minutes out with a window closing ten minutes into the next epoch is
-   already gone.
+   four minutes out with a window closing on the hour is already gone if the
+   van is held to the hour.
 
 3. **The asymmetry.** DYN-2 says "conservative by construction; false negatives
    are service failures", so every uncertain case resolves to must-go.
@@ -49,11 +49,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.epochs import classify, decide, epochs, must_go
 from vrp.model import (
     UNREACHABLE,
-    Location,
     Order,
     Problem,
     StopSpec,
@@ -72,25 +74,28 @@ def clock(seconds: int) -> str:
 
 
 def instance(closes: dict[str, int]) -> Problem:
+    """Real deliveries, each with the hour its window shuts.
+
+    The windows are the subject and stay the caller's -- a cut-off is a
+    commercial fact, not a geographic one. The addresses and service times are
+    the corpus's, so the drive between two stops is a real drive and the
+    question "can this still wait?" has a real answer.
+    """
     ids = sorted(closes)
-    size = len(ids) + 1
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
+    locations, matrix, deliveries, _depot = dataset.planar_sites(
+        len(ids), strategy="spread", name="waves")
     return Problem(
-        id="waves",
-        locations=tuple(Location(id="D" if i == 0 else f"C{i}",
-                                 lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                        for i in range(size)),
+        id="waves", locations=locations,
         orders=tuple(
             Order(id=order_id, kind="JOB", quantities={"kg": 1},
                   delivery=StopSpec(
                       location_id=f"C{n}",
                       time_windows=(TimeWindow(start=0, end=closes[order_id]),),
-                      service_fixed=300))
+                      service_fixed=deliveries[n - 1]["service_minutes"] * 60))
             for n, order_id in enumerate(ids, start=1)),
         vehicles=(Vehicle(id="V1", capacities={"kg": 100}, shift=DAY,
                           start_location_id="D", end_location_id="D"),),
-        matrix=TravelMatrix(version="w", durations=grid, distances=grid))
+        matrix=matrix)
 
 
 CLOSES = {"O1": 1 * HOUR, "O2": 2 * HOUR, "O3": 4 * HOUR, "O4": 8 * HOUR}
@@ -111,7 +116,12 @@ def show_the_waves() -> None:
 def show_must_go() -> None:
     print("\n2. Must-go is about arrival, not the window's clock (DYN-2)")
     problem = instance(CLOSES)
-    print(f"   each stop is {LEG // 60} min out; service {5} min")
+    drives = [problem.matrix.duration(
+        0, problem.location(problem.order(o).delivery.location_id).matrix_index)
+        for o in sorted(CLOSES)]
+    services = [problem.order(o).delivery.service_fixed for o in sorted(CLOSES)]
+    print(f"   real stops: {min(drives) // 60}-{max(drives) // 60} min out, "
+          f"service {min(services) // 60}-{max(services) // 60} min")
     print(f"   {'order':<7}{'window closes':>15}{'postponed to 10:00':>22}"
           f"{'arrives':>10}")
 
@@ -124,9 +134,27 @@ def show_must_go() -> None:
         print(f"   {order_id:<7}{clock(CLOSES[order_id]):>15}{verdict:>22}"
               f"{clock(arrives):>10}")
 
-    print("   O2's window closes at 10:00 and it is thirty minutes out, so a")
-    print("   van leaving at 10:00 arrives at 10:30 to a shut door. The window")
-    print("   has not closed yet; the chance to use it has.")
+    drive = problem.matrix.duration(
+        0, problem.location(problem.order("O2").delivery.location_id).matrix_index)
+    print(f"   O2's window closes at 10:00 and it is {drive // 60} min "
+          f"{drive % 60}s out, so a van")
+    print(f"   held to 10:00 arrives at {clock(2 * HOUR + drive)} to a shut "
+          "door. The window has")
+    print("   not closed yet; the chance to use it has. Four minutes is")
+    print("   enough -- the margin does not have to be large to be fatal.")
+
+
+def _with_unreachable_arc(problem: Problem, node: int) -> TravelMatrix:
+    """A stored copy of the matrix with one depot arc marked unreachable."""
+    size = problem.matrix.size
+    cells = tuple(tuple(problem.matrix.duration(i, j) for j in range(size))
+                  for i in range(size))
+    durations = tuple(
+        tuple(UNREACHABLE if (i, j) in ((0, node), (node, 0)) else cell
+              for j, cell in enumerate(row))
+        for i, row in enumerate(cells))
+    return TravelMatrix(version="waves-cut", durations=durations,
+                        distances=durations)
 
 
 def show_the_asymmetry() -> None:
@@ -135,13 +163,12 @@ def show_the_asymmetry() -> None:
 
     cases = {
         "no vehicles left": replace(problem, vehicles=()),
+        # A planar matrix computes its cells rather than storing them, so an
+        # unreachable arc has to be punched into a materialised copy. Worth
+        # seeing: a lazy matrix cannot carry MTX-5's sentinel, which is a real
+        # constraint on where it can be used.
         "stop unreachable in the matrix": replace(
-            problem,
-            matrix=replace(problem.matrix,
-                           durations=tuple(
-                               tuple(UNREACHABLE if (i, j) in ((0, 4), (4, 0))
-                                     else cell for j, cell in enumerate(row))
-                               for i, row in enumerate(problem.matrix.durations)))),
+            problem, matrix=_with_unreachable_arc(problem, 4)),
     }
     for label, variant in cases.items():
         verdict = must_go(variant, variant.order("O4"), postponed_to=2 * HOUR)

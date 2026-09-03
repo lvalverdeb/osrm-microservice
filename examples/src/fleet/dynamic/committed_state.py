@@ -44,10 +44,12 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.committed import Execution, commit_locks, committed_prefix, moved_since
 from vrp.model import (
-    Location,
     Order,
     Problem,
     Route,
@@ -55,7 +57,6 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.verify import verify
@@ -70,24 +71,25 @@ def clock(seconds: int) -> str:
 
 
 def instance(stops: int = 6, vans: int = 2) -> Problem:
-    size = stops + 1
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
+    """A morning's real deliveries, some of them already made.
+
+    Real coordinates and real service times, so the distances a re-plan trades
+    against are ones a driver would recognise.
+    """
+    locations, matrix, deliveries, _depot = dataset.planar_sites(
+        stops, strategy="spread", name="commit")
     return Problem(
-        id="commit",
-        locations=tuple(Location(id="D" if i == 0 else f"C{i}",
-                                 lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                        for i in range(size)),
-        orders=tuple(Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-                           delivery=StopSpec(location_id=f"C{i}",
-                                             time_windows=(DAY,),
-                                             service_fixed=300))
-                     for i in range(1, size)),
+        id="commit", locations=locations,
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": 1},
+                  delivery=StopSpec(location_id=f"C{i + 1}",
+                                    time_windows=(DAY,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
         vehicles=tuple(Vehicle(id=f"V{n}", capacities={"kg": 100}, shift=DAY,
                                start_location_id="D", end_location_id="D")
                        for n in range(1, vans + 1)),
-        matrix=TravelMatrix(version="k", durations=grid, distances=grid))
-
+        matrix=matrix)
 
 def plan(problem: Problem, assignment: dict[str, list[str]]) -> Solution:
     index = {loc.id: loc.matrix_index for loc in problem.locations}

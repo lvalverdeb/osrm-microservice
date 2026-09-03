@@ -40,9 +40,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.model import (
-    Location,
     Order,
     Problem,
     Route,
@@ -50,7 +52,6 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.stability import churn, churn_cost, tradeoff
@@ -65,35 +66,32 @@ ROUTES = {"V1": [f"O{i}" for i in range(1, 6)],
 
 
 def instance(stops: int = 15, vans: int = 3) -> Problem:
-    """Deliberately uneven geography.
+    """Fifteen real deliveries, whose geography is uneven for free.
 
-    On a regular line every displaced stop faces the same trade, so one weight
-    tips all of them at once and the "curve" is a step from six moves to zero.
-    That is a fact about the fixture rather than the penalty, and a step is not
-    much of a choice to hand an operation. Spacing the stops unevenly gives
-    each one a different saving from moving, which is what makes the curve a
-    curve.
+    The curve below needs each displaced stop to face a *different* saving
+    from moving; on a regular line they all face the same one, so a single
+    weight tips every stop at once and the "curve" is a step from six moves to
+    zero. That is a fact about the fixture rather than the penalty.
+
+    This used to be arranged by spacing stops with `(i * i) % 17` -- unevenness
+    somebody had to invent and defend. Real addresses are uneven because towns
+    are, which is both the honest source and one less thing to justify.
     """
-    size = stops + 1
-    xs = [0] + [((i * i) % 17) + 1 for i in range(1, size)]
-    grid = tuple(tuple(abs(xs[i] - xs[j]) * 400 for j in range(size))
-                 for i in range(size))
+    locations, matrix, deliveries, _depot = dataset.planar_sites(
+        stops, strategy="spread", name="churn")
     return Problem(
-        id="churn",
-        locations=tuple(Location(id="D" if i == 0 else f"C{i}",
-                                 lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                        for i in range(size)),
-        orders=tuple(Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-                           delivery=StopSpec(location_id=f"C{i}",
-                                             time_windows=(DAY,),
-                                             service_fixed=60))
-                     for i in range(1, size)),
+        id="churn", locations=locations,
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": 1},
+                  delivery=StopSpec(location_id=f"C{i + 1}",
+                                    time_windows=(DAY,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
         vehicles=tuple(Vehicle(id=f"V{n}", capacities={"kg": 100}, shift=DAY,
                                start_location_id="D", end_location_id="D",
                                cost_per_metre=1)
                        for n in range(1, vans + 1)),
-        matrix=TravelMatrix(version="c", durations=grid, distances=grid))
-
+        matrix=matrix)
 
 def plan(problem: Problem, assignment: dict[str, list[str]],
          starts: dict[str, int] | None = None) -> Solution:

@@ -297,3 +297,48 @@ def road_matrix_or_planar(points: list[tuple[float, float]], gateway: str,
         coords = tuple(((lon - home[1]) * lon_km, (lat - home[0]) * lat_km)
                        for lat, lon in points)
         return PlanarMatrix(version=f"{name}-planar", coordinates=coords), False
+
+
+def planar_sites(stops: int, strategy: str = "nearest",
+                 name: str = "round") -> tuple[Any, Any, list, dict]:
+    """Real deliveries as locations and a matrix, ready for a `Problem`.
+
+    Args:
+        stops: how many deliveries to take.
+        strategy: which slice -- `nearest`, `spread`, `furthest`, or
+            `cluster_with_outliers`. See the module docstring: the strategy
+            decides whether a demonstration demonstrates anything.
+        name: version label for the matrix.
+
+    Returns:
+        `(locations, matrix, deliveries, depot)`. Locations are `D` then `C1..Cn`
+        in the deliveries' order, so an example can build `O1..On` against them.
+
+    The geometry is what every example duplicated -- degrees to kilometres about
+    the depot, then a `PlanarMatrix` over the result. What each example does
+    with the fleet, the windows and the capacities is what it is *about*, and
+    that stays where a reader can see it.
+
+    Planar rather than road distances so the examples run with no gateway. The
+    numbers are shorter than the road's by different amounts in different
+    places; where that matters, an example should say so.
+    """
+    from vrp.matrix import PlanarMatrix
+    from vrp.model import Location
+
+    corpus = load()
+    deliveries, depot = getattr(corpus, strategy)(stops)
+
+    lat_km, lon_km = 110.57, 111.32 * math.cos(math.radians(depot["latitude"]))
+    coords = [(0.0, 0.0)] + [
+        ((d["longitude"] - depot["longitude"]) * lon_km,
+         (d["latitude"] - depot["latitude"]) * lat_km) for d in deliveries]
+
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i + 1)
+        for i, d in enumerate(deliveries))
+    return (locations, PlanarMatrix(version=f"{name}-v1",
+                                    coordinates=tuple(coords)),
+            deliveries, depot)

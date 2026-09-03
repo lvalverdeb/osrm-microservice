@@ -48,6 +48,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.bench import fixtures
 from vrp.model import Order, StopSpec, TimeWindow
@@ -74,11 +77,20 @@ def gas_escape() -> Order:
 
 
 def morning(vans: int):
+    """The round the emergency lands in the middle of.
+
+    Real addresses around the Guadalupe depot rather than the bench's grid:
+    what a preemption costs is the drive to the stop it displaces, and on a
+    uniform grid that cost is the same wherever it falls.
+    """
     work = routine()
+    locations, matrix, _deliveries, _depot = dataset.planar_sites(
+        len(work), strategy="spread", name=f"pre{vans}")
     problem = fixtures.instance(
         f"pre{vans}", work,
         tuple(fixtures.van(f"V{n}", capacities={"kg": 40})
-              for n in range(1, vans + 1)))
+              for n in range(1, vans + 1)),
+        locations=locations, matrix=matrix)
     return problem, solve(problem, iterations=400, seed=0)
 
 

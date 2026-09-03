@@ -43,16 +43,17 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.epochs import Classification, Epoch, epochs
 from vrp.icd import Thresholds, icd_policy
 from vrp.model import (
-    Location,
     Order,
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.policies import greedy, lazy
@@ -68,25 +69,25 @@ def clock(seconds: int) -> str:
 
 
 def instance(stops: int = 8, vans: int = 2) -> Problem:
-    size = stops + 1
-    grid = tuple(tuple(abs(i - j) * LEG for j in range(size))
-                 for i in range(size))
-    return Problem(
-        id="icd",
-        locations=tuple(Location(id="D" if i == 0 else f"C{i}",
-                                 lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-                        for i in range(size)),
-        orders=tuple(Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-                           delivery=StopSpec(location_id=f"C{i}",
-                                             time_windows=(DAY,),
-                                             service_fixed=300))
-                     for i in range(1, size)),
-        vehicles=tuple(Vehicle(id=f"V{n}", capacities={"kg": 100}, shift=DAY,
-                               start_location_id="D", end_location_id="D",
-                               cost_per_metre=1)
-                       for n in range(1, vans + 1)),
-        matrix=TravelMatrix(version="i", durations=grid, distances=grid))
+    """Real deliveries known now, against orders that have not arrived.
 
+    Real coordinates and real service times, so the distances a re-plan trades
+    against are ones a driver would recognise.
+    """
+    locations, matrix, deliveries, _depot = dataset.planar_sites(
+        stops, strategy="spread", name="sample")
+    return Problem(
+        id="sample", locations=locations,
+        orders=tuple(
+            Order(id=f"O{i + 1}", kind="JOB", quantities={"kg": 1},
+                  delivery=StopSpec(location_id=f"C{i + 1}",
+                                    time_windows=(DAY,),
+                                    service_fixed=d["service_minutes"] * 60))
+            for i, d in enumerate(deliveries)),
+        vehicles=tuple(Vehicle(id=f"V{n}", capacities={"kg": 100}, shift=DAY,
+                               start_location_id="D", end_location_id="D", cost_per_metre=1)
+                       for n in range(1, vans + 1)),
+        matrix=matrix)
 
 OPEN = ["O1", "O2", "O3", "O4", "O5", "O6"]
 SPLIT = Classification(must_go=("O1",), deferrable=tuple(OPEN[1:]))
