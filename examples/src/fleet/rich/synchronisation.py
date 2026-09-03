@@ -43,12 +43,17 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+import dataset
+
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
@@ -56,7 +61,6 @@ from vrp.model import (
     StopSpec,
     Synchronisation,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.solve.pyvrp_adapter import solve
@@ -64,21 +68,63 @@ from vrp.synchronise import solve_synchronised, unmet
 from vrp.verify import verify
 
 DAY = TimeWindow(start=0, end=12 * 3600)
-LEG = ((0, 600, 600, 1200), (600, 0, 0, 600),
-       (600, 0, 0, 600), (1200, 600, 600, 0))
+
+
+def the_network() -> tuple:
+    """A real depot, a real satellite, and the customer the bike serves.
+
+    An urban consolidation centre is a real thing and this is its shape: the
+    lorry hauls to a satellite in the suburb, and something small does the last
+    kilometre. The satellite and the customer are two corpus deliveries in the
+    Desamparados hub, about six minutes from the Guadalupe depot and one minute
+    from each other, which is the distance that makes the second echelon worth
+    having at all.
+
+    Returns:
+        `(matrix, depot, satellite, customer)`. The receiving and dispatch bays
+        share the satellite's coordinates, so the arc between them is free and
+        the transfer costs only its service time.
+    """
+    corpus = dataset.load()
+    depot = corpus.depots[0]
+    near, _ = corpus.spread(12)
+    satellite, customer = near[6], near[10]
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    places = [depot, satellite, satellite, customer]
+    coordinates = tuple(((d["longitude"] - depot["longitude"]) * lon_km,
+                         (d["latitude"] - depot["latitude"]) * lat_km)
+                        for d in places)
+    return (PlanarMatrix(version="echelon-v1", coordinates=coordinates),
+            depot, satellite, customer)
+
+
+MATRIX, DEPOT, SATELLITE, CUSTOMER = the_network()
 
 
 def hub(distinguishable: bool) -> Problem:
+    """The two-echelon instance, with or without bays a lorry cannot enter.
+
+    Args:
+        distinguishable: Whether the satellite's dispatch bay is modelled as
+            unreachable by an HGV, which is the only thing that stops one
+            vehicle doing both halves.
+
+    Returns:
+        The instance, carrying the transfer synchronisation.
+    """
     inbound = frozenset({"HGV"}) if distinguishable else frozenset()
     outbound = frozenset({"BIKE"}) if distinguishable else frozenset()
     locations = (
-        Location(id="D", lat=9.90, lon=-84.0, matrix_index=0),
-        Location(id="IN", lat=9.95, lon=-84.0, matrix_index=1,
-                 access_classes=inbound),
-        Location(id="OUT", lat=9.95, lon=-84.0, matrix_index=2,
+        Location(id="D", lat=DEPOT["latitude"], lon=DEPOT["longitude"],
+                 matrix_index=0),
+        Location(id="IN", lat=SATELLITE["latitude"], lon=SATELLITE["longitude"],
+                 matrix_index=1, access_classes=inbound),
+        Location(id="OUT", lat=SATELLITE["latitude"],
+                 lon=SATELLITE["longitude"], matrix_index=2,
                  access_classes=outbound),
-        Location(id="C", lat=10.0, lon=-84.0, matrix_index=3,
-                 access_classes=outbound))
+        Location(id="C", lat=CUSTOMER["latitude"], lon=CUSTOMER["longitude"],
+                 matrix_index=3, access_classes=outbound))
     orders = (Order(id="TRUNK", kind="JOB", quantities={"kg": 50},
                     delivery=StopSpec(location_id="IN", time_windows=(DAY,),
                                       service_fixed=600)),
@@ -93,7 +139,7 @@ def hub(distinguishable: bool) -> Problem:
                      access_class="BIKE" if distinguishable else None))
     return Problem(
         id="echelon", locations=locations, orders=orders, vehicles=fleet,
-        matrix=TravelMatrix(version="e", durations=LEG, distances=LEG),
+        matrix=MATRIX,
         synchronisations=(Synchronisation(kind="TRANSFER", first="TRUNK",
                                           second="ONWARD", min_gap=300),))
 
