@@ -8,6 +8,7 @@ Usage:
     uv run --package osrm-api-gateway-examples examples/main.py
 """
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,9 @@ except ImportError as exc:
     )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Keeps a menu line inside eighty columns with the index and indent.
+MENU_WIDTH = 68
+
 EXAMPLES_SRC = PROJECT_ROOT / "examples" / "src"
 
 
@@ -58,6 +62,32 @@ def discover_examples():
     return examples
 
 
+def title_of(script):
+    """The example's own first line, or its filename when it has none.
+
+    An example states what it shows in the first line of its docstring -- that
+    is the convention `examples/README.md` asks for, and it is a sentence the
+    author chose. Title-casing the filename instead produced "Ev Recharging"
+    and "Tw Multiple Windows": a menu that looks unconsidered because nothing
+    in it was considered.
+
+    Falls back to the filename for the eleven scripts that carry no docstring,
+    which is a fair thing to notice about them.
+
+    Parsed rather than imported: importing an example runs its module body, and
+    a menu that executed seventy-two scripts to draw itself would be a fine
+    joke and a poor launcher.
+    """
+    try:
+        tree = ast.parse(script.read_text(encoding="utf-8"))
+        first = (ast.get_docstring(tree) or "").strip().split("\n")[0].strip()
+    except (OSError, SyntaxError):
+        first = ""
+    if not first:
+        return script.stem.replace("_", " ").title()
+    return first if len(first) <= MENU_WIDTH else first[:MENU_WIDTH - 1] + "\u2026"
+
+
 def show_menu(examples):
     print("\nAvailable examples:\n")
     index = 1
@@ -65,7 +95,7 @@ def show_menu(examples):
     for category in sorted(examples):
         print(f"  [{category}]")
         for script in examples[category]:
-            name = script.stem.replace("_", " ").title()
+            name = title_of(script)
             print(f"    {index:2d}. {name}")
             mapping[index] = script
             index += 1
