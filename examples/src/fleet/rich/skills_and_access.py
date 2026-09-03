@@ -26,7 +26,15 @@ Four things this shows, in order:
 4. **Told twice, at different times.** Pre-flight names the reason before the
    solve; INV-10 catches it after. The two are independent on purpose.
 
-Runs offline. No gateway required.
+The sites are two real corpus deliveries around the Guadalupe depot, with the
+corpus's own service times. Every *compatibility* attribute is declared rather
+than derived, and deliberately so: this is a parcel corpus -- 30 kg at the
+heaviest -- so nothing in it needs a tail lift, nothing in it is hazardous, and
+no field records which street admits a lorry. That is the honest shape of the
+problem. A fleet brings this knowledge with it; the model's job is to carry it
+and the verifier's job is to enforce it.
+
+Runs offline, against the committed corpus slice.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -40,6 +48,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.diagnose import preflight
 from vrp.model import (
@@ -51,33 +62,53 @@ from vrp.model import (
     Step,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
 )
 from vrp.verify import verify
 
 DAY = TimeWindow(start=0, end=12 * 3600)
-DEPOT = Location(id="D", lat=9.9, lon=-84.0, matrix_index=0)
+
+# Two real deliveries around the Guadalupe depot, so the sites in this example
+# are addresses somebody could drive to. What they are carrying is a different
+# matter: this is a parcel corpus -- 30 kg at the heaviest -- so nothing in it
+# needs a tail-lift, nothing in it is hazardous, and no field says which street
+# admits a lorry. Every compatibility attribute below is therefore declared
+# rather than derived, and that is the honest shape of the problem: a fleet
+# brings this knowledge with it, and the model's job is to carry it.
+_LOCATIONS, _MATRIX, _DELIVERIES, _DEPOT = dataset.planar_sites(
+    2, "spread", "compat")
+DEPOT = _LOCATIONS[0]
+
+
+def site(index: int, **kwargs) -> Location:
+    """One of the real delivery addresses, with attributes bolted on.
+
+    Args:
+        index: 1 or 2, matching the `C1`/`C2` the orders reference.
+        **kwargs: `access_classes`, `max_vehicle_kg` -- what the corpus cannot
+            tell us and a dispatcher would.
+
+    Returns:
+        A location at a real address.
+    """
+    original = _LOCATIONS[index]
+    return Location(id=original.id, lat=original.lat, lon=original.lon,
+                    matrix_index=original.matrix_index, **kwargs)
 
 
 def instance(orders, vehicles, locations=None) -> Problem:
+    """The instance. Geometry is real; only compatibility is in question."""
     if locations is None:
-        locations = (DEPOT,
-                     Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1),
-                     Location(id="C2", lat=9.92, lon=-84.0, matrix_index=2))
-    size = len(locations)
-    grid = tuple(tuple(abs(i - j) * 600 for j in range(size))
-                 for i in range(size))
+        locations = (DEPOT, site(1), site(2))
     return Problem(id="cmp", locations=locations, orders=orders,
-                   vehicles=vehicles,
-                   matrix=TravelMatrix(version="c", durations=grid,
-                                       distances=grid))
+                   vehicles=vehicles, matrix=_MATRIX)
 
 
 def an_order(order_id: str, stop: str, **kwargs) -> Order:
+    service = _DELIVERIES[int(stop[1:]) - 1]["service_minutes"] * 60
     return Order(id=order_id, kind="JOB", quantities={"kg": 1},
                  delivery=StopSpec(location_id=stop, time_windows=(DAY,),
-                                   service_fixed=60), **kwargs)
+                                   service_fixed=service), **kwargs)
 
 
 def a_van(vehicle_id: str = "V1", **kwargs) -> Vehicle:
@@ -97,10 +128,13 @@ def plan(problem: Problem, assignment: dict[str, list[str]]) -> Solution:
             stop = problem.order(order_id).delivery
             there = index[stop.location_id]
             clock += problem.matrix.duration(here, there)
+            # The order's own service, not a constant: these come from the
+            # corpus and differ per stop, and INV-3 checks the arithmetic.
+            service = stop.service_fixed
             steps.append(Step(type="DELIVERY", location_id=stop.location_id,
                               order_id=order_id, arrival=clock,
-                              start_service=clock, departure=clock + 60))
-            clock, here = clock + 60, there
+                              start_service=clock, departure=clock + service))
+            clock, here = clock + service, there
         clock += problem.matrix.duration(here, index["D"])
         steps.append(Step(type="END", location_id="D", arrival=clock,
                           start_service=clock, departure=clock))
@@ -164,8 +198,7 @@ def show_incompatibility() -> None:
 def show_access() -> None:
     """FR-11, by class and by weight."""
     print("\n3. Vehicle to site — where the vehicle may go")
-    bike_only = (DEPOT, Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1,
-                                 access_classes=frozenset({"BIKE"})))
+    bike_only = (DEPOT, site(1, access_classes=frozenset({"BIKE"})))
     problem = instance((an_order("O1", "C1"),),
                        (a_van(access_class="RIGID"),), bike_only)
     judge("rigid lorry into a bike-only zone", problem, {"V1": ["O1"]})
@@ -178,8 +211,7 @@ def show_access() -> None:
                             (a_van(access_class="RIGID"),))
     judge("a site declaring no restriction", unrestricted, {"V1": ["O1"]})
 
-    bridge = (DEPOT, Location(id="C1", lat=9.91, lon=-84.0, matrix_index=1,
-                              max_vehicle_kg=3_500))
+    bridge = (DEPOT, site(1, max_vehicle_kg=3_500))
     heavy = instance((an_order("O1", "C1"),),
                      (a_van(gross_weight_kg=7_500),), bridge)
     judge("7.5t over a 3.5t weight limit", heavy, {"V1": ["O1"]})
