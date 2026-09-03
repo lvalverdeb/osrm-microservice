@@ -40,27 +40,30 @@ Usage:
 from __future__ import annotations
 
 import collections
+import math
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.bench import fixtures
+from vrp.matrix import PlanarMatrix
 from vrp.model import (
     Location,
     Order,
     Problem,
     StopSpec,
     TimeWindow,
-    TravelMatrix,
     Vehicle,
     travel_between,
 )
 from vrp.timedependent import SpeedProfile, arc_class_of
 
 HOUR = 3600
-ARCS = (("D", "C1", 0, 1, "local"), ("D", "C2", 0, 2, "trunk"))
 
 
 def profile(congested: tuple[int, ...]) -> SpeedProfile:
@@ -70,25 +73,79 @@ def profile(congested: tuple[int, ...]) -> SpeedProfile:
                               for hour in range(24)))
 
 
+def the_three_roads() -> tuple:
+    """Three real deliveries whose arcs from the depot fall in three classes.
+
+    Nothing here labels a road. `vrp.timedependent.arc_class_of` derives the
+    class from what the arc costs at free flow, and these three deliveries --
+    a neighbour, a suburb across town, and one near the Grecia depot an hour
+    up the motorway -- land one in each.
+
+    The distance is what makes the demonstration work, and it has a floor and
+    a ceiling. Too short and the peak has nothing to lengthen; too long and it
+    spans so much of the day that a three-hour peak is a rounding error. The
+    corpus's furthest deliveries are 388-minute arcs and show nothing at all.
+
+    Returns:
+        `(locations, matrix, deliveries, depot)` over the depot and the three.
+    """
+    corpus = dataset.load()
+    depot = corpus.depots[0]
+    near, _ = corpus.spread(12)
+    around, _ = corpus.around_each_depot(24)
+    chosen = [near[3], near[6], around[4]]
+    lat_km = 110.57
+    lon_km = 111.32 * math.cos(math.radians(depot["latitude"]))
+    coordinates = [(0.0, 0.0)] + [
+        ((d["longitude"] - depot["longitude"]) * lon_km,
+         (d["latitude"] - depot["latitude"]) * lat_km) for d in chosen]
+    locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
+                          matrix_index=0),) + tuple(
+        Location(id=f"C{i}", lat=d["latitude"], lon=d["longitude"],
+                 matrix_index=i)
+        for i, d in enumerate(chosen, 1))
+    return (locations, PlanarMatrix(version="roads-v1",
+                                    coordinates=tuple(coordinates)),
+            chosen, depot)
+
+
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = the_three_roads()
+ARCS = tuple((f"D->C{i}", 0, i) for i in range(1, len(DELIVERIES) + 1))
+
+
 def a_network(profile_=None, profiles=None) -> Problem:
-    """A depot, a shop two minutes away, and one an hour up the motorway."""
+    """The depot and three real deliveries, one on each class of road.
+
+    Args:
+        profile_: A single instance-wide speed profile, or None.
+        profiles: A profile per arc class, or None.
+
+    Returns:
+        The instance. Passing both is the library's business to reject.
+    """
     day = TimeWindow(start=0, end=20 * HOUR)
-    locations = tuple(
-        Location(id=site, lat=9.9 + i / 100, lon=-84.0, matrix_index=i)
-        for i, site in enumerate(("D", "C1", "C2")))
-    grid = ((0, 120, 3600), (120, 0, 3600), (3600, 3600, 0))
     orders = tuple(
         Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
-              delivery=StopSpec(location_id=f"C{i}", service_fixed=60,
+              delivery=StopSpec(location_id=f"C{i}",
+                                service_fixed=d["service_minutes"] * 60,
                                 time_windows=(day,)))
-        for i in (1, 2))
+        for i, d in enumerate(DELIVERIES, 1))
     return Problem(
-        id="network", locations=locations, orders=orders,
+        id="network", locations=LOCATIONS, orders=orders,
         vehicles=(Vehicle(id="V1", capacities={"kg": 10},
                           shift=TimeWindow(start=7 * HOUR, end=20 * HOUR),
                           start_location_id="D", end_location_id="D"),),
-        matrix=TravelMatrix(version="net", durations=grid, distances=grid),
-        speed_profile=profile_, speed_profiles=profiles)
+        matrix=MATRIX, speed_profile=profile_, speed_profiles=profiles)
+
+
+def timed(problem: Problem, header: str) -> None:
+    """Every arc at free flow and at eight in the morning."""
+    print(f"\n      {'arc':8s} {'class':9s} {'free flow':>10s} {header:>10s}")
+    for label, origin, destination in ARCS:
+        free = problem.matrix.duration(origin, destination)
+        peak = travel_between(problem, origin, destination, 8 * HOUR)
+        print(f"      {label:8s} {arc_class_of(free):9s} "
+              f"{free // 60:7d} min {peak // 60:7d} min")
 
 
 def heading(number: str, title: str) -> None:
@@ -127,28 +184,24 @@ def the_measurement() -> None:
 def what_one_profile_claims() -> None:
     heading("2.", "One profile: the same factor on every road")
     problem = a_network(profile_=profile((7, 8, 9, 10)))
-    print(f"\n      {'arc':10s} {'class':9s} {'free flow':>10s} {'at 08:00':>10s}")
-    for origin_id, destination_id, origin, destination, kind in ARCS:
-        free = problem.matrix.duration(origin, destination)
-        peak = travel_between(problem, origin, destination, 8 * HOUR)
-        print(f"      {origin_id + '->' + destination_id:10s} {kind:9s} "
-              f"{free // 60:7d} min {peak // 60:7d} min")
-    print("\n   Both doubled. The model has no way to say the lane is fine.")
+    timed(problem, "at 08:00")
+    factors = {arc_class_of(problem.matrix.duration(o, d)):
+               travel_between(problem, o, d, 8 * HOUR)
+               / max(problem.matrix.duration(o, d), 1)
+               for _, o, d in ARCS}
+    print("\n   " + ", ".join(f"{name} x{ratio:.1f}"
+                              for name, ratio in factors.items()) + ".")
+    print("   The same factor on all three, including the street the depot is")
+    print("   on. The model has no way to say the lane is fine.")
 
 
 def what_three_profiles_say() -> None:
     heading("3.", "One profile per class: the motorway crawls, the lane does not")
-    problem = a_network(profiles={
+    timed(a_network(profiles={
         "local": profile(()),
         "arterial": profile((8,)),
         "trunk": profile((7, 8, 9, 10)),
-    })
-    print(f"\n      {'arc':10s} {'class':9s} {'free flow':>10s} {'at 08:00':>10s}")
-    for origin_id, destination_id, origin, destination, kind in ARCS:
-        free = problem.matrix.duration(origin, destination)
-        peak = travel_between(problem, origin, destination, 8 * HOUR)
-        print(f"      {origin_id + '->' + destination_id:10s} {kind:9s} "
-              f"{free // 60:7d} min {peak // 60:7d} min")
+    }), "at 08:00")
     print("\n   Which is what a driver would have told you, and what §12.2")
     print("   fits: the multipliers are grouped per arc class already.")
 
