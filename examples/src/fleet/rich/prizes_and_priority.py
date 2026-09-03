@@ -56,6 +56,7 @@ from vrp.model import (
     TimeWindow,
     TravelMatrix,
     Vehicle,
+    precedence,
 )
 from vrp.solve.pyvrp_adapter import solve, tier_bonuses
 from vrp.verify import verify
@@ -162,8 +163,12 @@ def show_lexicographic() -> None:
         orders = (an_order("HIGH", "C1", kg=1, prize=1, priority_tier=1),
                   an_order("LOW", "C2", kg=1, prize=magnitude, priority_tier=4))
         bonuses = tier_bonuses(instance(orders, capacity=100, stops=2))
-        high = 1 + bonuses[1]
-        low = magnitude + bonuses[4]
+        # Keyed by `precedence`, not by the bare tier: FR-25 ranks a statutory
+        # order above an SLA one on the same tier, so the key is a (tier,
+        # source) pair. Looking it up with the same function the adapter keys
+        # with is what stops this drifting again.
+        high = 1 + bonuses[precedence(orders[0])]
+        low = magnitude + bonuses[precedence(orders[1])]
         print(f"   {magnitude:>22,}{high:>22,}{low:>22,}{high > low!s:>11}")
 
     print("   Checked on the bonuses, so it is exact at any magnitude. A")

@@ -257,3 +257,43 @@ def load(path: Path = DEFAULT_PATH) -> Dataset:
             "see docs/dataset_prep.md")
     raw = json.loads(path.read_text())
     return Dataset(raw["depots"], raw["deliveries"], raw["meta"])
+
+
+def road_matrix_or_planar(points: list[tuple[float, float]], gateway: str,
+                          name: str = "example") -> tuple[Any, bool]:
+    """A road matrix from the gateway, or a planar one when it is not there.
+
+    Args:
+        points: `(latitude, longitude)`, the depot first.
+        gateway: base URL of the OSRM API gateway.
+        name: version label for the matrix that gets built.
+
+    Returns:
+        The matrix, and whether it came from the road network. **Check the
+        flag and say so** -- straight-line distances are shorter than roads
+        everywhere and by different amounts in different places, so a number
+        printed from a planar matrix is not the number the road gives.
+
+    Five examples used to promise "Runs offline. No gateway required" and then
+    call `build_matrix` unconditionally, so they died on a refused connection.
+    An example nobody can run without infrastructure showcases nothing and its
+    implementation clue is untested. This is the fallback that makes the
+    promise true, and `vrp.matrix.PlanarMatrix` is what `§7.6` reaches for at
+    size anyway.
+    """
+    from vrp.matrix import PlanarMatrix
+    from vrp.osrm import build_matrix
+
+    try:
+        matrix, _ = build_matrix(gateway, points)
+        return matrix, True
+    except Exception:
+        # Any failure to reach the gateway, not just a refused connection: a
+        # DNS miss, a timeout and a 502 are all "no road matrix today", and an
+        # example is the wrong place to distinguish them.
+        home = points[0]
+        lat_km = 110.57
+        lon_km = 111.32 * math.cos(math.radians(home[0]))
+        coords = tuple(((lon - home[1]) * lon_km, (lat - home[0]) * lat_km)
+                       for lat, lon in points)
+        return PlanarMatrix(version=f"{name}-planar", coordinates=coords), False

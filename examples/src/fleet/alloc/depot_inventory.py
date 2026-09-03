@@ -63,7 +63,6 @@ from vrp.model import (
     TimeWindow,
     Vehicle,
 )
-from vrp.osrm import build_matrix
 from vrp.verify import verify
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
@@ -108,7 +107,11 @@ def instance(depots: tuple[Location, ...], vehicles: tuple[Vehicle, ...],
                  matrix_index=len(depots) + i)
         for i, d in enumerate(deliveries))
     locations = (*depots, *customers)
-    matrix, _ = build_matrix(GATEWAY, [(loc.lat, loc.lon) for loc in locations])
+    matrix, road = dataset.road_matrix_or_planar(
+        [(loc.lat, loc.lon) for loc in locations], GATEWAY, "depot-inv")
+    if not road:
+        print("   no gateway; distances are straight-line, so the costs"
+              " below are lower than the road gives")
 
     quantities = {"kg": kg} | ({"pallets": pallets} if pallets else {})
     orders = tuple(

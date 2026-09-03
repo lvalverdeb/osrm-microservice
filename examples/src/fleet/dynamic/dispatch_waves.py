@@ -176,8 +176,14 @@ def show_the_guarantee() -> None:
         if not open_ids:
             break
         split = classify(problem, open_ids, postponed_to=wave.end)
-        decision = decide(problem, open_ids, postponed_to=wave.end,
-                          policy=lambda ids, s: ())
+        # `decide` takes the epoch rather than the instant it would postpone
+        # to: it derives that from `epoch.end` itself, so the caller cannot
+        # pass a horizon that disagrees with the wave it is deciding.
+        # A `Policy` is `(open_ids, classification, epoch) -> chosen`. This
+        # one chooses nothing, every wave, which is the point: what still
+        # gets dispatched is what AC-3.1 refuses to let it postpone.
+        decision = decide(problem, open_ids, wave,
+                          policy=lambda ids, split, epoch: ())
         print(f"   {wave.index:<7}{open_ids!s:<26}"
               f"{list(decision.dispatched)!s:<20}"
               f"{list(decision.forced)!s:<20}")

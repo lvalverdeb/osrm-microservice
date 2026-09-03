@@ -67,7 +67,6 @@ from vrp.model import (
     Vehicle,
 )
 from vrp.objective import Mode, ObjectiveSpec, Tier, score
-from vrp.osrm import build_matrix
 from vrp.solve import pyvrp_adapter
 from vrp.verify import verify
 
@@ -104,7 +103,11 @@ def real_round(stops: int) -> tuple:
         deliveries, depot = dataset.load().spread(stops)
         points = [(depot["latitude"], depot["longitude"])]
         points += [(d["latitude"], d["longitude"]) for d in deliveries]
-        matrix, _ = build_matrix(GATEWAY, points)
+        matrix, road = dataset.road_matrix_or_planar(points, GATEWAY,
+                                                    "fleet-mix")
+        if not road:
+            print("   no gateway; distances are straight-line, so the costs"
+                  " below are lower than the road gives")
         locations = (Location(id="D", lat=depot["latitude"],
                               lon=depot["longitude"], matrix_index=0),) + tuple(
             Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],

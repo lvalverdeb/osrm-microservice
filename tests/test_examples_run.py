@@ -25,13 +25,20 @@ nobody runs is the situation this replaces.
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO / "examples" / "src"
+
+# The command every example's own usage line names. It matters: the examples are
+# a separate workspace package, and installing it is what puts `config` on
+# `sys.path` and `folium` in the environment. Running them with a bare
+# interpreter worked on a laptop that had run `make examples` at some point and
+# failed in CI on a clean checkout -- a gate that runs the thing differently
+# from the way it is documented tests a configuration nobody has.
+RUNNER = ["uv", "run", "--package", "osrm-api-gateway-examples"]
 
 # Not examples: `dataset.py` is the shared corpus loader and `config.py` holds
 # the gateway URL. Both are imported by examples and neither is one.
@@ -48,15 +55,16 @@ UNREACHABLE = (
 # Known broken, pinned rather than hidden. Strict: fixing one fails this file
 # until the entry is removed, which is what stops a repair going unrecorded.
 # Phase 1 of `docs/planning/VRP_EXAMPLES_PLAN.md` clears both.
-BROKEN = {
-    "fleet/dynamic/dispatch_waves.py":
-        "calls decide(postponed_to=...); vrp.epochs.decide has no such "
-        "parameter. API drift, nothing ran the file.",
-    "fleet/rich/prizes_and_priority.py":
-        "indexes tier_bonuses()[1]; T-74 re-keyed it by precedence(), a "
-        "(tier, source) tuple. Broken by my own change, in this repository, "
-        "with a full green suite.",
-}
+BROKEN: dict[str, str] = {}
+"""Examples known broken, pinned rather than hidden.
+
+Empty, and that is the point: Phase 1 of `docs/planning/VRP_EXAMPLES_PLAN.md`
+cleared both entries -- `dispatch_waves` called `decide(postponed_to=...)` and
+passed a two-argument policy, and `prizes_and_priority` indexed `tier_bonuses`
+by a bare tier after `T-74` re-keyed it by `precedence()`. An entry here is a
+strict xfail: fixing one without removing it fails this file, which is what
+stops a repair going unrecorded.
+"""
 
 
 def examples() -> list[Path]:
@@ -90,8 +98,8 @@ def test_the_example_runs(path: Path):
     if name_of(path) in BROKEN:
         pytest.xfail(BROKEN[name_of(path)])
 
-    result = subprocess.run([sys.executable, str(path)], cwd=REPO,
-                            capture_output=True, text=True, timeout=180,
+    result = subprocess.run(RUNNER + [str(path)], cwd=REPO,
+                            capture_output=True, text=True, timeout=300,
                             check=False)
     if result.returncode == 0:
         return
@@ -106,13 +114,16 @@ def test_the_example_runs(path: Path):
 
 @pytest.mark.slow
 def test_no_example_claims_to_run_offline_while_needing_a_gateway():
-    """The claim in the docstring is a promise to whoever reads it first.
+    """The claim in a docstring is a promise to whoever reads it first.
 
-    Five examples say "Runs offline. No gateway required" and then call
-    `build_matrix(GATEWAY, ...)` with no fallback, so they die on a refused
-    connection. Pinned strictly rather than deleted from the docstrings: the
-    fix Phase 1 prefers is a planar fallback, which makes the claim true
-    instead of making it absent.
+    Five examples said "Runs offline. No gateway required" and then called
+    `build_matrix(GATEWAY, ...)` with no fallback, so they died on a refused
+    connection. They now go through `dataset.road_matrix_or_planar`, which
+    falls back to straight-line distances and says so -- the promise made true
+    rather than deleted.
+
+    The check is that the *promise* holds, not that the call is absent: an
+    example may reach for a road matrix as long as it works without one.
     """
     liars = []
     for path in ALL:
@@ -120,16 +131,9 @@ def test_no_example_claims_to_run_offline_while_needing_a_gateway():
         head = source[:source.find('"""', 3) + 3] if source.startswith('"""') else ""
         if "Runs offline" not in head:
             continue
-        if "build_matrix(" in source or "GATEWAY" in source:
+        if "build_matrix(" in source and "road_matrix_or_planar" not in source:
             liars.append(name_of(path))
 
-    assert liars == sorted([
-        "fleet/alloc/depot_inventory.py",
-        "fleet/alloc/fleet_minimisation.py",
-        "fleet/alloc/fleet_mix.py",
-        "fleet/alloc/tactical_sizing.py",
-        "fleet/alloc/territories.py",
-    ]), (
-        "the set of examples promising to run offline while calling a gateway "
-        f"has changed: {sorted(liars)}. Fixing one means removing it from this "
-        "list; adding one means an example makes a promise it cannot keep")
+    assert not liars, (
+        f"{sorted(liars)} promise to run offline and call build_matrix with no "
+        "fallback, so they die on a refused connection")

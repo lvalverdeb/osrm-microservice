@@ -71,7 +71,6 @@ from vrp.model import (
     Vehicle,
 )
 from vrp.objective import Mode, ObjectiveSpec, Tier, score
-from vrp.osrm import build_matrix
 
 GATEWAY = os.environ.get("OSRM_API_URL", "http://localhost:8000")
 DAY = TimeWindow(start=0, end=12 * 3600)
@@ -109,7 +108,11 @@ def round_from_dataset(stops: int, vans: int, path: Path,
 
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
-    matrix, _ = build_matrix(gateway, points)
+    matrix, road = dataset.road_matrix_or_planar(points, gateway,
+                                                 "territories")
+    if not road:
+        print("   no gateway; distances are straight-line, so the costs"
+              " below are lower than the road gives")
 
     locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
                           matrix_index=0),) + tuple(

@@ -61,7 +61,6 @@ from vrp.model import (
     TimeWindow,
     Vehicle,
 )
-from vrp.osrm import build_matrix
 from vrp.scenarios import (
     FULL,
     Mix,
@@ -105,7 +104,11 @@ def base_problem(stops: int = POOL, path: Path | None = None,
     deliveries, depot = dataset.load(path or dataset.DEFAULT_PATH).nearest(stops)
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
-    matrix, _ = build_matrix(gateway or GATEWAY, points)
+    matrix, road = dataset.road_matrix_or_planar(points, gateway or GATEWAY,
+                                                 "tactical")
+    if not road:
+        print("   no gateway; distances are straight-line, so the costs"
+              " below are lower than the road gives")
 
     locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
                           matrix_index=0),) + tuple(

@@ -78,17 +78,45 @@ fails the file.
 The five false "Runs offline" claims have their own test, asserting the exact
 set. Fixing one means removing it from that list; a sixth appearing fails.
 
-## Phase 1 — Repair what is already broken
+## Phase 1 — Repair what is already broken — **DONE**
 
-- Fix `dispatch_waves`'s call to `decide`.
-- Fix `prizes_and_priority`'s `bonuses[1]` against `precedence()`-keyed tiers.
-- The five false offline claims: either give them a planar fallback like
-  `large_instance_decomposition.py`, or correct the docstring. Prefer the
-  fallback — an example nobody can run without infrastructure serves neither
-  purpose, and `PlanarMatrix` over real coordinates is what `§7.6` wants at
-  size anyway.
-- **Done when** all 72 run standalone, and the audit script that proved it is
-  the Phase 0 test.
+Both drifts were deeper than the one-line traceback suggested.
+
+- `dispatch_waves` — `decide` had **two** changes. It takes the `Epoch` rather
+  than a `postponed_to` instant, and `Policy` became `(open_ids,
+  classification, epoch)` rather than two arguments. Fixing the first surfaced
+  the second.
+- `prizes_and_priority` — the fix is not `bonuses[(1, 2)]` but
+  `bonuses[precedence(order)]`. Keying with the same function the adapter keys
+  with is what stops a third drift.
+
+The five false offline claims are **made true rather than deleted**. They go
+through `dataset.road_matrix_or_planar`: a road matrix when a gateway answers,
+planar over the same coordinates when none does, and it prints which it got.
+Straight-line distances are shorter than roads everywhere and by different
+amounts in different places, so a number from a planar matrix is not the number
+the road gives; an example that swapped them silently would be a worse lie than
+the one it replaced.
+
+**Result: 74 passed, nothing skipped, nothing xfailed.** Every example runs with
+no infrastructure at all, where before five could not run without a gateway and
+two could not run at all.
+
+### What Phase 0's gate got wrong, and CI caught
+
+The gate ran examples with a bare interpreter. Every example's usage line says
+`uv run --package osrm-api-gateway-examples`, and that package is what puts
+`config` on `sys.path` and installs `folium`. It passed on a laptop whose venv
+had been synced by an earlier `make examples` and failed on CI's clean checkout.
+
+A gate that runs the thing differently from the way it is documented tests a
+configuration nobody has -- a sharper version of the error this whole plan is
+about. The runner is now the documented command, at 0.11 s of overhead each.
+
+It also means the survey's "65 of 72 pass" was measured wrongly and was
+flattering: `folium` and `config` failures would have counted as failures on a
+clean machine. The conclusions about *which* examples were broken still hold,
+because those two failed for their own reasons.
 
 ## Phase 2 — Purpose 2: only the public API
 

@@ -57,7 +57,6 @@ import dataset
 from vrp.benchmarks import read_benchmark
 from vrp.fleet import Ejection, minimise_fleet, routes_needed
 from vrp.model import Problem, TravelMatrix
-from vrp.osrm import build_matrix
 from vrp.solve import pyvrp_adapter
 
 INSTANCES = PROJECT_ROOT / "benchmarks" / "instances"
@@ -87,7 +86,11 @@ def grid(size: int) -> TravelMatrix:
         deliveries, depot = dataset.load().spread(size - 1)
         points = [(depot["latitude"], depot["longitude"])]
         points += [(d["latitude"], d["longitude"]) for d in deliveries]
-        matrix, _ = build_matrix(GATEWAY, points)
+        matrix, road = dataset.road_matrix_or_planar(points, GATEWAY,
+                                                    "fleet-min")
+        if not road:
+            print("   no gateway; distances are straight-line, so the costs"
+                  " below are lower than the road gives")
         _GRIDS[size] = matrix
     return _GRIDS[size]
 
