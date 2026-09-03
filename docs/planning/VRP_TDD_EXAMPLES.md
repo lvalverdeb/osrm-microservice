@@ -243,9 +243,9 @@ interactions are exercised rather than each constraint in isolation.
 | E-33 | `tests/vrp/test_neighbourhood_throughput.py` | `T-33` | ALG-2 | | L1 | **Done.** ≥ 10× local-search throughput against the naive baseline, measured not asserted |
 | E-34 | `tests/vrp/test_lns_core.py` | `T-34` | ALG-3b | | L4 | **Done.** SISR ruin + greedy-with-blinks recreate matches published results on the frozen corpus |
 | E-35 | `examples/src/fleet/alloc/fleet_minimisation.py` | `T-35` | FR-32, §5.2 | | L4 | **Done.** `MIN_VEHICLES` reaches the BKS vehicle count on the benchmark set |
-| E-36 | `tests/vrp/test_portfolio_runner.py` | `T-36` | §7.3 | | L1 | **Done.** Incumbents scored by the canonical evaluator, never the engine's own accounting; win rates recorded by instance signature |
-| E-37 | `tests/vrp/test_decomposition.py` | `T-37` | §7.6 | | L5 | **Done.** Large instances decompose and recombine with no invariant violation at the boundaries |
-| E-38 | `tests/vrp/test_set_partitioning.py` | `T-38` | ALG-6 | | L5 | **Done.** Never worse than the best pooled trajectory on the frozen corpus (mean reported); ≥ 0.5% on a capacity-pressured 200-customer instance |
+| E-36 | `examples/src/fleet/rich/engine_portfolio.py` | `T-36` | §7.3 | | L1 | **Done.** Incumbents scored by the canonical evaluator, never the engine's own accounting; win rates recorded by instance signature; evidence in `tests/vrp/test_portfolio_runner.py` |
+| E-37 | `examples/src/fleet/rich/large_instance_decomposition.py` | `T-37` | §7.6 | | L5 | **Done.** Large instances decompose and recombine with no invariant violation at the boundaries; evidence in `tests/vrp/test_decomposition.py` |
+| E-38 | `examples/src/fleet/rich/set_partitioning_polish.py` | `T-38` | ALG-6 | | L5 | **Done.** Never worse than the best pooled trajectory on the frozen corpus (mean reported); ≥ 0.5% on a capacity-pressured 200-customer instance; evidence in `tests/vrp/test_set_partitioning.py` |
 | E-39 | `examples/src/fleet/rich/departure_scheduling.py` | `T-39` | ALG-5 | TSP | L1 | **Done.** Duty duration measurably reduced by departure-time choice |
 | E-40 | `examples/src/fleet/rich/time_dependent.py` | `T-40` | FR-14 | | L2 | FIFO (no-passing) property holds across every bucket boundary, and the formulation §6.3 forbids is shown overtaking on the same instance. **Done.** The blocker was misread: OSRM cannot serve time-dependent travel, but §12.2 fits multipliers *against* free flow, so the construction never needed a departure-time parameter |
 | E-41 | `examples/src/fleet/rich/ev_recharging.py` | `T-41` | FR-20, INV-16 | | L2 | The taper that makes the last fifth of a battery cost three times the first; a 240 km round on 200 km of range ending 20% past empty, with the shortfall at a step rather than in a total; the charge placed late and sized to the rest of the round; every later stop moving by the time on the plug; and a 30 kWh van refused by name. **Done.** |
@@ -257,7 +257,7 @@ interactions are exercised rather than each constraint in isolation.
 | # | Example | Task | Satisfies | Variant | Level | Passes when |
 |---|---|---|---|---|---|---|
 | E-44 | `examples/src/fleet/alloc/fleet_mix.py` | `T-44` | FR-30, FR-32, FR-33 | | L2 | **Done.** Deployment is a decision, not an outcome; own-vs-hire step costs applied; marginal value reported per vehicle |
-| E-45 | `tests/vrp/test_depot_inventory.py` | `T-45` | FR-31 | | L1 | **Done.** A stockout yields `DEPOT_STOCKOUT`, never a silent over-allocation |
+| E-45 | `examples/src/fleet/alloc/depot_inventory.py` | `T-45` | FR-31 | | L1 | **Done.** A stockout yields `DEPOT_STOCKOUT`, never a silent over-allocation; evidence in `tests/vrp/test_depot_inventory.py` |
 | E-46 | `examples/src/fleet/alloc/tactical_sizing.py` | `T-46` | FR-34 | | L5 | **Done.** Cost/service Pareto front over ≥ 30 days × ≥ 10 fleet mixes |
 | E-47 | `examples/src/fleet/alloc/territories.py` | `T-47` | FR-17, FR-18, FR-35 | | L2 | **Done.** Territories balanced on duration, distance and stop count; driver-customer stability measured across periods |
 
@@ -267,13 +267,13 @@ interactions are exercised rather than each constraint in isolation.
 
 | # | Example | Task | Satisfies | Variant | Level | Passes when |
 |---|---|---|---|---|---|---|
-| E-50 | `tests/vrp/test_committed_state.py` | `T-50` | DYN-4 | | L2 | **Done.** No executed stop ever moves, proven over the replay corpus |
+| E-50 | `examples/src/fleet/dynamic/committed_state.py` | `T-50` | DYN-4 | | L2 | **Done.** No executed stop ever moves, proven over the replay corpus; evidence in `tests/vrp/test_committed_state.py` |
 | E-51 | `examples/src/fleet/dynamic/dispatch_waves.py` | `T-51` | DYN-1, DYN-2, **FR-22** | | L2 | **Done.** Zero must-go postponements across the replay corpus; dispatched-now vs postponed decided explicitly |
 | E-52 | `tests/vrp/test_baseline_policies.py` | `T-52` | §8.2 | | L1 | **Done.** Greedy, lazy and random wired into the replayer as permanent baselines |
-| E-53 | `tests/vrp/test_historical_replayer.py` | `T-53` **[GATE]** | DYN-6 | | L6 | **Done.** Deterministic replay of 90 historical days; policies comparable on one scale |
+| E-53 | `examples/src/fleet/dynamic/replay_policies.py` | `T-53` **[GATE]** | DYN-6 | | L6 | **Done.** Deterministic replay of 90 historical days; policies comparable on one scale; evidence in `tests/vrp/test_historical_replayer.py` |
 | E-54 | `examples/src/fleet/dynamic/sample_scenario_policy.py` | `T-54` | §8.2 | | L6 | **Done.** Beats greedy and lazy on the replay corpus, with the result written down |
 | E-55 | `examples/src/fleet/dynamic/prize_collecting_epoch.py` | `T-55` | §8.2 | | L6 | **Done.** Comparable or better than the sample-scenario policy |
-| E-56 | `tests/vrp/test_reoptimisation_latency.py` | `T-56` | DYN-5, §8.3 | | L1 | **Done.** p95 ≤ 30 s with 90% of the plan locked |
+| E-56 | `examples/src/fleet/dynamic/breakdown_at_eleven.py` | `T-56` | DYN-5, §8.3 | | L1 | **Done.** p95 ≤ 30 s with 90% of the plan locked; evidence in `tests/vrp/test_reoptimisation_latency.py` |
 | E-57 | `examples/src/fleet/dynamic/churn_tradeoff.py` | `T-57` | §8.3 | | L5 | **Done.** Churn/cost curve produced so operations can choose a point |
 
 ---
@@ -283,12 +283,12 @@ interactions are exercised rather than each constraint in isolation.
 | # | Example | Task | Satisfies | Variant | Level | Passes when |
 |---|---|---|---|---|---|---|
 | E-60 | `examples/src/fleet/explain/why_unassigned.py` | `T-60` | CON-5, FR-36 | | L1 | **Done.** Per-order rationale, marginal cost, and `would_fit_if` for every rejected order |
-| E-61 | `tests/vrp/test_plan_adherence.py` | `T-61` | CON-6, §12.4 | | L6 | **Done.** Adherence computed per depot, driver and territory from telematics |
+| E-61 | `examples/src/fleet/learn/plan_adherence.py` | `T-61` | CON-6, §12.4 | | L6 | **Done.** Adherence computed per depot, driver and territory from telematics; evidence in `tests/vrp/test_plan_adherence.py` |
 | E-62 | `examples/src/fleet/learn/service_time_calibration.py` | `T-62` | §12.1 | | L1 | **Done.** Monthly re-fit reproduces a known fixture; drift alerts fire |
 | E-63 | `examples/src/fleet/learn/speed_calibration.py` | `T-63` | §12.2 | | L1 | Where a speed profile's numbers come from: multipliers fitted from what the vans did, against what the engine believed. Shows the arcs that cross the hour being discarded, the fit recovering the traffic that produced it, a held-out week scoring 0s against 880s for a week of gridlock, and the fit refusing to average arc classes together. **Done.** |
-| E-64 | `tests/vrp/test_zone_prior.py` | `T-64` | §12.4 | | L6 | **Done.** Adherence improves with no verifier regression; advisory only, never a hard constraint |
-| E-65 | `tests/vrp/test_shadow_and_canary.py` | `T-65` | §11.4 | | L6+L7 | **Done.** One depot canary completed with a written go/no-go |
-| E-66 | `tests/vrp/test_verify_endpoint.py` | `T-66` | §9.4, CON-1 | | L1 | **Done.** An externally supplied plan is verifiable through the public endpoint |
+| E-64 | `examples/src/fleet/learn/zone_sequence_prior.py` | `T-64` | §12.4 | | L6 | **Done.** Adherence improves with no verifier regression; advisory only, never a hard constraint; evidence in `tests/vrp/test_zone_prior.py` |
+| E-65 | `examples/src/fleet/learn/canary_rollout.py` | `T-65` | §11.4 | | L6+L7 | **Done.** One depot canary completed with a written go/no-go; evidence in `tests/vrp/test_shadow_and_canary.py` |
+| E-66 | `examples/src/fleet/verify/external_plan.py` | `T-66` | §9.4, CON-1 | | L1 | **Done.** An externally supplied plan is verifiable through the public endpoint; evidence in `tests/vrp/test_verify_endpoint.py` |
 | E-67 | `examples/src/fleet/infra/accelerator_profile.py` | `T-67` | NFR-09, §7.3 | | L4 | A negative requirement demonstrated on the machine that lacks the thing: with the profile off the import system is never asked for `cuopt` at all (shown with a watcher carrying its own sentinel), the plan is the same stops in the same order, and switching it on without the library reports the fallback instead of hiding it. The engine refuses by name — no cuOpt has ever run against this code. **Done.** accelerator profile, and no GPU is present in this environment |
 
 ---

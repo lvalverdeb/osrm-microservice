@@ -183,10 +183,21 @@ declined.
   `import os as _os`, and a check with false positives is one people learn to
   ignore.
 
-## Phase 3 — Purpose 1: coverage somebody can navigate
+## Phase 3 — Purpose 1: coverage somebody can navigate — **DONE**
 
-31 examples have no catalogue row. They are not all the same kind of thing, and
-the first job is to say which:
+**The number was right and the diagnosis was wrong.** Reading the 31 rather
+than counting them: **eleven already declared their own `E-nn`** in their
+docstrings, and those rows existed -- pointing at a **test file**. `E-45` said
+the example was `tests/vrp/test_depot_inventory.py` while
+`examples/src/fleet/alloc/depot_inventory.py` sat there implementing it. The
+index was describing an older state of the repository and nothing said so, the
+same shape as `E-67` before its example was written. Those eleven rows now
+point at the example and keep the test named as evidence.
+
+The remaining nineteen split cleanly: twelve gateway examples, six tools, one
+benchmark.
+
+The original triage, for the record:
 
 - **Feature examples** — belong in `VRP_TDD_EXAMPLES.md` with an `E-nn` row
   tracing to a requirement, like the other 43.
@@ -199,13 +210,24 @@ the first job is to say which:
   because `VRP_TDD_EXAMPLES.md` is a VRP document; give them their own short
   index rather than forcing them into it.
 
-- **Done when** every file under `examples/src` is either catalogued, indexed
-  as a gateway example, or moved out of the example tree, and a traceability
-  check enforces it the way it already enforces missing example files.
+**One deviation, deliberate.** The plan said to move the tools into
+`examples/tools/`. They have not been moved: it churns paths in the launcher,
+the Makefile and any doc referencing them, for a benefit an index gives without
+the risk -- and on a day when three CI runs went red for environment reasons, a
+path change that cannot be fully verified locally is a poor bet. They are
+listed under their own heading in `examples/README.md`, which is what "a reader
+looking for how do I use this should not have to sift them out" actually asks
+for. The move remains available if wanted.
 
-## Phase 4 — Say what an example is
+- **Done:** `test_every_example_is_indexed_somewhere` fails when an example
+  appears in neither index, and when an entry is dropped from one. Both
+  verified by perturbation.
 
-There is no `examples/README.md`. Write one, short:
+## Phase 4 — Say what an example is — **DONE, folded into Phase 3**
+
+Written as part of Phase 3 rather than after it -- the index Phase 3 needed and
+the statement of purpose Phase 4 wanted are the same document, and writing it
+twice made no sense. It carries:
 
 - the two purposes, stated;
 - public API only, and why proof belongs in tests;
@@ -214,8 +236,9 @@ There is no `examples/README.md`. Write one, short:
 - the docstring shape the good ones already share — what it demonstrates, which
   requirement, numbered sections, "Runs offline", a usage line.
 
-- **Done when** a new example can be written from the README without reading
-  another example, and the claim is checked by doing it.
+- **Done:** `examples/README.md` states the two purposes, the conventions that
+  follow from them, and indexes every example by kind. The claim that a new
+  example can be written from it alone is not yet tested by doing it.
 
 ## What this plan does not do
 

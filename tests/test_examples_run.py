@@ -149,3 +149,29 @@ def test_no_example_claims_to_run_offline_while_needing_a_gateway():
     assert not liars, (
         f"{sorted(liars)} promise to run offline and call build_matrix with no "
         "fallback, so they die on a refused connection")
+
+
+@pytest.mark.slow
+def test_every_example_is_indexed_somewhere():
+    """An example nobody can find showcases nothing.
+
+    Two indexes, because the examples are two audiences. VRP capability
+    examples trace to a requirement and live in `VRP_TDD_EXAMPLES.md` by
+    `E-nn`; gateway examples, benchmarks and tools are listed in
+    `examples/README.md`, which also states what an example is for.
+
+    Thirty-one files were in neither when this was written. Eleven of those
+    turned out to have an `E-nn` row already, pointing at a *test* rather than
+    at the example somebody had since written -- the index was describing an
+    older state of the repository and nothing said so.
+    """
+    catalogue = (REPO / "docs" / "planning" / "VRP_TDD_EXAMPLES.md").read_text()
+    readme = (REPO / "examples" / "README.md").read_text()
+
+    missing = [name_of(p) for p in ALL
+               if str(p.relative_to(REPO)) not in catalogue
+               and name_of(p) not in readme]
+
+    assert not missing, (
+        "these examples appear in no index, so nobody can find them and "
+        "nothing says what they are for: " + ", ".join(sorted(missing)))
