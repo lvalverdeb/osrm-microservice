@@ -50,6 +50,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
+
+import dataset
 
 from vrp.bench.corpus import CORPUS, build_instance
 from vrp.hos.schedule import schedule_route
@@ -226,9 +229,10 @@ def show_sequencing() -> None:
     print("   Visiting it first costs 1,100 s against the illegal 300, so a DP")
     print("   that ignored windows would report a cheaper, unusable answer.")
 
+    print("\n   the DP on real rounds of each size:")
     print(f"\n   {'stops':>7}{'DP':>9}")
     for stops in (8, 12, MAX_DP_STOPS, MAX_DP_STOPS + 1):
-        instance = _line(stops)
+        instance = _real_round(stops)
         started = time.monotonic()
         found = tsptw_sequence(instance, "V0",
                                [order.id for order in instance.orders])
@@ -266,12 +270,35 @@ def _windowed_detour() -> Problem:
                   12 * 3600)
 
 
-def _line(stops: int) -> Problem:
-    size = stops + 1
-    legs = [[abs(i - j) * 600 for j in range(size)] for i in range(size)]
-    return _build(legs,
-                  {i: TimeWindow(start=0, end=14 * 3600) for i in range(1, size)},
-                  14 * 3600)
+def _real_round(stops: int) -> Problem:
+    """A real delivery round of `stops`, for timing the DP at each size.
+
+    Scattered rather than collinear on purpose. Stops evenly spaced along a
+    line are the easiest tour there is -- the optimal order is the order they
+    come in -- so timing the DP on one flatters it. These are real addresses
+    around the depot, and the DP has to actually search.
+
+    Args:
+        stops: How many deliveries to take.
+
+    Returns:
+        An instance with windows wide enough that only the sequencing costs
+        anything.
+    """
+    day = TimeWindow(start=0, end=14 * 3600)
+    locations, matrix, deliveries, _ = dataset.planar_sites(
+        stops, "spread", "polish")
+    orders = tuple(
+        Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},
+              delivery=StopSpec(location_id=f"C{i}",
+                                service_fixed=d["service_minutes"] * 60,
+                                time_windows=(day,)))
+        for i, d in enumerate(deliveries, 1))
+    return Problem(
+        id=f"polish-{stops}", locations=locations, orders=orders,
+        vehicles=(Vehicle(id="V0", capacities={"kg": 100}, shift=day,
+                          start_location_id="D", end_location_id="D"),),
+        matrix=matrix)
 
 
 def main() -> int:
