@@ -49,6 +49,22 @@ from typing import Any
 
 DEFAULT_PATH = Path("data/deliveries_cr.json")
 
+# A committed slice of the corpus, used when the full one is not there. The
+# full file is 12 MB and generated -- and generating it snaps fifty thousand
+# points through OSRM, so a clean checkout and CI can make neither. Without
+# this every dataset-backed example was unrunnable anywhere but a machine that
+# had already built one, which is most of them.
+#
+# It is not a sample in the statistical sense: it is the union of every slice
+# the examples take -- the nearest two thousand to the first depot (the pool
+# `spread` walks), the nearest hundred and fifty to each other depot, a far
+# tail measured from every depot, and the first four hundred in file order
+# because `busiest_depot` reads them. `nearest`, `spread`, `furthest`,
+# `around_each_depot` and `cluster_with_outliers` all return exactly what the
+# full corpus returns, which is what lets an example print the same numbers
+# here, on a fresh clone, and in CI.
+SAMPLE_PATH = Path(__file__).resolve().parent.parent / "data" / "deliveries_sample.json"
+
 #: How many deliveries `busiest_depot` weighs. The whole corpus would pick the
 #: depot nearest the country's centre of mass every time, whatever the slice.
 _DEPOT_SAMPLE = 400
@@ -245,9 +261,16 @@ def load(path: Path = DEFAULT_PATH) -> Dataset:
         The loaded dataset.
 
     Raises:
-        SystemExit: If the file is absent. It is generated rather than
-            committed, so the fix is a command, not a bug report.
+        SystemExit: If neither the full corpus nor the committed slice is
+            there. The full one is generated rather than committed, so the fix
+            is a command, not a bug report.
+
+    Falls back to `SAMPLE_PATH` silently. An announcement on every run would be
+    noise, and the fallback is not a degradation: the slice returns exactly what
+    the full corpus returns for every selection the examples make.
     """
+    if not path.exists() and path == DEFAULT_PATH and SAMPLE_PATH.exists():
+        path = SAMPLE_PATH
     if not path.exists():
         raise SystemExit(
             f"no dataset at {path}\n"

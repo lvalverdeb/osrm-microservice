@@ -90,3 +90,6 @@ examples/**/*.html
 # committing it would add churn to every diff for no information.
 # See docs/dataset_prep.md.
 data/deliveries*.json
+# The committed slice is the exception: examples and CI need a corpus,
+# and generating the full one snaps 50,000 points through OSRM.
+!examples/data/deliveries_sample.json
