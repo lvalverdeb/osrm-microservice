@@ -120,10 +120,26 @@ class Dataset:
 
     Attributes:
         depots: Depot records, each with `name`, `latitude`, `longitude`.
-        deliveries: Delivery records, each with `product_id`, `latitude`,
-            `longitude`, `province`, `weight_kg`, `units`, `priority`,
-            `service_minutes` and `category`.
-        meta: Generation metadata — seed, counts, snapping bounds.
+        deliveries: Delivery records, each with all thirteen of `product_id`,
+            `order_id`, `latitude`, `longitude`, `province`, `hub`, `gam`,
+            `weight_kg`, `units`, `priority`, `service_minutes` and `category`.
+
+            Three are worth knowing about because they are easy to miss.
+            `hub` names the town a delivery belongs to and `gam` says whether
+            it is inside the Greater Metropolitan Area -- together they are the
+            corpus's own geography, and `contested` and the clustering examples
+            lean on them. `priority` is `standard`, `express` or `scheduled`;
+            nothing reads it yet, and `scheduled` is the honest place to get a
+            delivery that has an appointment rather than inventing one.
+
+            `order_id` is not what a solver means by an order id: examples key
+            orders off `product_id`, and every `order_id` in a solution is the
+            plan's own identifier rather than this field.
+        meta: Generation metadata — seed, counts, and whether the points were
+            snapped to the road network. For the committed corpus
+            `snapped_to_road_network` is false: `generate_delivery_dataset.py`
+            only snaps when given `--engine`, so a few coordinates sit off the
+            network and whatever builds a matrix snaps them itself.
     """
 
     depots: list[dict[str, Any]]
@@ -338,9 +354,17 @@ def road_matrix_or_planar(points: list[tuple[float, float]], gateway: str,
 
     Returns:
         The matrix, and whether it came from the road network. **Check the
-        flag and say so** -- straight-line distances are shorter than roads
-        everywhere and by different amounts in different places, so a number
-        printed from a planar matrix is not the number the road gives.
+        flag and say so**: a number printed from a planar matrix is not the
+        number the road gives, and it is not wrong in a single direction.
+
+        Measured against this gateway on Costa Rican arcs, straight-line
+        *distance* understates the road by 22% in the metro and 65% through
+        the mountains. Straight-line *duration* does not follow it, because
+        `PlanarMatrix` prices every arc at one speed: a metro arc comes out
+        24% short, while Guadalupe to Liberia comes out 358 minutes against
+        the road's 235 -- 52% long, because the real route is motorway. An
+        earlier version of this docstring claimed planar numbers were "shorter
+        than roads everywhere", which is true of distance and false of time.
 
     Five examples used to promise "Runs offline. No gateway required" and then
     call `build_matrix` unconditionally, so they died on a refused connection.
@@ -387,9 +411,13 @@ def planar_sites(stops: int, strategy: str = "nearest",
     with the fleet, the windows and the capacities is what it is *about*, and
     that stays where a reader can see it.
 
-    Planar rather than road distances so the examples run with no gateway. The
-    numbers are shorter than the road's by different amounts in different
-    places; where that matters, an example should say so.
+    Planar rather than road distances so the examples run with no gateway, and
+    so their output does not change depending on who has one. Straight-line
+    distance understates the road by a fifth to two thirds here; straight-line
+    duration is understated in the metro and badly *overstated* on long arcs,
+    where one fixed speed stands in for a motorway. Where the magnitude
+    matters rather than the mechanism -- range, driving hours -- reach for
+    `road_matrix_or_planar` instead, and say which one you got.
     """
     from vrp.matrix import PlanarMatrix
     from vrp.model import Location

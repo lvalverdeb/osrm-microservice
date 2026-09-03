@@ -7,8 +7,8 @@ It used to invent both. The depots were six hard-coded pairs of coordinates --
 the same six, copied -- and the stops were `random.uniform` offsets around
 them, unseeded, so every run produced a different file and the committed
 payload changed whenever anybody executed an example. The corpus has the depots
-and 50,000 road-snapped deliveries, so none of that needed inventing and none
-of it needed committing.
+and 50,000 deliveries across the country's real provinces and hubs, so none of
+that needed inventing and none of it needed committing.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\

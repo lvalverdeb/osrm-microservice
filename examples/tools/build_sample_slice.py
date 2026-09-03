@@ -2,9 +2,9 @@
 
 `examples/data/deliveries_sample.json` is the corpus the examples fall back to
 when the full `data/deliveries_cr.json` is not there -- on a fresh clone, and in
-CI. The full corpus is 12 MB and reproducible only by snapping 50,000 points
-through a live OSRM, so it is not committed; without a stand-in, every
-dataset-backed example skipped and the gate proved nothing about them.
+CI. The full corpus is 12 MB and takes a long generator run to rebuild, so it
+is not committed; without a stand-in, every dataset-backed example skipped and
+the gate proved nothing about them.
 
 The slice is not a sample. A random tenth of the corpus would answer every
 selection differently and quietly change what each example prints. It is the
