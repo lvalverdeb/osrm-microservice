@@ -137,9 +137,17 @@ class Dataset:
             plan's own identifier rather than this field.
         meta: Generation metadata — seed, counts, and whether the points were
             snapped to the road network. For the committed corpus
-            `snapped_to_road_network` is false: `generate_delivery_dataset.py`
-            only snaps when given `--engine`, so a few coordinates sit off the
-            network and whatever builds a matrix snaps them itself.
+            `snapped_to_road_network` is now true and every coordinate sits on
+            a road, so a matrix build moves nothing and raises no
+            `SnapWarning`.
+
+            It was not always so. The corpus shipped unsnapped, because
+            `generate_delivery_dataset.py` only snaps when given `--engine`,
+            and it places deliveries as a Gaussian around each hub — sigma
+            about 7 km outside the Valle Central — with no land check at all.
+            22.6% of it sat beyond the generator's own 250 m bar and the worst
+            were 20 km out to sea off Jaco and Limon. `repaired_off_network`
+            records how many were repositioned.
     """
 
     depots: list[dict[str, Any]]

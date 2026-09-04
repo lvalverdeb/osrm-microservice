@@ -28,10 +28,9 @@ MAX_STOPS = 2000
 # three -- the same six depots, 50,000 deliveries placed around the country's
 # real hubs, and each one's province and hub -- so none of it needs restating.
 #
-# Not snapped, though: this corpus was generated without `--engine`, so its
-# `snapped_to_road_network` is false and a few points sit up to ~190 m off the
-# network. The gateway snaps them when it builds a matrix, which is why a
-# `SnapWarning` is normal here rather than a fault.
+# Every one of them sits on a road, so allocating them is a question about
+# roads rather than about coordinates that happen to be in the sea -- which
+# 22.6% of this corpus were until they were repositioned.
 
 @lru_cache(maxsize=1)
 def depot_names() -> tuple[str, ...]:

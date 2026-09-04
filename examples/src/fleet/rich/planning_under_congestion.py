@@ -100,9 +100,14 @@ def the_round(stops: int = STOPS) -> tuple:
     """
     locations, matrix, deliveries, depot = dataset.planar_sites(
         stops, "spread", "congestion")
+    # A pharmacy is the reason a stop has a receiving window, so prefer one --
+    # but which categories a round contains is the corpus's business, not this
+    # example's. A 14-stop round has none, and assuming otherwise crashed the
+    # NFR-01 section, which does not care what the bay sells.
     pharmacies = [i for i, d in enumerate(deliveries, 1)
                   if d["category"] == "Pharmacy"]
-    bay = max(pharmacies, key=lambda i: matrix.duration(0, i))
+    candidates = pharmacies or list(range(1, len(deliveries) + 1))
+    bay = max(candidates, key=lambda i: matrix.duration(0, i))
     return locations, matrix, deliveries, depot, bay
 
 
@@ -166,7 +171,12 @@ def plans_for(closes: int) -> tuple[list[str] | None, list[str] | None]:
 
 def describe_round() -> None:
     heading("1.", "Ten real deliveries, and the one with a bay to hit")
-    print(f"\n   Depot: {DEPOT['name']}. Service times are the corpus's own.\n")
+    kind = DELIVERIES[BAY - 1]["category"]
+    print(f"\n   Depot: {DEPOT['name']}. Service times are the corpus's own.")
+    print(f"   The bay is C{BAY}, the furthest {kind} on the round"
+          + ("." if kind == "Pharmacy" else
+             " -- no pharmacy in this\n   selection, so the receiving window "
+             "goes to the furthest stop instead.") + "\n")
     print(f"      {'stop':6s} {'category':12s} {'from depot':>11s} {'service':>8s}")
     for i, delivery in enumerate(DELIVERIES, 1):
         mark = "  <- receiving bay" if i == BAY else ""
@@ -202,6 +212,17 @@ def when_it_matters() -> tuple[int, int]:
               f"{clock(served_at(blind, closes, f'O{BAY}')):>14s} "
               f"{clock(served_at(aware, closes, f'O{BAY}')):>11s}   "
               f"{'free-flow plan MISSES the bay' if late else 'both arrive in time'}")
+    if not band:
+        # Whether a band exists at all depends on the round, and the round
+        # comes from the corpus. Saying so beats printing an empty range or
+        # crashing on min() of nothing, which is how the bay selection above
+        # failed when a redrawn corpus put no pharmacy in the round.
+        print("\n   No bay hour separates the two plans on this round: the")
+        print("   free-flow sequence happens to satisfy every window the peak")
+        print("   leaves it. That is a real answer -- planning under the")
+        print("   profile is worth nothing here -- and the sweep is what")
+        print("   distinguishes it from the mechanism being broken.")
+        return SHIFT.start, SHIFT.start
     print(f"\n   The two plans differ between {clock(min(band) * 60)} and "
           f"{clock(max(band) * 60)} and nowhere else.")
     print("   Earlier, the bay is tight enough that both go there first.")
