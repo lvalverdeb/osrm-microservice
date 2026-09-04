@@ -23,6 +23,7 @@ The constraints that decide whether a plan can actually be driven.
 | | the problem it answers |
 |---|---|
 | `fleet/tw/multiple_windows.py` | The customer is out between 12 and 2. What does being late actually cost, and is a soft window worth breaking? |
+| `fleet/tw/sla_windows.py` | Express, standard and scheduled are three different promises. Which ones did the round keep, and what did keeping them cost? |
 | `fleet/rich/multi_capacity.py` | A van is full when *any* dimension runs out — weight, volume, pallets. Totals are the wrong test and pass instances that cannot be loaded. |
 | `fleet/rich/heterogeneous_fleet.py` | Six depots and a mixed fleet: the shape most businesses have, rather than one depot and identical vans. |
 | `fleet/rich/skills_and_access.py` | Three plans that look perfect and cannot be driven — no tail-lift, no ADR ticket, a low bridge. |
