@@ -29,11 +29,21 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import sys
+import time
 from pathlib import Path
 
 import httpx
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import config  # noqa: F401  -- loads examples/.env into the environment
+
+# `/matrix` reports a snap per coordinate; MATRIX_MAX_CELLS caps a square
+# one at 10,000 cells, and RATE_LIMIT_MATRIX at 300 a minute.
+SNAP_BATCH = 100
+SNAP_PACE = 0.25
 
 # --- Depots -----------------------------------------------------------------
 # Verbatim from clustering/run_clustering_workflow.py so the two are comparable.
@@ -42,7 +52,7 @@ WAREHOUSES = [
     {"name": "Grecia (Alajuela)", "latitude": 10.0734, "longitude": -84.3121},
     {"name": "Guapiles (Limon)", "latitude": 10.2128, "longitude": -83.7847},
     {"name": "San Carlos (Alajuela North)", "latitude": 10.3228, "longitude": -84.4253},
-    {"name": "Liberia (Guanacaste)", "latitude": 10.6333, "longitude": -85.5333},
+    {"name": "Liberia (Guanacaste)", "latitude": 10.618846, "longitude": -85.521774},
     {"name": "Perez Zeledon (San Jose South)", "latitude": 9.3734, "longitude": -83.7029},
 ]
 
@@ -153,23 +163,52 @@ def snap_batch(client: httpx.Client, engine: str, points: list[tuple[float, floa
                max_snap_m: float) -> list[tuple[float, float] | None]:
     """Snap each point to the road network, or None if it is too far from one.
 
-    One `/nearest` call per point: it takes a single coordinate by definition,
-    so there is no batch form to use.
+    Goes through the gateway's own `POST /matrix`, which reports one snapped
+    location and snap distance per coordinate, a hundred coordinates at a time.
+
+    It used to issue one `GET {engine}/nearest/v1/driving/{lon},{lat}` per
+    point -- raw osrm-routed's URL shape, which the gateway answers with a 404,
+    and which only works if osrm-routed itself is exposed. Deployments here
+    publish the gateway and keep the engine private, so the documented
+    `--engine` could not be satisfied by the thing the docs point at. Worse,
+    the failure was swallowed: every 404 became `None`, every point read as
+    unreachable, and a URL mismatch would have looked exactly like a corpus
+    with nowhere to deliver to.
+
+    Args:
+        client: An open HTTP client.
+        engine: Gateway base URL.
+        points: `(latitude, longitude)` to snap.
+        max_snap_m: Beyond this a point is rejected rather than moved.
+
+    Returns:
+        One entry per input: the snapped `(latitude, longitude)`, or None when
+        the nearest road is further than `max_snap_m`.
+
+    Raises:
+        RuntimeError: if the gateway answers anything but 200. A snapping run
+            that cannot reach the gateway must stop, not quietly reject the
+            entire corpus.
     """
     out: list[tuple[float, float] | None] = []
-    for lat, lon in points:
-        try:
-            response = client.get(f"{engine}/nearest/v1/driving/{lon:.6f},{lat:.6f}",
-                                  params={"number": 1}, timeout=30)
-            data = response.json()
-            if data.get("code") != "Ok" or not data.get("waypoints"):
-                out.append(None)
-                continue
-            snapped_lon, snapped_lat = data["waypoints"][0]["location"]
-            moved = haversine_metres(lat, lon, snapped_lat, snapped_lon)
-            out.append((snapped_lat, snapped_lon) if moved <= max_snap_m else None)
-        except Exception:
-            out.append(None)
+    for start in range(0, len(points), SNAP_BATCH):
+        chunk = points[start:start + SNAP_BATCH]
+        # `/matrix` wants at least two coordinates; a lone straggler is sent
+        # doubled and its second answer discarded.
+        sent = chunk if len(chunk) > 1 else chunk * 2
+        body = {"coordinates": [{"latitude": lat, "longitude": lon}
+                                for lat, lon in sent], "profile": "driving"}
+        response = client.post(f"{engine}/matrix", json=body, timeout=120)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"{engine}/matrix returned {response.status_code}: "
+                f"{response.text[:200]}")
+        for (lat, lon), source in zip(chunk, response.json()["sources"]):
+            snapped_lon, snapped_lat = source["location"]
+            moved = float(source.get("distance", 0.0))
+            out.append((snapped_lat, snapped_lon) if moved <= max_snap_m
+                       else None)
+        time.sleep(SNAP_PACE)
     return out
 
 
@@ -274,17 +313,31 @@ def main() -> int:
                         help="same seed, same dataset")
     parser.add_argument("--gam-share", type=float, default=0.72,
                         help="share of deliveries in the Greater Metropolitan Area")
-    parser.add_argument("--engine", default=None,
-                        help="OSRM base URL. Without it, points are NOT snapped "
-                             "and road-reachability is not guaranteed")
+    parser.add_argument("--engine", default=os.environ.get("OSRM_API_URL"),
+                        help="OSRM base URL. Defaults to OSRM_API_URL. Without "
+                             "one, nothing can check that a point is on land")
     parser.add_argument("--max-snap-metres", type=float, default=250.0)
     parser.add_argument("--out", default="data/deliveries_cr.json")
+    parser.add_argument("--allow-unsnapped", action="store_true",
+                        help="write the corpus without snapping. Produces "
+                             "deliveries in the sea; see the module docstring")
     args = parser.parse_args()
 
-    if not args.engine:
-        print("WARNING: no --engine given. Points will not be snapped to the road\n"
-              "         network, so some will not be reachable by road.\n",
+    # Refusing here rather than writing is the whole point. Deliveries are
+    # placed as a Gaussian around a hub -- sigma about 7 km outside the Valle
+    # Central -- and nothing in that placement knows where the coast is. Run
+    # without an engine, this produced a corpus with 22.6% of its deliveries
+    # further than `--max-snap-metres` from any road and the worst of them 20 km
+    # out to sea off Jaco and Limon, while the README and the example gate both
+    # described it as "snapping every point through OSRM". A generator that
+    # silently writes what its own documentation says it does not is worse than
+    # one that stops.
+    if not args.engine and not args.allow_unsnapped:
+        print("Gateway not reachable: no --engine and no OSRM_API_URL, so "
+              "nothing can snap these points to a road or tell sea from land. "
+              "Pass --engine, or --allow-unsnapped to write the corpus anyway.",
               file=sys.stderr)
+        return 1
 
     dataset = generate(args.count, args.seed, args.gam_share,
                        args.engine, args.max_snap_metres)
