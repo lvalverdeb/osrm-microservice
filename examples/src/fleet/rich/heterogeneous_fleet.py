@@ -103,8 +103,8 @@ class VehicleClass:
 # fleet whose smallest vehicle is a 1.2-tonne van was describing a different
 # business. Its 25 kg is the top box, a fact about the vehicle rather than a
 # threshold tuned until the example looked good; it happens to bind because the
-# round's per-depot loads run 16-29 kg, so half the depots fit on two wheels
-# and half do not, and the solver has to decide which.
+# round's per-depot loads run 18-31 kg, so two depots fit on two wheels and
+# four do not, and the solver has to decide which.
 #
 # The motorbike is priced at the van's rate per metre, and that is a limitation
 # rather than a claim: a motorbike genuinely runs cheaper, but these are whole
@@ -138,7 +138,7 @@ def build(depots: list[dict], deliveries: list[dict], matrix: TravelMatrix,
                                   lon=delivery["longitude"], matrix_index=index))
         orders.append(Order(
             id=delivery["product_id"], kind="JOB",
-            quantities={"kg": max(1, round(delivery["weight_kg"]))},
+            quantities={"kg": dataset.load_kg(delivery)},
             delivery=StopSpec(location_id=delivery["product_id"],
                               time_windows=(SHIFT,),
                               service_fixed=delivery["service_minutes"] * 60),

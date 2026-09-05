@@ -91,7 +91,7 @@ def build(depot: dict, deliveries: list[dict], matrix: TravelMatrix,
 
     orders, seeded = [], {}
     for offset, delivery in enumerate(deliveries):
-        kilos = max(1, round(delivery["weight_kg"]))
+        kilos = dataset.load_kg(delivery)
         extra: dict = {}
         # Each seeded stop breaks exactly one thing, so the code that comes
         # back is attributable rather than a coincidence of several failures.

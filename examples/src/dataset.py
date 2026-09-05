@@ -70,6 +70,35 @@ SAMPLE_PATH = Path(__file__).resolve().parent.parent / "data" / "deliveries_samp
 _DEPOT_SAMPLE = 400
 
 
+def load_kg(delivery: dict[str, Any]) -> int:
+    """A delivery's weight as whole kilograms, rounded **up**.
+
+    `vrp.model` takes integer quantities on purpose, so a corpus recorded in
+    fractional kilograms has to be converted, and the direction matters. Six
+    examples wrote `max(1, round(delivery["weight_kg"]))`, which rounds to
+    nearest: on this corpus that understates 42% of deliveries, by up to 0.50 kg
+    each. A capacity is the one dimension where understating is unsafe -- it
+    plans a load the vehicle cannot carry, and the plan still verifies, because
+    the model was told the wrong weight rather than given an illegal one.
+
+    Rounding up is the conservative direction: a plan may leave a little room
+    it did not need, and can never claim room it does not have. It costs about
+    8% of inflated load across the whole corpus.
+
+    It does not make kilograms the right unit for everything. Anything lighter
+    than half a kilo lands on 1 either way -- 0.05 kg and 0.95 kg are the same
+    number here -- so freight that is genuinely sub-kilogram needs a finer
+    dimension, which is what `fleet/tw/envelope_round.py` does with grams.
+
+    Args:
+        delivery: A corpus delivery record, carrying `weight_kg`.
+
+    Returns:
+        Whole kilograms, at least 1 for any delivery of positive weight.
+    """
+    return math.ceil(delivery["weight_kg"])
+
+
 def great_circle_metres(a: tuple[float, float], b: tuple[float, float]) -> int:
     """Distance between two (latitude, longitude) pairs, in whole metres.
 

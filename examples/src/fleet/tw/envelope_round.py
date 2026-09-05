@@ -23,14 +23,14 @@ coherence -- is rounding error against a stop that costs ten minutes whatever
 route reaches it. The only decision left is how many couriers to send, which
 is section 4.
 
-**Kilograms have no resolution left.** Six examples in this repository write
-`quantities={"kg": max(1, round(delivery["weight_kg"]))}`. For a 200 g envelope
-that is `max(1, round(0.2))` -- one kilogram, a fivefold overstatement, and
-identical for every envelope, so the dimension carries no information at all.
-`vrp.model` is integers throughout on purpose (a float second makes `INV-4`
-unfalsifiable), so the answer is a finer unit rather than a fractional one:
-grams. `rich/multi_capacity.py` already reaches for the same trick, counting
-volume in whole tenths of a cubic metre.
+**Kilograms have no resolution left.** `dataset.load_kg` rounds a corpus weight
+up to whole kilograms, which is the safe direction for a capacity and is what
+the other examples use. It cannot help here: 200 g rounds up to 1 kg, a
+fivefold overstatement, and so does every other envelope, so the dimension
+would carry no information at all. `vrp.model` is integers throughout on
+purpose (a float second makes `INV-4` unfalsifiable), so the answer is a finer
+unit rather than a fractional one: grams. `rich/multi_capacity.py` already
+reaches for the same trick, counting volume in whole tenths of a cubic metre.
 
 **Four constraints and none of them is capacity.** The shift is eight hours and
 must fall in daylight, which at 10 degrees north is 11h25m even at the December

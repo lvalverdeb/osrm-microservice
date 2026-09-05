@@ -110,7 +110,7 @@ def build(depot: dict, deliveries: list[dict], matrix: TravelMatrix,
                                   lon=delivery["longitude"], matrix_index=index))
         orders.append(Order(
             id=delivery["product_id"], kind="JOB",
-            quantities={"kg": max(1, round(delivery["weight_kg"]))},
+            quantities={"kg": dataset.load_kg(delivery)},
             delivery=StopSpec(location_id=delivery["product_id"],
                               time_windows=windows_for(scenario, offset),
                               service_fixed=delivery["service_minutes"] * 60),

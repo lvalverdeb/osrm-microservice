@@ -189,7 +189,7 @@ def order_for(delivery: dict, window: TimeWindow, prize: int) -> Order:
     declinable = priority == "standard"
     return Order(
         id=delivery["product_id"], kind="JOB",
-        quantities={"kg": max(1, round(delivery["weight_kg"]))},
+        quantities={"kg": dataset.load_kg(delivery)},
         priority_tier=1 if declinable else 0,
         prize=prize if declinable else 0,
         priority_source="COMMERCIAL" if priority == "scheduled" else "SLA",

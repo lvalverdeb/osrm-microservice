@@ -99,7 +99,7 @@ def cube_of(delivery: dict) -> int:
     round 1 with larger numbers, under a docstring claiming the plan changes.
     """
     bulky = delivery.get("category", "") in BULKY_CATEGORIES
-    kilos = max(1, round(delivery["weight_kg"]))
+    kilos = dataset.load_kg(delivery)
     return max(1, round(kilos / (8 if bulky else 60) * 10))
 
 
@@ -131,7 +131,7 @@ def build(depot: dict, deliveries: list[dict], matrix: TravelMatrix,
         locations.append(Location(id=delivery["product_id"],
                                   lat=delivery["latitude"],
                                   lon=delivery["longitude"], matrix_index=index))
-        quantities = {"kg": max(1, round(delivery["weight_kg"]))}
+        quantities = {"kg": dataset.load_kg(delivery)}
         if use_volume:
             quantities["dm3"] = cube_of(delivery)
 
