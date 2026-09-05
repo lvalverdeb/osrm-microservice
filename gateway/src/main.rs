@@ -135,6 +135,7 @@ fn data_plane() -> Router<AppState> {
         .route("/match", post(handlers::match_trace))
         .route("/trip", post(handlers::trip))
         .route("/nearest", post(handlers::nearest))
+        .route("/nearest/batch", post(handlers::nearest_batch))
         .route("/vrp", post(handlers::vrp))
         .route("/vrp/allocate", post(handlers::vrp_allocate))
         // The final segment arrives as `{y}.mvt`; the handler strips the suffix.

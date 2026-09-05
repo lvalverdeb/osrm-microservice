@@ -29,6 +29,7 @@ use crate::vrp::solve;
         handlers::match_trace,
         handlers::trip,
         handlers::nearest,
+        handlers::nearest_batch,
         handlers::tile,
         handlers::vrp,
         handlers::vrp_allocate,
@@ -140,7 +141,7 @@ mod tests {
         let doc = doc();
         let paths = doc["paths"].as_object().expect("paths object");
         for expected in ["/v1/route", "/v1/matrix", "/v1/matrix-graph", "/v1/match",
-                         "/v1/trip", "/v1/nearest", "/v1/vrp", "/v1/vrp/allocate",
+                         "/v1/trip", "/v1/nearest", "/v1/nearest/batch", "/v1/vrp", "/v1/vrp/allocate",
                          "/health", "/ready", "/metrics"] {
             assert!(paths.contains_key(expected), "{expected} is missing from the document");
         }

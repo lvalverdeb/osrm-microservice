@@ -405,6 +405,7 @@ pub struct Limits {
     match_trace: Option<Limit>,
     trip: Option<Limit>,
     nearest: Option<Limit>,
+    nearest_batch: Option<Limit>,
     tile: Option<Limit>,
     vrp: Option<Limit>,
 }
@@ -423,6 +424,8 @@ impl Limits {
             match_trace: configured("RATE_LIMIT_MATCH", &settings.rate_limit_match)?,
             trip: configured("RATE_LIMIT_TRIP", &settings.rate_limit_trip)?,
             nearest: configured("RATE_LIMIT_NEAREST", &settings.rate_limit_nearest)?,
+            nearest_batch: configured("RATE_LIMIT_NEAREST_BATCH",
+                                      &settings.rate_limit_nearest_batch)?,
             tile: configured("RATE_LIMIT_TILE", &settings.rate_limit_tile)?,
             vrp: configured("RATE_LIMIT_VRP", &settings.rate_limit_vrp)?,
         })
@@ -435,7 +438,7 @@ impl Limits {
         let limit = Limit::parse("600/minute");
         Self {
             route: limit, matrix: limit, match_trace: limit, trip: limit,
-            nearest: limit, tile: limit, vrp: limit,
+            nearest: limit, nearest_batch: limit, tile: limit, vrp: limit,
         }
     }
 
@@ -457,6 +460,8 @@ impl Limits {
             "/matrix-graph" => ("matrix-graph", self.matrix),
             "/match" => ("match", self.match_trace),
             "/trip" => ("trip", self.trip),
+            // Before "/nearest", or the prefix match would swallow it.
+            "/nearest/batch" => ("nearest-batch", self.nearest_batch),
             "/nearest" => ("nearest", self.nearest),
             "/vrp" => ("vrp", self.vrp),
             "/vrp/allocate" => ("vrp-allocate", self.vrp),
@@ -511,6 +516,7 @@ mod limits_tests {
             match_trace: Limit::parse("600/minute"),
             trip: Limit::parse("300/minute"),
             nearest: Limit::parse("600/minute"),
+            nearest_batch: Limit::parse("60/minute"),
             tile: Limit::parse("600/minute"),
             vrp: Limit::parse("100/minute"),
         }

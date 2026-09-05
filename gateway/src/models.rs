@@ -33,6 +33,9 @@ pub mod bounds {
     pub const BREADCRUMBS: (usize, usize) = (2, 5000);
     pub const TRIP_COORDINATES: (usize, usize) = (2, 200);
     pub const NEAREST_NUMBER_MIN: i64 = 1;
+    /// One coordinate is a legitimate batch; the operational cap is
+    /// `NEAREST_MAX_COORDINATES`, not this schema ceiling.
+    pub const NEAREST_BATCH_COORDINATES: (usize, usize) = (1, 5000);
     pub const DEPOTS: (usize, usize) = (1, 500);
     pub const CAPACITY: (i64, i64) = (1, 10_000);
     /// `gt=0` in the pydantic schema. Enforced here because forwarding an
@@ -789,6 +792,62 @@ pub struct NearestRequest {
     pub profile: Profile,
     #[serde(flatten)]
     pub common: CommonRoutingOptions,
+}
+
+/// Snap many coordinates in one request.
+///
+/// OSRM's `/nearest` takes one coordinate, so this fans out rather than
+/// forwarding. It exists because the alternative callers reach for is worse:
+/// snapping N points meant N round trips against a 600/minute limit, or -- as
+/// the corpus generator did -- posting N coordinates to `/matrix` and throwing
+/// away an NxN matrix to read N snap distances off `sources`. Intake validating
+/// geocoder output is the case this serves: `distance` is how far the address
+/// moved to reach a road, which is the confidence signal worth gating on.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NearestBatchRequest {
+    #[schema(min_items = 1)]
+    pub coordinates: Vec<Coordinate>,
+    /// Alternatives per coordinate, as `/nearest` means it.
+    #[serde(default = "one")]
+    #[schema(minimum = 1)]
+    #[serde(deserialize_with = "lax::integer")]
+    pub number: i64,
+    #[serde(default = "driving")]
+    pub profile: Profile,
+    #[serde(flatten)]
+    pub common: CommonRoutingOptions,
+}
+
+impl NearestBatchRequest {
+    /// Refuse a batch that would fan out past the configured bound.
+    ///
+    /// One request becomes one upstream call per coordinate, so the cap is a
+    /// statement about the engine rather than about parsing -- which is why it
+    /// is configuration and not a schema maximum, the same split `/matrix`
+    /// makes between its 5,000-coordinate schema and `MATRIX_MAX_CELLS`.
+    pub fn validate_budget(&self, max_coordinates: usize) -> Vec<ValidationError> {
+        let count = self.coordinates.len();
+        if count <= max_coordinates {
+            return Vec::new();
+        }
+        vec![ValidationError::new("value_error", &[], format!(
+            "Value error, {count} coordinates exceeds the {max_coordinates}-coordinate \
+             limit for one batch; split the request"))]
+    }
+}
+
+impl Validate for NearestBatchRequest {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = validate_coordinates(&self.coordinates, "coordinates",
+                             bounds::NEAREST_BATCH_COORDINATES.0,
+                             bounds::NEAREST_BATCH_COORDINATES.1);
+        if self.number < bounds::NEAREST_NUMBER_MIN {
+            errors.push(ValidationError::new("greater_than_equal", &["number"],
+                "Input should be greater than or equal to 1".to_string())
+                .with_ctx(serde_json::json!({ "ge": bounds::NEAREST_NUMBER_MIN })));
+        }
+        errors
+    }
 }
 
 impl Validate for NearestRequest {

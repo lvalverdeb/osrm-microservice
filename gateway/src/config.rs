@@ -106,6 +106,9 @@ settings! {
     rate_limit_trip: String = "RATE_LIMIT_TRIP" / "300/minute",
     rate_limit_vrp: String = "RATE_LIMIT_VRP" / "100/minute",
     rate_limit_nearest: String = "RATE_LIMIT_NEAREST" / "600/minute",
+    /// Lower than `/nearest` because one request is many engine calls: at the
+    /// 1,000-coordinate cap, 60 a minute is already 60,000 upstream snaps.
+    rate_limit_nearest_batch: String = "RATE_LIMIT_NEAREST_BATCH" / "60/minute",
     rate_limit_tile: String = "RATE_LIMIT_TILE" / "600/minute",
 
     // --- L2 cache (Redis) ---
@@ -163,6 +166,15 @@ settings! {
 
     // --- VRP chunk fan-out ---
     vrp_chunk_concurrency: usize = "VRP_CHUNK_CONCURRENCY" / "4",
+
+    // --- Batch nearest fan-out ---
+    /// Coordinates one `/nearest/batch` may carry. Refused with a 422 past
+    /// this, because the cost is upstream calls rather than parsing.
+    nearest_max_coordinates: usize = "NEAREST_MAX_COORDINATES" / "1000",
+    /// Concurrent engine calls one batch may have in flight. The same lever as
+    /// `VRP_CHUNK_CONCURRENCY` and for the same reason: osrm-routed is shared,
+    /// and one caller should not be able to take all of it.
+    nearest_batch_concurrency: usize = "NEAREST_BATCH_CONCURRENCY" / "8",
 
     // --- API versioning (NFR-10) ---
     /// When the unversioned paths stop being served, as an HTTP-date.

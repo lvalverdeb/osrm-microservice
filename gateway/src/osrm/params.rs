@@ -12,7 +12,8 @@
 
 use crate::cache::{ParamValue, Params};
 use crate::models::{
-    CommonRoutingOptions, MatchRequest, MatrixRequest, NearestRequest, RouteRequest, TripRequest,
+    CommonRoutingOptions, MatchRequest, MatrixRequest, NearestBatchRequest,
+    NearestRequest, RouteRequest, TripRequest,
 };
 use crate::pyfloat::python_float;
 
@@ -163,6 +164,13 @@ pub fn trip(request: &TripRequest) -> Params {
 pub fn nearest(request: &NearestRequest) -> Params {
     let mut params = Params::new();
     // An int, not a string: the cache key hashes the native type.
+    params.insert("number", ParamValue::Int(request.number));
+    apply_common(params, &request.common)
+}
+
+/// The same params as `nearest`, for every coordinate in a batch.
+pub fn nearest_batch(request: &NearestBatchRequest) -> Params {
+    let mut params = Params::new();
     params.insert("number", ParamValue::Int(request.number));
     apply_common(params, &request.common)
 }

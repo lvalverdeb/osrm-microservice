@@ -8,11 +8,13 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Map, Value};
+use tokio::sync::Semaphore;
 
 use crate::config::Settings;
 use crate::error::ApiError;
 use crate::models::{
-    join_coordinates, MatchRequest, MatrixRequest, NearestRequest, RouteRequest, TripRequest,
+    join_coordinates, MatchRequest, MatrixRequest, NearestBatchRequest,
+    NearestRequest, RouteRequest, TripRequest,
     Validate, ValidationError, VrpRequest,
 };
 use crate::osrm::client::{OsrmClient, OsrmError};
@@ -292,6 +294,64 @@ pub async fn nearest(State(state): State<AppState>, body: Bytes) -> Result<Respo
     let endpoint = format!("/nearest/v1/{}/{}", request.profile.as_str(),
                            request.coordinate.as_pair());
     Ok(proxy(state.client.get(&endpoint, &params::nearest(&request)).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/nearest/batch",
+    tag = "Routing",
+    request_body = NearestBatchRequest,
+    responses(
+        (status = 200, description = "Snap every coordinate, in the order given.", body = Object),
+        (status = 422, description = "Request failed validation, or exceeded the batch limit"),
+        (status = 429, description = "Rate limit exceeded"),
+        (status = 500, description = "The routing engine could not be reached"),
+        (status = "default", description = "An error from the routing engine, relayed with its own status"),
+    )
+)]
+pub async fn nearest_batch(State(state): State<AppState>, body: Bytes)
+    -> Result<Response, ApiError> {
+    let request: NearestBatchRequest = accept(&body)?;
+    let budget = request.validate_budget(state.settings.nearest_max_coordinates);
+    if !budget.is_empty() {
+        return Err(ApiError::Validation(budget));
+    }
+
+    let params = params::nearest_batch(&request);
+    let profile = request.profile.as_str().to_string();
+    let slots = Arc::new(Semaphore::new(state.settings.nearest_batch_concurrency.max(1)));
+    let mut set = tokio::task::JoinSet::new();
+    for (position, coordinate) in request.coordinates.iter().enumerate() {
+        let endpoint = format!("/nearest/v1/{}/{}", profile, coordinate.as_pair());
+        let (client, slots, params) = (Arc::clone(&state.client), Arc::clone(&slots),
+                                       params.clone());
+        set.spawn(async move {
+            let _permit = slots.acquire().await.expect("semaphore is never closed");
+            // Through the same `get_json` as the single endpoint, so a batch
+            // fills and reuses the very cache entries `/nearest` would.
+            (position, client.get_json(&endpoint, &params).await)
+        });
+    }
+
+    let mut snapped: Vec<Option<Value>> = vec![None; request.coordinates.len()];
+    while let Some(joined) = set.join_next().await {
+        let (position, result) = joined.map_err(|e| ApiError::Upstream(
+            OsrmError::Unavailable(format!("batch nearest task failed: {e}"))))?;
+        match result {
+            Ok(value) => snapped[position] = Some(value),
+            Err(error) => {
+                // One unreachable coordinate makes the whole answer untrustworthy
+                // for the caller's purpose -- gating geocodes -- so stop rather
+                // than return a list with a hole nobody looks for. The same
+                // choice `solve_depot_routes` makes.
+                set.abort_all();
+                return Err(ApiError::Upstream(error));
+            }
+        }
+    }
+
+    let results: Vec<Value> = snapped.into_iter().flatten().collect();
+    Ok(Json(serde_json::json!({ "code": "Ok", "results": results })).into_response())
 }
 
 /// Vector tiles: raw protobuf, no cache, no retry.
