@@ -63,7 +63,7 @@ Commercial decisions the router should be making rather than a human.
 | `fleet/alloc/fleet_mix.py` | Which vans go out today, and what the last one is actually worth — the marginal vehicle, priced. |
 | `fleet/alloc/fleet_minimisation.py` | The route a distance-minimising search will never remove, because dropping it costs distance and saves a vehicle. |
 | `fleet/alloc/tactical_sizing.py` | How many vans to own, decided against thirty days of demand rather than one — including what a failed delivery costs. |
-| `fleet/alloc/territories.py` | What it costs to send the same driver to the same street every week, and what you buy with it. |
+| `fleet/alloc/territories.py` | What it costs to send the same driver to the same street every week, and what you buy with it. Draws the territories, so a wedge and a scattering can be told apart. |
 | `fleet/alloc/depot_inventory.py` | A depot is not a spring. Allocating more than the stock on hand is a plan that stops at lunchtime. |
 | `fleet/rich/large_instance_decomposition.py` | Two thousand stops, fifty sub-problems, and the constraint none of them can see on its own. |
 

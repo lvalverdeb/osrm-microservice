@@ -44,7 +44,10 @@ RUNNER = ["uv", "run", "--package", "osrm-api-gateway-examples"]
 
 # Not examples: `dataset.py` is the shared corpus loader and `config.py` holds
 # the gateway URL. Both are imported by examples and neither is one.
-NOT_AN_EXAMPLE = {"dataset.py", "config.py"}
+# Shared infrastructure under `examples/src/`, not examples: they define
+# helpers and do nothing when run, so the harness would report a vacuous
+# pass and the index test would demand a catalogue row for a library.
+NOT_AN_EXAMPLE = {"dataset.py", "config.py", "maps.py"}
 
 # Signs that a prerequisite is absent rather than that the example is broken.
 # Three kinds, each learned from a CI run rather than guessed:

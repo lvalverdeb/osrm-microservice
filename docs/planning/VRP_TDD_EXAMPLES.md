@@ -259,7 +259,7 @@ interactions are exercised rather than each constraint in isolation.
 | E-44 | `examples/src/fleet/alloc/fleet_mix.py` | `T-44` | FR-30, FR-32, FR-33 | | L2 | **Done.** Deployment is a decision, not an outcome; own-vs-hire step costs applied; marginal value reported per vehicle |
 | E-45 | `examples/src/fleet/alloc/depot_inventory.py` | `T-45` | FR-31 | | L1 | **Done.** A stockout yields `DEPOT_STOCKOUT`, never a silent over-allocation; evidence in `tests/vrp/test_depot_inventory.py` |
 | E-46 | `examples/src/fleet/alloc/tactical_sizing.py` | `T-46` | FR-34 | | L5 | **Done.** Cost/service Pareto front over ≥ 30 days × ≥ 10 fleet mixes |
-| E-47 | `examples/src/fleet/alloc/territories.py` | `T-47` | FR-17, FR-18, FR-35 | | L2 | **Done.** Territories balanced on duration, distance and stop count; driver-customer stability measured across periods |
+| E-47 | `examples/src/fleet/alloc/territories.py` | `T-47` | FR-17, FR-18, FR-35 | | L2 | **Done.** Territories balanced on duration, distance and stop count; driver-customer stability measured across periods **Section 5 draws it** (`territories_map.html`): the same stops under both plans as two toggleable layers, each van's stops coloured and its convex hull shaded. The caption is measured rather than asserted -- an average van's hull covers **13% of the round by territory against 39% round-robin** -- because a claim about a shape drifts from the data silently. Map helpers are `examples/src/maps.py`, shared with `config` and `dataset`; its geometry is tested in `tests/test_example_maps.py`. |
 
 ---
 

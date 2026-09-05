@@ -50,6 +50,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
 import dataset
+import maps
 
 from vrp.consistency import (
     Horizon,
@@ -198,12 +199,7 @@ def show_fairness(problem: Problem, vans: int) -> None:
 def show_territories(problem: Problem, vans: int) -> None:
     print("\n2. Territories (FR-35)")
     zones = territories(problem, count=vans)
-    depot = problem.location("D")
     for name, members in sorted(zones.items()):
-        bearings = []
-        for order_id in members:
-            site = problem.location(problem.order(order_id).delivery.location_id)
-            bearings.append(round((site.lat - depot.lat) * 1000))
         print(f"   {name}: {len(members)} stops   {members}")
 
     print("   A polar sweep: order the customers by bearing from the depot and")
@@ -276,6 +272,82 @@ def show_the_price(problem: Problem, vans: int) -> None:
     print("   of §5.1: no amount of imbalance outranks a metre of driving.")
 
 
+def site_of(problem: Problem, order_id: str) -> tuple[float, float]:
+    """Where an order is served, as `(latitude, longitude)`."""
+    stop = problem.location(problem.order(order_id).delivery.location_id)
+    return (stop.lat, stop.lon)
+
+
+def draw(canvas, problem: Problem, label: str,
+         assignment: dict[str, list[str]], shown: bool) -> int:
+    """One assignment as a toggleable layer: a hull and its stops per van.
+
+    Returns:
+        How many vans held too few stops to bound an area. Two stops make a
+        line, and a territory that cannot be drawn is worth saying rather than
+        leaving as a gap the reader reads as a bug.
+    """
+    layer = maps.group(canvas, label, shown=shown)
+    flat = 0
+    for index, (vehicle_id, order_ids) in enumerate(sorted(assignment.items())):
+        shade = maps.colour(index)
+        sites = [site_of(problem, order_id) for order_id in order_ids]
+        if not maps.region(layer, sites, shade, f"{label}: {vehicle_id}"):
+            flat += 1
+        for order_id, site in zip(order_ids, sites, strict=True):
+            maps.stop(layer, site, shade, f"{vehicle_id}  {order_id}")
+    home = problem.location("D")
+    maps.depot(layer, (home.lat, home.lon), "depot")
+    return flat
+
+
+def coverage(problem: Problem, assignment: dict[str, list[str]]) -> int:
+    """What share of the round an average van's hull covers, in percent.
+
+    The number behind the picture. Under territories a van holds a wedge and
+    the share is small; under round-robin every van's stops are spread over
+    the whole round, so each hull swells to nearly all of it. Measured rather
+    than asserted, because "three copies of the whole round" is the kind of
+    claim that stays in a docstring long after the data stopped supporting it.
+    """
+    sites = [site_of(problem, order.id) for order in problem.orders]
+    whole = maps.area(maps.hull(sites))
+    if whole <= 0:
+        return 0
+    shares = [maps.area(maps.hull([site_of(problem, order_id)
+                                   for order_id in order_ids]))
+              for order_ids in assignment.values()]
+    return round(sum(shares) / len(shares) / whole * 100)
+
+
+def show_map(problem: Problem, vans: int) -> None:
+    """5. The picture those numbers are of.
+
+    The two layers carry the whole of section 4's argument. Under `zoned` each
+    van's hull is a wedge off the depot and the wedges barely touch; under
+    `interleaved` every van's hull is the entire round, drawn three times on
+    top of itself. Both plans give each van the same number of stops, which is
+    why FR-17's stop count alone cannot tell them apart -- and why a dispatcher
+    asked to believe the table is entitled to see this instead.
+    """
+    print("\n5. The same stops under both plans")
+    by_territory, round_robin = zoned(problem, vans), interleaved(problem, vans)
+    canvas = maps.base_map([(site.lat, site.lon) for site in problem.locations])
+    flat = draw(canvas, problem, "by territory", by_territory, True)
+    flat += draw(canvas, problem, "round-robin", round_robin, False)
+    maps.controls(canvas)
+    maps.legend(canvas, {f"V{n + 1}": maps.colour(n) for n in range(vans)}, "van")
+    if flat:
+        print(f"   {flat} van(s) hold fewer than three stops, so they are drawn"
+              " as points rather than regions")
+    maps.save(canvas, Path(__file__).parent / "territories_map.html")
+    print(f"   average van covers {coverage(problem, by_territory)}% of the "
+          f"round by territory, {coverage(problem, round_robin)}% round-robin")
+    print("   Toggle the layers. Both plans give every van the same number of")
+    print("   stops, which is why FR-17's stop count cannot separate them and")
+    print("   why the shapes can.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stops", type=int, default=12)
@@ -290,6 +362,7 @@ def main() -> int:
     show_territories(problem, vans)
     show_horizon(problem, vans)
     show_the_price(problem, vans)
+    show_map(problem, vans)
     return 0
 
 
