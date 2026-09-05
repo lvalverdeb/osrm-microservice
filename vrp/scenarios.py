@@ -87,7 +87,15 @@ class MixResult:
 
     @property
     def service_level(self) -> int:
-        """Orders served within window, in parts per thousand. AC-4.2."""
+        """Orders assigned to a vehicle, in parts per thousand. AC-4.2.
+
+        This is an assignment rate, not a punctuality one: `_measure` counts
+        placement, so an order served long after its window closed still counts
+        here. That is the intended reading -- the question this asks of a fleet
+        mix is how much of the offered work it can carry at all. Whether the
+        work that was carried arrived on time is `evaluator.window_attainment`,
+        which is measured per timeline rather than per scenario.
+        """
         if self.offered <= 0:
             return FULL
         return self.served * FULL // self.offered

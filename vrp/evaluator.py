@@ -27,6 +27,11 @@ from vrp.model import (
     travel_between,
 )
 
+# Attainment in parts per thousand, for CON-4's reason: 11 of 12 orders is not
+# representable as an integer percentage and this project does not accumulate
+# floats. `vrp.scenarios` reports its service level on the same scale.
+FULL = 1000
+
 
 @dataclass(frozen=True)
 class ObjectiveWeights:
@@ -271,12 +276,8 @@ def soft_penalties(problem: Problem, step: Step) -> tuple[int, int]:
     uncosted waiting produces plans that look cheap and consume the whole
     driver day".
     """
-    if step.order_id is None:
-        return 0, 0
-    order = problem.order(step.order_id)
-    stop = order.delivery or order.pickup
     early = late = 0
-    for window in stop.time_windows:
+    for window in _windows_of(problem, step):
         if window.hardness != "SOFT":
             continue
         if step.arrival < window.start:
@@ -284,6 +285,82 @@ def soft_penalties(problem: Problem, step: Step) -> tuple[int, int]:
         if step.start_service > window.end:
             late += (step.start_service - window.end) * window.lateness_cost_per_sec
     return early, late
+
+
+def _windows_of(problem: Problem, step: Step) -> tuple:
+    """The windows promised at this step, or none if it promised nothing."""
+    if step.order_id is None:
+        return ()
+    order = problem.order(step.order_id)
+    stop = order.delivery or order.pickup
+    return stop.time_windows
+
+
+def lateness(problem: Problem, step: Step) -> int:
+    """How late service began, in seconds. Unpriced, and blind to hardness.
+
+    The companion to `soft_penalties`, which answers what lateness *cost*. That
+    is a different question, and on most plans its answer is zero for reasons
+    that have nothing to do with punctuality: a HARD window may not carry a
+    rate at all (`TimeWindow.__post_init__` forbids it), and a SOFT one may
+    carry a rate of zero. Both leave a stop served hours late accounted at
+    nothing.
+
+    Measured against the last window that closed before service began, not the
+    first. On disjoint windows the earlier one has been superseded, and
+    charging the breach to it would overstate it by the length of the gap.
+    Service before every window is early, which is a different fault and not
+    this number's to report.
+    """
+    windows = _windows_of(problem, step)
+    if not windows or any(w.contains(step.start_service) for w in windows):
+        return 0
+    closed = [w.end for w in windows if w.end < step.start_service]
+    return step.start_service - max(closed) if closed else 0
+
+
+@dataclass(frozen=True)
+class Attainment:
+    """Promises kept along one timeline. §6.2, AC-4.2.
+
+    `promised` counts only stops that carry a window. An unwindowed stop is
+    unconstrained everywhere else in the model, and scoring it as punctual
+    would let a plan made entirely of them report perfect service.
+    """
+
+    promised: int = 0
+    on_time: int = 0
+    lateness_seconds: int = 0
+    worst_lateness: int = 0
+
+    @property
+    def missed(self) -> int:
+        """Promised stops not served inside a window, late or early."""
+        return self.promised - self.on_time
+
+    @property
+    def attained_ppt(self) -> int:
+        """Share served in window, parts per thousand. FULL when none was made."""
+        if self.promised <= 0:
+            return FULL
+        return self.on_time * FULL // self.promised
+
+
+def window_attainment(problem: Problem, timeline: tuple[Step, ...]) -> Attainment:
+    """Count kept and broken promises along one expanded timeline."""
+    promised = on_time = total = worst = 0
+    for step in timeline:
+        windows = _windows_of(problem, step)
+        if not windows:
+            continue
+        promised += 1
+        if any(window.contains(step.start_service) for window in windows):
+            on_time += 1
+        late = lateness(problem, step)
+        total += late
+        worst = max(worst, late)
+    return Attainment(promised=promised, on_time=on_time,
+                      lateness_seconds=total, worst_lateness=worst)
 
 
 def _fleet_prices_itself(problem: Problem) -> bool:
