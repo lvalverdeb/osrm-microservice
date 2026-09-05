@@ -1,0 +1,48 @@
+{
+  "name": "signed-envelopes",
+  "applies_to": [
+    "Documents"
+  ],
+  "problem_id": "envelopes",
+  "quantity": {
+    "dimension": "grams",
+    "fixed": 200
+  },
+  "service": {
+    "fixed_seconds": 600
+  },
+  "windows": [
+    {
+      "start": 28800,
+      "end": 43200
+    },
+    {
+      "start": 46800,
+      "end": 61200
+    }
+  ],
+  "shift": {
+    "start": 28800,
+    "end": 57600
+  },
+  "declinable": {
+    "priority_tier": 1,
+    "prize": 1000000
+  },
+  "route": {
+    "closed": true
+  },
+  "assignment": {
+    "depot": "nearest"
+  },
+  "fleet": [
+    {
+      "class": "COURIER",
+      "id": "COURIER-{n}",
+      "per_depot": 3,
+      "capacities": {
+        "grams": 25000
+      }
+    }
+  ]
+}

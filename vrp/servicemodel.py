@@ -48,9 +48,22 @@ refuses a file the contract does not recognise.
 
 from __future__ import annotations
 
+import json
+import math
+from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
-from vrp.model import Location, Order, StopSpec, TimeWindow, Vehicle
+from vrp.battery import ChargingCurve
+from vrp.model import (
+    Location,
+    Order,
+    Problem,
+    StopSpec,
+    TimeWindow,
+    TravelMatrix,
+    Vehicle,
+)
 
 # --------------------------------------------------------------------------
 # The contract
@@ -199,3 +212,244 @@ def validate_keys(raw: dict[str, Any]) -> list[str]:
     return [f"unknown model key {key!r}; the contract knows "
             f"{', '.join(sorted(allowed))}"
             for key in sorted(raw) if key not in allowed]
+
+
+# --------------------------------------------------------------------------
+# Named strategies and computations
+# --------------------------------------------------------------------------
+# A model *names* one of these; it never describes one. The registries are the
+# whole of the extension mechanism, and deliberately so: the moment a model
+# needs behaviour that is not in one of them, that is a code change with a test
+# rather than an edit to a data file.
+
+ROUNDERS: dict[str, Callable[[float], int]] = {"up": math.ceil, "nearest": round}
+
+# How the caller chose its depots and stops. `vrp` does not implement these --
+# `examples/src/dataset.py` does -- but the name is validated here so a model
+# cannot ship a strategy nothing can resolve.
+KNOWN_DEPOT_STRATEGIES = frozenset({
+    "nearest", "spread", "furthest", "around_each_depot", "by_province",
+    "busiest_depot", "cluster_with_outliers", "contested",
+})
+
+# Shipped computations a model may name for a quantity it cannot read off a
+# field. Empty until one is needed: `multi_capacity.cube_of` is the candidate,
+# and it lives in an example rather than here.
+DERIVED: dict[str, Callable[[dict[str, Any]], int]] = {}
+
+
+def depot_strategy(model: dict[str, Any]) -> str:
+    """Which slicing strategy this model expects its caller to have used."""
+    return model["assignment"]["depot"]
+
+
+def _quantities(model: dict[str, Any], record: dict[str, Any]) -> dict[str, int]:
+    specs = model["quantity"]
+    return {spec["dimension"]: _one_quantity(spec, record)
+            for spec in ([specs] if isinstance(specs, dict) else specs)}
+
+
+def _one_quantity(spec: dict[str, Any], record: dict[str, Any]) -> int:
+    if "fixed" in spec:
+        return spec["fixed"]
+    if "derived" in spec:
+        return DERIVED[spec["derived"]](record)
+    rounder = ROUNDERS[spec.get("round", "nearest")]
+    return rounder(record[spec["from_field"]])
+
+
+def _service_seconds(spec: dict[str, Any], record: dict[str, Any]) -> int:
+    if "fixed_seconds" in spec:
+        return spec["fixed_seconds"]
+    return record[spec["from_field"]] * spec["scale_seconds"]
+
+
+def _windows(specs: Sequence[dict[str, Any]]) -> tuple[TimeWindow, ...]:
+    return tuple(TimeWindow(**spec) for spec in specs)
+
+
+def _stop(model: dict[str, Any], record: dict[str, Any]) -> StopSpec:
+    service = model["service"]
+    return StopSpec(
+        location_id=record["id"],
+        time_windows=_windows(model["windows"]),
+        service_fixed=_service_seconds(service, record),
+        service_per_unit=service.get("per_unit", 0),
+        service_per_unit_dimension=service.get("per_unit_dimension"))
+
+
+def _order(model: dict[str, Any], record: dict[str, Any]) -> Order:
+    declinable = model.get("declinable", {})
+    spec = model.get("order", {})
+    stop = _stop(model, record)
+    kind = spec.get("kind", "JOB")
+    collecting = spec.get("collects", False)
+    return Order(
+        id=record["id"], kind=kind,
+        quantities=_quantities(model, record),
+        pickup=stop if collecting else None,
+        delivery=None if collecting else stop,
+        priority_tier=declinable.get("priority_tier", 0),
+        prize=declinable.get("prize", 0),
+        release_time=spec.get("release", 0),
+        required_skills=frozenset(spec.get("requires", ())),
+        max_ride_time=spec.get("max_ride_time"),
+        priority_source=spec.get("priority_source", "COMMERCIAL"),
+        order_class=spec.get("order_class"),
+        incompatible_with=frozenset(spec.get("incompatible_with", ())))
+
+
+def _battery(spec: dict[str, Any]) -> dict[str, Any]:
+    """FR-20's fields, absent together or present together."""
+    if not spec:
+        return {}
+    curve = spec.get("curve")
+    return {
+        "battery_wh": spec["wh"],
+        "consumption_wh_per_km": spec["wh_per_km"],
+        "initial_soc_ppt": spec.get("initial_ppt", 1000),
+        "charging_curve": None if curve is None else ChargingCurve(
+            bands=tuple(tuple(band) for band in curve)),
+    }
+
+
+def _vehicle(spec: dict[str, Any], model: dict[str, Any], depot: dict[str, Any],
+             number: int) -> Vehicle:
+    shift = model["shift"]
+    closed = model["route"]["closed"]
+    reload_spec = spec.get("reload", {})
+    return Vehicle(
+        id=spec["id"].format(n=number, **{"class": spec["class"],
+                                          "depot": depot["id"]}),
+        capacities=dict(spec["capacities"]),
+        shift=TimeWindow(start=shift["start"], end=shift["end"]),
+        max_duration=shift.get("max_duty_seconds"),
+        max_distance=spec.get("max_distance"),
+        skills=frozenset(spec.get("skills", ())),
+        fixed_cost=spec.get("fixed_cost", 0),
+        cost_per_metre=spec.get("cost_per_metre", 0),
+        cost_per_second=spec.get("cost_per_second", 0),
+        cost_per_order=spec.get("cost_per_order", 0),
+        overtime_cost_per_second=spec.get("overtime_cost_per_second", 0),
+        profile=spec.get("profile", "driving"),
+        service_factor_ppt=spec.get("service_factor_ppt", 1000),
+        reload_locations=frozenset(reload_spec.get("locations", ())),
+        max_reloads=reload_spec.get("max", 0),
+        reload_duration=reload_spec.get("seconds", 0),
+        access_class=spec.get("access_class"),
+        gross_weight_kg=spec.get("gross_weight_kg"),
+        hos_rules=spec.get("hos_rules"),
+        start_location_id=depot["id"],
+        end_location_id=depot["id"] if closed else None,
+        open_route=not closed,
+        **_battery(spec.get("battery", {})))
+
+
+def _refuse_contradictions(model: dict[str, Any], orders: Sequence[Order],
+                           vehicles: Sequence[Vehicle]) -> None:
+    """A load no vehicle in the fleet can carry is a contradiction written down.
+
+    Refused here rather than left to a solver, for the reason `Order` refuses a
+    STATUTORY order carrying a prize: the alternative is a plan that comes back
+    infeasible with no stated cause, and a model file nobody suspects.
+    """
+    for order in orders:
+        for dimension, amount in order.quantities.items():
+            biggest = max((v.capacities.get(dimension, 0) for v in vehicles),
+                          default=0)
+            if amount > biggest:
+                raise ValueError(
+                    f"model {model['name']!r}: order {order.id} needs {amount} "
+                    f"{dimension} and the largest vehicle carries {biggest}")
+
+
+def build(model: dict[str, Any], depots: Sequence[dict[str, Any]],
+          deliveries: Sequence[dict[str, Any]],
+          matrix: TravelMatrix) -> Problem:
+    """Turn a model and one round's demand into a `Problem`.
+
+    Args:
+        model: a loaded model file.
+        depots: records carrying `id`, `lat`, `lon`.
+        deliveries: records carrying `id`, `lat`, `lon`, plus whatever fields
+            the model's `from_field` keys name. The model is the adapter
+            between a data source and the domain, which is why nothing here
+            knows a corpus's spelling.
+        matrix: the pinned travel matrix, depots first.
+
+    Returns:
+        The problem the model describes over that demand.
+
+    Raises:
+        ValueError: if the file carries a key the contract does not know, names
+            an unknown depot strategy, or describes a fleet that cannot carry
+            its own orders.
+    """
+    complaints = validate_keys(model)
+    if complaints:
+        raise ValueError("; ".join(complaints))
+    if depot_strategy(model) not in KNOWN_DEPOT_STRATEGIES:
+        raise ValueError(
+            f"unknown depot strategy {depot_strategy(model)!r}; shipped: "
+            f"{', '.join(sorted(KNOWN_DEPOT_STRATEGIES))}")
+
+    dwell = model["service"].get("dwell_overhead", 0)
+    locations = [Location(id=d["id"], lat=d["lat"], lon=d["lon"], matrix_index=i)
+                 for i, d in enumerate(depots)]
+    locations += [Location(id=r["id"], lat=r["lat"], lon=r["lon"],
+                           matrix_index=len(depots) + offset,
+                           dwell_overhead=dwell)
+                  for offset, r in enumerate(deliveries)]
+    orders = tuple(_order(model, record) for record in deliveries)
+    vehicles = tuple(
+        _vehicle(spec, model, depot, n)
+        for depot in depots
+        for spec in model["fleet"]
+        for n in range(1, spec["per_depot"] + 1))
+    _refuse_contradictions(model, orders, vehicles)
+    return Problem(id=model["problem_id"], locations=tuple(locations),
+                   orders=orders, vehicles=vehicles, matrix=matrix)
+
+
+# --------------------------------------------------------------------------
+# The registry
+# --------------------------------------------------------------------------
+# In-repo JSON, versioned with the code. Not fetched at runtime: a model that
+# can change without a release is a model that can change without a review, and
+# `T-96`'s gate is what makes an edit safe rather than merely possible.
+
+MODELS = Path(__file__).resolve().parent.parent / "models"
+
+
+def model_for(name: str) -> dict[str, Any]:
+    """One shipped model, by name. `hos.rules_for`'s shape, for the same reason.
+
+    Raises:
+        ValueError: if no model of that name ships, naming the ones that do
+            rather than leaving a caller to list the directory.
+    """
+    path = MODELS / f"{name}.json"
+    if not path.exists():
+        shipped = sorted(f.stem for f in MODELS.glob("*.json")
+                         if f.name != "categories.json")
+        raise ValueError(f"unknown delivery model {name!r}; "
+                         f"shipped: {', '.join(shipped)}")
+    return json.loads(path.read_text())
+
+
+def model_for_category(category: str) -> dict[str, Any]:
+    """The model an item category is served by. One global map, `T-94`.
+
+    Global because a category selects a model everywhere or the map stops being
+    a map: a per-depot override is a deployment concern, and belongs to the
+    overlay rules rather than to this lookup.
+
+    Raises:
+        ValueError: if the category is not mapped. Silence would mean serving
+            unknown freight by whichever model happened to be first.
+    """
+    mapping = json.loads((MODELS / "categories.json").read_text())
+    if category not in mapping:
+        raise ValueError(f"no delivery model for category {category!r}; "
+                         f"mapped: {', '.join(sorted(mapping))}")
+    return model_for(mapping[category])

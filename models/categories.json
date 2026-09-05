@@ -1,0 +1,10 @@
+{
+  "Documents": "signed-envelopes",
+  "Groceries": "mixed-parcels",
+  "Beverages": "mixed-parcels",
+  "Household": "mixed-parcels",
+  "Pharmacy": "mixed-parcels",
+  "Hardware": "mixed-parcels",
+  "Apparel": "mixed-parcels",
+  "Electronics": "mixed-parcels"
+}
