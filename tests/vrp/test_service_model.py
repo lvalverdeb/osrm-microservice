@@ -2,8 +2,8 @@
 
 A model is JSON that builds a `Problem`, so the question that decides whether
 it is honest is: **which of the domain's fields can it set, and which has it
-decided not to?** This is the first half of `T-94`, which is still open: the
-builder is not written, and these tests say nothing about it.
+decided not to?** `T-94`'s contract, tested here; the builder it feeds is
+checked against the examples it rebuilds in `tests/test_service_model_examples.py`.
 
 `_vehicle_from_dict` reconstructed 9 of `Vehicle`'s 28 fields until `T-89`, and
 nothing failed -- a snapshot round-tripped, and nineteen fields were dropped in

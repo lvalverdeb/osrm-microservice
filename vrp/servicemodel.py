@@ -1,8 +1,7 @@
-"""The coverage contract for a delivery model.
+"""Delivery models: an operation described as data — `T-94`.
 
-Which of the domain's fields a model may set, and which it has decided not to.
-This is the contract and the schema derived from it; the builder that turns a
-model into a `Problem` is not here yet, and is the rest of `T-94`.
+Which of the domain's fields a model may set, which it has decided not to, and
+the builder that turns a model plus one round's demand into a `Problem`.
 
 A delivery model is everything about an operation *except* today's demand:
 which vehicle serves it, what a stop costs in minutes, what a unit weighs, when
@@ -41,9 +40,12 @@ model says `{"derived": "cube"}` and the code stays code, exactly as
 calibration run: the windows do not exist until the round has been solved once.
 That is a procedure, and procedures are code.
 
-Building the `Problem` is the next step of `T-94` and deliberately not here yet;
-this module is the contract, the schema derived from it, and the loader that
-refuses a file the contract does not recognise.
+Three things live here: the contract, the schema derived from it, and the
+builder that reads a model and produces a `Problem`. The shipped models are
+`models/*.json`, mapped to item categories by `models/categories.json`, and
+`tests/test_service_model_examples.py` holds them to the examples they describe
+-- a model that cannot rebuild the round somebody wrote by hand is not a model
+of it.
 """
 
 from __future__ import annotations
