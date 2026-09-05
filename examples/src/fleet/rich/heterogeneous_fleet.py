@@ -29,6 +29,20 @@ Three things it shows:
    their last drop drives one way. `end_location_id=None` used to mean "return
    to the start", so that leg was charged whether or not anyone drove it.
 
+4. **The smallest vehicle is the one that fits.** Half this corpus is under
+   5 kg and 96% of it under 20 kg, so the parcel that needs a 1.2-tonne van is
+   the exception. A motorbike is cheap to put on the road and cheap to run, and
+   the only thing stopping it taking a whole depot's round is its 25 kg box --
+   which binds here, because the per-depot loads run 16 to 29 kg.
+
+**Not delivered, and stated rather than implied.** The motorbike is routed on
+the same matrix as the van. The deployment builds one OSRM profile (`PROFILE`
+defaults to `car`), so `MTX-1`'s "matrices are per routing profile" is met only
+in the cache key -- there is no second profile to key. A motorbike mostly does
+follow the roads a car does, which is what makes this an approximation worth
+printing rather than a fiction; its real advantages in traffic are not modelled
+and this example does not claim them.
+
 Requires a running gateway; `examples/.env` points at the FreeBSD jail.
     # dataset: see docs/dataset_prep.md
 
@@ -80,9 +94,31 @@ class VehicleClass:
 
 
 # Deliberately different on both axes: the rigid costs more to deploy and more
-# to drive, and carries four times as much. A fleet where one class dominates
-# on every axis would make the assignment obvious and prove nothing.
+# to drive, and carries two hundred times what the motorbike does. A fleet where
+# one class dominates on every axis would make the assignment obvious and prove
+# nothing.
+#
+# `MOTO` is not decoration. This corpus has a median parcel of 4.5 kg and 96% of
+# it under 20 kg, and a motorbike is what actually moves that in San Jose -- a
+# fleet whose smallest vehicle is a 1.2-tonne van was describing a different
+# business. Its 25 kg is the top box, a fact about the vehicle rather than a
+# threshold tuned until the example looked good; it happens to bind because the
+# round's per-depot loads run 16-29 kg, so half the depots fit on two wheels
+# and half do not, and the solver has to decide which.
+#
+# The motorbike is priced at the van's rate per metre, and that is a limitation
+# rather than a claim: a motorbike genuinely runs cheaper, but these are whole
+# colones per metre and the van already sits on 1, the smallest non-zero rate
+# there is. Zero would have made its driving free. Scaling the whole fleet up to
+# make room was tried and withdrawn -- it preserved every ratio, but PyVRP
+# answered with `PenaltyBoundWarning: large data scaling differences` and worse
+# plans, which is a poor trade for a distinction the reader can be told about.
+# So the motorbike's advantage here is what it costs to put on the road, and its
+# 25 kg box is what it pays for that.
+#
+# Ordered smallest first, which is also what `flip_costs` mirrors.
 FLEET = (
+    VehicleClass("MOTO", capacity_kg=25, fixed_cost=6_000, cost_per_metre=1),
     VehicleClass("VAN", capacity_kg=1_200, fixed_cost=35_000, cost_per_metre=1),
     VehicleClass("RIGID", capacity_kg=5_000, fixed_cost=90_000, cost_per_metre=3),
 )
@@ -111,10 +147,14 @@ def build(depots: list[dict], deliveries: list[dict], matrix: TravelMatrix,
     vehicles = []
     for depot in depots:
         for spec in FLEET:
-            # Flipping swaps which class is dear, which is how the example
-            # shows the costs are read rather than assumed.
-            other = FLEET[1] if spec is FLEET[0] else FLEET[0]
-            costs = other if flip_costs else spec
+            # Flipping mirrors the fleet, so the cheapest class is charged the
+            # dearest one's rates: it is how the example shows the costs are
+            # read rather than assumed. `FLEET[1] if spec is FLEET[0] else
+            # FLEET[0]` did this while there were exactly two classes and
+            # would have sent the motorbike the van's bill while leaving the
+            # rigid its own.
+            mirrored = FLEET[len(FLEET) - 1 - FLEET.index(spec)]
+            costs = mirrored if flip_costs else spec
             vehicles.append(Vehicle(
                 id=f"{spec.name}@{depot['name'].split()[0]}",
                 capacities={"kg": spec.capacity_kg},
@@ -196,7 +236,7 @@ def main() -> int:
 
     print(f"\nsolving ({args.iterations} iterations)")
     closed = build(depots, deliveries, matrix, open_routes=False)
-    report("closed routes, van cheap to run", closed,
+    report("closed routes, each class at its own rates", closed,
            solve(closed, iterations=args.iterations, seed=0))
 
     flipped = build(depots, deliveries, matrix, open_routes=False, flip_costs=True)
