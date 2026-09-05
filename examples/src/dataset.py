@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -440,50 +441,53 @@ def road_matrix(points: list[tuple[float, float]], gateway: str,
     return matrix
 
 
-def planar_sites(stops: int, strategy: str = "nearest",
-                 name: str = "round") -> tuple[Any, Any, list, dict]:
-    """Real deliveries as locations and a matrix, ready for a `Problem`.
+def road_sites(stops: int, strategy: str = "nearest", name: str = "round",
+               gateway: str | None = None) -> tuple[Any, Any, list, dict]:
+    """Real deliveries as locations and a road matrix, ready for a `Problem`.
 
     Args:
         stops: how many deliveries to take.
         strategy: which slice -- `nearest`, `spread`, `furthest`, or
             `cluster_with_outliers`. See the module docstring: the strategy
             decides whether a demonstration demonstrates anything.
-        name: version label for the matrix.
+        name: label for the caller's own reporting; the matrix carries the
+            gateway's content-addressed version (MTX-6).
+        gateway: base URL, defaulting to `OSRM_API_URL` and then to
+            `http://localhost:8000`. Importing `config` puts the value from
+            `examples/.env` into the environment, which is why every example
+            that reaches this does so.
 
     Returns:
         `(locations, matrix, deliveries, depot)`. Locations are `D` then `C1..Cn`
         in the deliveries' order, so an example can build `O1..On` against them.
 
-    The geometry is what every example duplicated -- degrees to kilometres about
-    the depot, then a `PlanarMatrix` over the result. What each example does
-    with the fleet, the windows and the capacities is what it is *about*, and
-    that stays where a reader can see it.
+    Raises:
+        RuntimeError: if the gateway cannot be reached. See `road_matrix`.
 
-    Planar rather than road distances so the examples run with no gateway, and
-    so their output does not change depending on who has one. Straight-line
-    distance understates the road by a fifth to two thirds here; straight-line
-    duration is understated in the metro and badly *overstated* on long arcs,
-    where one fixed speed stands in for a motorway. Where the magnitude
-    matters rather than the mechanism -- range, driving hours -- reach for
-    `road_matrix` instead, which requires a gateway and has no fallback.
+    The geometry is what every example duplicated -- the slice, then a matrix
+    over the result. What each example does with the fleet, the windows and the
+    capacities is what it is *about*, and that stays where a reader can see it.
+
+    This was `planar_sites` and built a straight-line matrix so that examples
+    ran with no gateway and printed the same numbers for everybody. It bought
+    that with numbers that were wrong in two directions at once -- distance
+    understated by a fifth to two thirds, duration understated in the metro and
+    badly overstated on long arcs, where one fixed speed stands in for a
+    motorway -- and the examples reading them drew conclusions about driving
+    hours, range and cost. Determinism is worth having; it is not worth having
+    about the wrong quantity.
     """
-    from vrp.matrix import PlanarMatrix
-    from vrp.model import Location
-
     corpus = load()
     deliveries, depot = getattr(corpus, strategy)(stops)
+    points = [(depot["latitude"], depot["longitude"])]
+    points += [(d["latitude"], d["longitude"]) for d in deliveries]
 
-    lat_km, lon_km = 110.57, 111.32 * math.cos(math.radians(depot["latitude"]))
-    coords = [(0.0, 0.0)] + [
-        ((d["longitude"] - depot["longitude"]) * lon_km,
-         (d["latitude"] - depot["latitude"]) * lat_km) for d in deliveries]
-
+    from vrp.model import Location
     locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
                           matrix_index=0),) + tuple(
         Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],
                  matrix_index=i + 1)
         for i, d in enumerate(deliveries))
-    return (locations, PlanarMatrix(version=f"{name}-v1",
-                                    coordinates=tuple(coords)),
-            deliveries, depot)
+    matrix = road_matrix(points, gateway or os.environ.get(
+        "OSRM_API_URL", "http://localhost:8000"), name)
+    return locations, matrix, deliveries, depot

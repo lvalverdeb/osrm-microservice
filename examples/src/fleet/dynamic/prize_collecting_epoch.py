@@ -28,7 +28,8 @@ Four things, in order:
 
 4. **Why it wins**, and the one place the numbers are a coincidence.
 
-Runs offline. No gateway required. About 40 s.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail. About 40 s.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -44,6 +45,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.epochs import Classification, Epoch
@@ -73,7 +77,7 @@ def instance(stops: int = 8, vans: int = 2) -> Problem:
     Real coordinates and real service times, so the distances a re-plan trades
     against are ones a driver would recognise.
     """
-    locations, matrix, deliveries, _depot = dataset.planar_sites(
+    locations, matrix, deliveries, _depot = dataset.road_sites(
         stops, strategy="spread", name="prize")
     return Problem(
         id="prize", locations=locations,
@@ -119,7 +123,7 @@ def show_the_constant(problem: Problem) -> None:
     print("   which is why §8.2 says \"tuned\" rather than giving a number.")
 
 
-def show_the_measurement(problem: Problem) -> None:
+def show_the_measurement(problem: Problem) -> dict[str, int]:
     print("\n3. Ninety days, against the baselines and against ICD")
     corpus = dispatchable(problem, DAY, window=3 * HOUR)
     days = generate_days(corpus, count=90, seed=0, horizon=DAY)
@@ -145,11 +149,24 @@ def show_the_measurement(problem: Problem) -> None:
     for prize, cost in sorted(curve.items()):
         mark = "  <- best" if prize == best else ""
         print(f"     {prize:>7,}  {cost:>12,}{mark}")
+    return dict(rows)
 
 
-def show_why_it_wins(problem: Problem) -> None:
+def show_why_it_wins(costs: dict[str, int]) -> None:
+    """Section 4. `costs` comes from the measurement, so the claim cannot drift.
+
+    It used to read "6.6% under ICD and 15.4% under greedy", measured when this
+    example ran on straight-line distances. On the road it is nearer 6% and 12%,
+    which is the same conclusion and different arithmetic -- so the arithmetic
+    is done here rather than typed.
+    """
+    priced = next(v for k, v in costs.items() if k.startswith("prize-collecting"))
+    under = {name: (cost - priced) / cost * 100
+             for name, cost in costs.items() if not name.startswith("prize")}
     print("\n4. Why, and one number that is a coincidence")
-    print("   Prize-collecting comes in 6.6% under ICD and 15.4% under greedy.")
+    print("   Prize-collecting comes in "
+          + ", ".join(f"{share:.1f}% under {name.split(' (')[0]}"
+                      for name, share in under.items()) + ".")
     print("   The reason is structural rather than lucky: ICD samples futures,")
     print("   picks a set, and hands it to a router. Prize-collecting asks one")
     print("   solver both questions, so a request is judged against the route")
@@ -168,8 +185,8 @@ def main() -> int:
     problem = instance()
     show_the_sub_problem(problem)
     show_the_constant(problem)
-    show_the_measurement(problem)
-    show_why_it_wins(problem)
+    costs = show_the_measurement(problem)
+    show_why_it_wins(costs)
     return 0
 
 

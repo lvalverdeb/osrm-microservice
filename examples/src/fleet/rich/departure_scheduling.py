@@ -34,7 +34,8 @@ Four things this shows, in order:
    nothing has polished yet, and it declines above ~14 stops rather than
    truncating.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -52,6 +53,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.bench.corpus import CORPUS, build_instance
@@ -286,7 +290,7 @@ def _real_round(stops: int) -> Problem:
         anything.
     """
     day = TimeWindow(start=0, end=14 * 3600)
-    locations, matrix, deliveries, _ = dataset.planar_sites(
+    locations, matrix, deliveries, _ = dataset.road_sites(
         stops, "spread", "polish")
     orders = tuple(
         Order(id=f"O{i}", kind="JOB", quantities={"kg": 1},

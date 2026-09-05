@@ -33,7 +33,8 @@ Three things, in order:
    with no approximation. That is the check `/verify` runs on a plan built
    somewhere else, which is the only place the exact rule can be applied.
 
-Runs offline.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -49,6 +50,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.model import (
@@ -69,7 +73,7 @@ MINUTE = 60
 # Four real deliveries around the Guadalupe depot. C1 and C4 are both
 # pharmacies, which is where the sample story comes from: the corpus chose
 # them, not the example.
-LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.planar_sites(4, "spread", "ride")
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.road_sites(4, "spread", "ride")
 
 
 def service_at(stop: str) -> int:

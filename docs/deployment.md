@@ -78,7 +78,7 @@ before starting anything.
 
 ```bash
 # Target a remote host (skip for a local daemon)
-export DOCKER_HOST=tcp://10.211.55.28:2375
+export DOCKER_HOST=ssh://developer@10.211.55.36
 
 # Show the active Docker host and its architecture
 make compose-doctor

@@ -82,7 +82,7 @@ DAY = TimeWindow(start=0, end=12 * 3600)
 # question -- the corpus has them. Two stops near *each other* would not do
 # it: serving both on one trip is simply efficient, which is what a first
 # attempt at this section discovered.
-METRO = dataset.planar_sites(4, "spread", "mt-metro")
+METRO = dataset.road_sites(4, "spread", "mt-metro")
 
 
 def _regional() -> tuple:

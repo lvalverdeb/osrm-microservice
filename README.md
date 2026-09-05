@@ -62,7 +62,7 @@ bind-mounted and the stack can be deployed to a remote Docker host as-is.
 make download-data              # fetch the Costa Rica extract into ./data
 make process-osrm PROFILE=car   # extract / partition / customize
 
-export DOCKER_HOST=tcp://10.211.55.28:2375   # optional: target a remote daemon
+export DOCKER_HOST=ssh://developer@10.211.55.36   # optional: target a remote daemon
 make compose-doctor             # show the active Docker host and architecture
 make compose-up                 # build and start, with sequencing and health checks
 make compose-logs

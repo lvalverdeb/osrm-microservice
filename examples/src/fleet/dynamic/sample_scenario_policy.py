@@ -29,7 +29,8 @@ Four things, in order:
    narrowly -- and how narrow is a fact about this objective rather than about
    ICD.
 
-Runs offline. No gateway required. About 30 s.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail. About 30 s.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -45,6 +46,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.epochs import Classification, Epoch, epochs
@@ -74,7 +78,7 @@ def instance(stops: int = 8, vans: int = 2) -> Problem:
     Real coordinates and real service times, so the distances a re-plan trades
     against are ones a driver would recognise.
     """
-    locations, matrix, deliveries, _depot = dataset.planar_sites(
+    locations, matrix, deliveries, _depot = dataset.road_sites(
         stops, strategy="spread", name="sample")
     return Problem(
         id="sample", locations=locations,
@@ -134,7 +138,7 @@ def show_consensus_and_iteration(problem: Problem) -> None:
     print("   undecided middle is just split by a single threshold.")
 
 
-def show_the_measurement(problem: Problem) -> None:
+def show_the_measurement(problem: Problem) -> list[tuple[float, float]]:
     print("\n3. Ninety days, against both baselines")
     corpus = dispatchable(problem, DAY, window=3 * HOUR)
     days = generate_days(corpus, count=90, seed=0, horizon=DAY)
@@ -150,25 +154,41 @@ def show_the_measurement(problem: Problem) -> None:
               f"{(cost - against_greedy) / against_greedy * 100:>11.1f}%"
               f"{(cost - against_lazy) / against_lazy * 100:>9.2f}%")
 
-    beats = 0
+    beats, margins = 0, []
     for seed in range(10):
         cost = total(icd_policy(corpus, horizon=8 * HOUR, scenarios=8,
                                 seed=seed))
         beats += cost < against_lazy
+        margins.append(((cost - against_greedy) / against_greedy * 100,
+                        (cost - against_lazy) / against_lazy * 100))
         if seed < 3:
             print(f"   {'icd seed ' + str(seed):<16}{cost:>12,}"
-                  f"{(cost - against_greedy) / against_greedy * 100:>11.1f}%"
-                  f"{(cost - against_lazy) / against_lazy * 100:>9.2f}%")
+                  f"{margins[-1][0]:>11.1f}%{margins[-1][1]:>9.2f}%")
     print(f"   over ten seeds: beats greedy 10/10, beats lazy {beats}/10")
+    return margins
 
 
-def show_how_much_room_there_was() -> None:
+def show_how_much_room_there_was(margins: list[tuple[float, float]]) -> None:
+    """Section 4, quoting the run above rather than a remembered one.
+
+    It used to read "about 9.4% ... seven seeds of ten ... -0.69% to +0.05%",
+    measured when this example ran on straight-line distances. On the road
+    every one of those figures moved, so they are computed here: the shape of
+    the argument -- a margin too thin to trust from one run -- is what the
+    section is about, and it survives.
+    """
+    versus_greedy = [g for g, _ in margins]
+    versus_lazy = [ell for _, ell in margins]
     print("\n4. How much room there was to win")
-    print("   ICD beats greedy in every seed by about 9.4%, and beats lazy in")
-    print("   seven seeds of ten -- tying two and losing one by 0.05%. The")
-    print("   spread runs from -0.69% to +0.05%, which is why the table above")
-    print("   shows several seeds rather than the best one: a margin that")
-    print("   small is not evidence from a single run.")
+    print(f"   ICD beats greedy in every seed by about "
+          f"{abs(sum(versus_greedy) / len(versus_greedy)):.1f}%, and beats lazy")
+    print(f"   in {sum(1 for m in versus_lazy if m < 0)} seeds of "
+          f"{len(versus_lazy)}. The spread against lazy runs from "
+          f"{min(versus_lazy):+.2f}% to")
+    print(f"   {max(versus_lazy):+.2f}%, which is why the table above shows "
+          "several seeds rather")
+    print("   than the best one: a margin that small is not evidence from a")
+    print("   single run.")
     print("   Lazy is a strong baseline here, not a weak one. Postponing has")
     print("   almost no downside in this simulator: AC-3.1 guarantees no window")
     print("   is ever missed, and a day costs the routing of each wave's")
@@ -190,8 +210,8 @@ def main() -> int:
     problem = instance()
     show_the_clock_matters(problem)
     show_consensus_and_iteration(problem)
-    show_the_measurement(problem)
-    show_how_much_room_there_was()
+    margins = show_the_measurement(problem)
+    show_how_much_room_there_was(margins)
     return 0
 
 

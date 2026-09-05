@@ -33,7 +33,8 @@ Four things, in order:
    account of how little it moves here, and why that is about the constructor
    rather than about the term.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -49,6 +50,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.model import (
@@ -76,7 +80,7 @@ def instance(stops: int = 8, vans: int = 2) -> Problem:
     Real coordinates and real service times, so the distances a re-plan trades
     against are ones a driver would recognise.
     """
-    locations, matrix, deliveries, _depot = dataset.planar_sites(
+    locations, matrix, deliveries, _depot = dataset.road_sites(
         stops, strategy="spread", name="replay")
     return Problem(
         id="replay", locations=locations,
@@ -144,8 +148,10 @@ def show_what_it_is_careful_about(problem, days) -> None:
           f"{greedy_result.dispatch_epochs}")
     print(f"   lazy was overruled {lazy_result.forced} times; greedy "
           f"{greedy_result.forced}")
+    saving = (greedy_result.cost - lazy_result.cost) / greedy_result.cost * 100
     print("   A policy can be cheap by being late, so waves sit beside the")
-    print("   money: lazy's 39% saving is bought by holding work back, and")
+    print(f"   money: lazy's {saving:.0f}% saving is bought by holding work "
+          "back, and")
     print("   whether that is a saving or a service problem is not a question")
     print("   one number can answer.")
     print("   The overruled column is zero for all three, and that is the good")
@@ -170,6 +176,7 @@ def show_the_price_of_waiting(problem, days) -> None:
     corpus_days = generate_days(corpus, count=90, seed=0, horizon=DAY)
 
     print(f"   {'price/1000s':>12}{'greedy':>12}{'lazy':>12}   cheaper")
+    unpriced: dict[str, int] = {}
     for price in (0, 100, 200, 400, 700):
         totals = {}
         for name, policy in (("greedy", greedy), ("lazy", lazy)):
@@ -179,8 +186,12 @@ def show_the_price_of_waiting(problem, days) -> None:
         winner = min(totals, key=lambda n: totals[n])
         print(f"   {price:>12}{totals['greedy']:>12,}{totals['lazy']:>12,}"
               f"   {winner}")
+        unpriced = unpriced or totals
 
-    print("   At zero, holding work costs nothing and lazy wins by 9%. §8.3")
+    margin = ((unpriced["greedy"] - unpriced["lazy"])
+              / unpriced["greedy"] * 100)
+    print(f"   At zero, holding work costs nothing and lazy wins by "
+          f"{margin:.0f}%. §8.3")
     print("   says that is wrong: \"report and optionally penalise churn (stops")
     print("   moved between vehicles, ETA shifts communicated to customers)\",")
     print("   and a request held four hours is exactly such a shift.")

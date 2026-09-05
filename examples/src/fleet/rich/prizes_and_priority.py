@@ -33,7 +33,8 @@ Four things this shows, in order:
    correctly up to prizes of about 10^6 and misbehaves above 10^9. That is a
    real limit of the engine, and it is printed rather than avoided.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -50,6 +51,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.matrix import PlanarMatrix
@@ -72,7 +76,7 @@ DAY = TimeWindow(start=0, end=12 * 3600)
 # times are the corpus's; the parcel counts below are not, and deliberately so
 # -- every section here turns on capacity being exactly scarce enough that one
 # order has to go, which is a property of the instance rather than of the data.
-LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.planar_sites(
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.road_sites(
     4, "spread", "prizes")
 RACK = 6
 

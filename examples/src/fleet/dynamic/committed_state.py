@@ -29,7 +29,8 @@ Four things, in order:
 
 4. **A day replayed.** T-50's definition of done: no executed stop ever moves.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -46,6 +47,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.committed import Execution, commit_locks, committed_prefix, moved_since
@@ -76,7 +80,7 @@ def instance(stops: int = 6, vans: int = 2) -> Problem:
     Real coordinates and real service times, so the distances a re-plan trades
     against are ones a driver would recognise.
     """
-    locations, matrix, deliveries, _depot = dataset.planar_sites(
+    locations, matrix, deliveries, _depot = dataset.road_sites(
         stops, strategy="spread", name="commit")
     return Problem(
         id="commit", locations=locations,

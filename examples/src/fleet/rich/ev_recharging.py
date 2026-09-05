@@ -106,7 +106,7 @@ def geometry() -> tuple:
     about 40% on this round, so a planar run flatters every battery. That is not
     an approximation of this example's answer, it is a different answer.
     """
-    locations, _, deliveries, depot = dataset.planar_sites(
+    locations, _, deliveries, depot = dataset.road_sites(
         STOPS, "furthest", "ev")
     corpus = dataset.load()
     others = [d for d in corpus.depots if d["name"] != depot["name"]]

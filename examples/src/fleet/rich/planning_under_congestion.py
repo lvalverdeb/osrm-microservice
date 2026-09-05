@@ -42,7 +42,8 @@ service times come from the corpus. The half-speed morning peak is invented, and
 A search that carries a profile is testable with any profile; only its
 *usefulness* waits on real traffic.
 
-Runs offline, against the committed corpus slice.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail. Against the committed corpus slice.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -59,6 +60,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.evaluator import build_timeline
@@ -98,7 +102,7 @@ def the_round(stops: int = STOPS) -> tuple:
         1-based index of the pharmacy furthest from the depot -- the customer
         with both a reason for a receiving window and the driving to miss it.
     """
-    locations, matrix, deliveries, depot = dataset.planar_sites(
+    locations, matrix, deliveries, depot = dataset.road_sites(
         stops, "spread", "congestion")
     # A pharmacy is the reason a stop has a receiving window, so prefer one --
     # but which categories a round contains is the corpus's business, not this

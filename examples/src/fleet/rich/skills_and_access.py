@@ -34,7 +34,8 @@ no field records which street admits a lorry. That is the honest shape of the
 problem. A fleet brings this knowledge with it; the model's job is to carry it
 and the verifier's job is to enforce it.
 
-Runs offline, against the committed corpus slice.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail. Against the committed corpus slice.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -50,6 +51,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.diagnose import preflight
@@ -75,7 +79,7 @@ DAY = TimeWindow(start=0, end=12 * 3600)
 # admits a lorry. Every compatibility attribute below is therefore declared
 # rather than derived, and that is the honest shape of the problem: a fleet
 # brings this knowledge with it, and the model's job is to carry it.
-_LOCATIONS, _MATRIX, _DELIVERIES, _DEPOT = dataset.planar_sites(
+_LOCATIONS, _MATRIX, _DELIVERIES, _DEPOT = dataset.road_sites(
     2, "spread", "compat")
 DEPOT = _LOCATIONS[0]
 

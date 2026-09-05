@@ -35,7 +35,8 @@ Four things this shows, in order:
    the dispatcher's fault, and blaming their locks would send them to unpick
    decisions that were never the problem.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -51,6 +52,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.locks import is_feasible_under_locks, minimal_conflict
@@ -74,7 +78,7 @@ DAY = TimeWindow(start=0, end=12 * 3600)
 # Twelve real deliveries around the Guadalupe depot; a section takes as many
 # as it needs. Quantities are the corpus's own parcel counts, so a lock that
 # conflicts with capacity conflicts with a real load.
-LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.planar_sites(
+LOCATIONS, MATRIX, DELIVERIES, DEPOT = dataset.road_sites(
     12, "spread", "locks")
 
 # FREEZE_UNTIL's honoured case needs a freeze that has expired by the time the

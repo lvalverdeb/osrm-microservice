@@ -34,7 +34,8 @@ Four things, in order:
    "never postpones a must-go" is enforced by the controller, not trusted to
    the policy.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -51,6 +52,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.epochs import classify, decide, epochs, must_go
@@ -82,7 +86,7 @@ def instance(closes: dict[str, int]) -> Problem:
     question "can this still wait?" has a real answer.
     """
     ids = sorted(closes)
-    locations, matrix, deliveries, _depot = dataset.planar_sites(
+    locations, matrix, deliveries, _depot = dataset.road_sites(
         len(ids), strategy="spread", name="waves")
     return Problem(
         id="waves", locations=locations,

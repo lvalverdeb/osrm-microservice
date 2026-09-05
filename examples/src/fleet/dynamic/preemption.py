@@ -33,7 +33,8 @@ Three things, in order:
    moves rather than disappearing, which is FR-27's stated preference and the
    difference between churn and loss.
 
-Runs offline.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -50,6 +51,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.bench import fixtures
@@ -84,7 +88,7 @@ def morning(vans: int):
     uniform grid that cost is the same wherever it falls.
     """
     work = routine()
-    locations, matrix, _deliveries, _depot = dataset.planar_sites(
+    locations, matrix, _deliveries, _depot = dataset.road_sites(
         len(work), strategy="spread", name=f"pre{vans}")
     problem = fixtures.instance(
         f"pre{vans}", work,

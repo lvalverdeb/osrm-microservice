@@ -25,7 +25,8 @@ Four things, in order:
 4. **Why §8.3 insists on it.** "A 0.5% cost gain that reshuffles half the plan
    at 14:00 is a net loss", and a response carrying only a plan hides that.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -42,6 +43,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.model import (
@@ -71,7 +75,7 @@ def instance(stops: int = 12, vans: int = 4) -> Problem:
     Real coordinates and real service times, so the distances a re-plan trades
     against are ones a driver would recognise.
     """
-    locations, matrix, deliveries, _depot = dataset.planar_sites(
+    locations, matrix, deliveries, _depot = dataset.road_sites(
         stops, strategy="spread", name="react")
     return Problem(
         id="react", locations=locations,
