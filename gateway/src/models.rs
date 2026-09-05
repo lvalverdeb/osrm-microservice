@@ -325,12 +325,21 @@ fn default_capacity() -> i64 { 35 }
 fn hysteresis() -> f64 { 2000.0 }
 
 /// A longitude/latitude pair.
+///
+/// Every example in this document is a real place inside the deployed extract,
+/// so "Try it out" answers instead of erroring. The generated default was
+/// `{"longitude": 0, "latitude": 0}` -- a point in the Gulf of Guinea, some
+/// 9,000 km outside any Costa Rican profile, which made the one request a
+/// reader is most likely to send the one guaranteed to fail. The set below is
+/// a San Jose metro round: Avenida 2 in the centre, the Guadalupe depot the
+/// benchmark corpus uses, Heredia and Cartago. Each was checked against
+/// `/nearest` and snaps within 25 m of a road.
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, ToSchema)]
 pub struct Coordinate {
-    #[schema(minimum = -180.0, maximum = 180.0)]
+    #[schema(minimum = -180.0, maximum = 180.0, example = -84.0785)]
     #[serde(deserialize_with = "lax::number")]
     pub longitude: f64,
-    #[schema(minimum = -90.0, maximum = 90.0)]
+    #[schema(minimum = -90.0, maximum = 90.0, example = 9.9333)]
     #[serde(deserialize_with = "lax::number")]
     pub latitude: f64,
 }
@@ -484,6 +493,11 @@ impl Alternatives {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "origin": {"longitude": -84.0785, "latitude": 9.9333},
+    "destination": {"longitude": -84.0531, "latitude": 9.9472},
+    "profile": "driving"
+}))]
 pub struct RouteRequest {
     pub origin: Coordinate,
     pub destination: Coordinate,
@@ -530,6 +544,16 @@ impl Validate for RouteRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "coordinates": [
+        {"longitude": -84.0531, "latitude": 9.9472},
+        {"longitude": -84.0785, "latitude": 9.9333},
+        {"longitude": -84.1165, "latitude": 9.9981},
+        {"longitude": -83.9194, "latitude": 9.8638}
+    ],
+    "profile": "driving",
+    "annotations": "duration,distance"
+}))]
 pub struct MatrixRequest {
     #[schema(min_items = 2, max_items = 5000)]
     pub coordinates: Vec<Coordinate>,
@@ -618,13 +642,13 @@ impl Validate for MatrixRequest {
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GpsBreadcrumb {
-    #[schema(minimum = -180.0, maximum = 180.0)]
+    #[schema(minimum = -180.0, maximum = 180.0, example = -84.07853)]
     #[serde(deserialize_with = "lax::number")]
     pub longitude: f64,
-    #[schema(minimum = -90.0, maximum = 90.0)]
+    #[schema(minimum = -90.0, maximum = 90.0, example = 9.93309)]
     #[serde(deserialize_with = "lax::number")]
     pub latitude: f64,
-    #[schema(minimum = 0)]
+    #[schema(minimum = 0, example = 1788249600i64)]
     #[serde(deserialize_with = "lax::integer")]
     pub timestamp: i64,
     /// Defaults to 5.0 rather than null, so it is always present in the
@@ -657,6 +681,16 @@ impl GpsBreadcrumb {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "breadcrumbs": [
+        {"longitude": -84.07853, "latitude": 9.93309, "timestamp": 1788249600},
+        {"longitude": -84.06797, "latitude": 9.93228, "timestamp": 1788249703},
+        {"longitude": -84.06581, "latitude": 9.93960, "timestamp": 1788249806},
+        {"longitude": -84.06193, "latitude": 9.94269, "timestamp": 1788249909},
+        {"longitude": -84.05293, "latitude": 9.94729, "timestamp": 1788250012}
+    ],
+    "profile": "driving"
+}))]
 pub struct MatchRequest {
     #[schema(min_items = 2, max_items = 5000)]
     pub breadcrumbs: Vec<GpsBreadcrumb>,
@@ -719,6 +753,15 @@ impl Validate for MatchRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "coordinates": [
+        {"longitude": -84.0531, "latitude": 9.9472},
+        {"longitude": -84.0785, "latitude": 9.9333},
+        {"longitude": -84.1165, "latitude": 9.9981}
+    ],
+    "profile": "driving",
+    "roundtrip": true
+}))]
 pub struct TripRequest {
     #[schema(min_items = 2, max_items = 200)]
     pub coordinates: Vec<Coordinate>,
@@ -781,6 +824,11 @@ impl Validate for TripRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "coordinate": {"longitude": -84.0785, "latitude": 9.9333},
+    "number": 1,
+    "profile": "driving"
+}))]
 pub struct NearestRequest {
     pub coordinate: Coordinate,
     /// No upper bound, matching the Python schema.
@@ -804,6 +852,15 @@ pub struct NearestRequest {
 /// geocoder output is the case this serves: `distance` is how far the address
 /// moved to reach a road, which is the confidence signal worth gating on.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "coordinates": [
+        {"longitude": -84.0785, "latitude": 9.9333},
+        {"longitude": -84.1165, "latitude": 9.9981},
+        {"longitude": -83.9194, "latitude": 9.8638}
+    ],
+    "number": 1,
+    "profile": "driving"
+}))]
 pub struct NearestBatchRequest {
     #[schema(min_items = 1)]
     pub coordinates: Vec<Coordinate>,
@@ -865,10 +922,10 @@ impl Validate for NearestRequest {
 /// A stop or depot: a coordinate that may carry a caller-supplied identifier.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct Stop {
-    #[schema(minimum = -180.0, maximum = 180.0)]
+    #[schema(minimum = -180.0, maximum = 180.0, example = -84.0531)]
     #[serde(deserialize_with = "lax::number")]
     pub longitude: f64,
-    #[schema(minimum = -90.0, maximum = 90.0)]
+    #[schema(minimum = -90.0, maximum = 90.0, example = 9.9472)]
     #[serde(deserialize_with = "lax::number")]
     pub latitude: f64,
     /// `str | int | None` in the pydantic schema. Left as a bare `Value` this
@@ -887,6 +944,16 @@ impl Stop {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "depots": [{"longitude": -84.0531, "latitude": 9.9472, "id": "GUADALUPE"}],
+    "stops": [
+        {"longitude": -84.0785, "latitude": 9.9333, "id": "CR-0001"},
+        {"longitude": -84.1165, "latitude": 9.9981, "id": "CR-0002"},
+        {"longitude": -83.9194, "latitude": 9.8638, "id": "CR-0003"}
+    ],
+    "capacity": 2,
+    "clustering_mode": "travel_time"
+}))]
 pub struct VrpRequest {
     #[schema(min_items = 1, max_items = 500)]
     pub depots: Vec<Stop>,
