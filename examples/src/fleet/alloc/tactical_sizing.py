@@ -33,7 +33,8 @@ Four things, in order:
    error when a missed delivery costs more than a drive. Priced cheaply, a
    small fleet is the right answer and both methods find it.
 
-Runs offline. No gateway required. About 20 s.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail. About 20 s.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -51,6 +52,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.model import (
@@ -104,11 +108,8 @@ def base_problem(stops: int = POOL, path: Path | None = None,
     deliveries, depot = dataset.load(path or dataset.DEFAULT_PATH).nearest(stops)
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
-    matrix, road = dataset.road_matrix_or_planar(points, gateway or GATEWAY,
+    matrix = dataset.road_matrix(points, gateway or GATEWAY,
                                                  "tactical")
-    if not road:
-        print("   no gateway; distances are straight-line, so the costs"
-              " below are lower than the road gives")
 
     locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
                           matrix_index=0),) + tuple(

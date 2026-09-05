@@ -39,7 +39,8 @@ Five things, in order:
    refusals, because "no charger in range from here" and "flat even after
    charging everywhere" are different problems for a dispatcher.
 
-Runs offline, against the committed corpus slice. The stops, their spacing and
+Requires a running gateway: range is spent per kilometre, so the distances must
+be the road's. Against the committed corpus slice -- the stops, their spacing and
 their service times are the corpus's; the charging curve and the decision to
 put a charger at every depot are invented, which is what the DoD asked for.
 
@@ -97,14 +98,13 @@ def geometry() -> tuple:
     """The real round, and the depots standing in as chargers.
 
     Returns:
-        `(locations, matrix, on_road, deliveries, depot, charger_names)`, where
-        the chargers are every depot except the one the van starts from and
-        `on_road` says whether the matrix came from the gateway.
+        `(locations, matrix, deliveries, depot, charger_names)`, where the
+        chargers are every depot except the one the van starts from.
 
-    Road distances when a gateway is there, straight lines when it is not, and
-    the difference is the whole example rather than a detail: range is spent
-    per kilometre, and straight lines undercount Costa Rican kilometres by
-    about 40% on this round. A planar run therefore flatters every battery.
+    Road distances, and the gateway is required rather than preferred: range is
+    spent per kilometre, and straight lines undercount Costa Rican kilometres by
+    about 40% on this round, so a planar run flatters every battery. That is not
+    an approximation of this example's answer, it is a different answer.
     """
     locations, _, deliveries, depot = dataset.planar_sites(
         STOPS, "furthest", "ev")
@@ -117,8 +117,8 @@ def geometry() -> tuple:
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
     points += [(d["latitude"], d["longitude"]) for d in others]
-    matrix, on_road = dataset.road_matrix_or_planar(points, GATEWAY, "ev")
-    return (locations + extra, matrix, on_road, deliveries, depot,
+    matrix = dataset.road_matrix(points, GATEWAY, "ev")
+    return (locations + extra, matrix, deliveries, depot,
             {f"CH{i}": d["name"] for i, d in enumerate(others, 1)})
 
 
@@ -141,7 +141,7 @@ def _matrix_over(points: list[tuple[float, float]], depot: dict) -> PlanarMatrix
     return PlanarMatrix(version="ev-v1", coordinates=coordinates)
 
 
-LOCATIONS, MATRIX, ON_ROAD, DELIVERIES, DEPOT, CHARGERS = geometry()
+LOCATIONS, MATRIX, DELIVERIES, DEPOT, CHARGERS = geometry()
 
 
 def tour_metres() -> int:
@@ -343,11 +343,7 @@ def main() -> int:
     print(__doc__.strip().split("\n")[0])
     print(f"\nFR-20 and INV-16. Real stops from {DEPOT['name']}; "
           "chargers and curve invented.")
-    print("distances: " + ("the road network, via the gateway."
-                           if ON_ROAD else
-                           "straight lines -- no gateway. Roads here are about "
-                           "40% longer, so every battery below looks better "
-                           "than it is."))
+    print("distances: the road network, via the gateway.")
     problem = a_round()
     the_curve()
     beyond_the_battery(problem)

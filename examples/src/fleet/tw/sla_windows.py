@@ -65,7 +65,8 @@ order number is the only sequence it carries, so intake is spread across the
 first quarter of the shift in order-number order and says so here rather than
 pretending to a field that does not exist.
 
-Runs offline. Without a gateway the matrix is planar and the output says so.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
     # dataset: see docs/dataset_prep.md
 
 Usage:
@@ -299,9 +300,8 @@ def main() -> int:
 
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
-    matrix, on_road = dataset.road_matrix_or_planar(points, GATEWAY, "sla")
-    print(f"matrix        {'road, from ' + GATEWAY if on_road else 'planar'}"
-          f"{'' if on_road else ' -- no gateway; distances are straight lines'}")
+    matrix = dataset.road_matrix(points, GATEWAY, "sla")
+    print(f"matrix        road, from {GATEWAY}")
 
     classes = {d["product_id"]: d["priority"] for d in deliveries}
     intake = intake_times(deliveries)

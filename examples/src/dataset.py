@@ -380,52 +380,64 @@ def load(path: Path = DEFAULT_PATH) -> Dataset:
     return Dataset(raw["depots"], raw["deliveries"], raw["meta"])
 
 
-def road_matrix_or_planar(points: list[tuple[float, float]], gateway: str,
-                          name: str = "example") -> tuple[Any, bool]:
-    """A road matrix from the gateway, or a planar one when it is not there.
+def road_matrix(points: list[tuple[float, float]], gateway: str,
+                name: str = "example") -> Any:
+    """A road matrix from the gateway. There is no fallback.
 
     Args:
         points: `(latitude, longitude)`, the depot first.
         gateway: base URL of the OSRM API gateway.
-        name: version label for the matrix that gets built.
+        name: unused, kept so callers need not change; the matrix carries the
+            gateway's own content-addressed version (MTX-6).
 
     Returns:
-        The matrix, and whether it came from the road network. **Check the
-        flag and say so**: a number printed from a planar matrix is not the
-        number the road gives, and it is not wrong in a single direction.
+        The travel matrix, measured on the road network.
 
-        Measured against this gateway on Costa Rican arcs, straight-line
-        *distance* understates the road by 22% in the metro and 65% through
-        the mountains. Straight-line *duration* does not follow it, because
-        `PlanarMatrix` prices every arc at one speed: a metro arc comes out
-        24% short, while Guadalupe to Liberia comes out 358 minutes against
-        the road's 235 -- 52% long, because the real route is motorway. An
-        earlier version of this docstring claimed planar numbers were "shorter
-        than roads everywhere", which is true of distance and false of time.
+    Raises:
+        RuntimeError: if the gateway cannot be reached. This used to fall back
+            to a straight-line matrix so an example could run offline, and the
+            fallback is gone on purpose.
 
-    Five examples used to promise "Runs offline. No gateway required" and then
-    call `build_matrix` unconditionally, so they died on a refused connection.
-    An example nobody can run without infrastructure showcases nothing and its
-    implementation clue is untested. This is the fallback that makes the
-    promise true, and `vrp.matrix.PlanarMatrix` is what `§7.6` reaches for at
-    size anyway.
+    **Why there is no fallback.** Straight-line numbers are not a rough version
+    of road numbers, they are wrong in two directions at once. Measured against
+    this gateway on Costa Rican arcs, straight-line *distance* understates the
+    road by 22% in the metro and 65% through the mountains, while straight-line
+    *duration* runs 24% short in the metro and 52% **long** from Guadalupe to
+    Liberia, where one fixed speed stands in for a motorway. An example whose
+    conclusion is a distance -- `alloc/territories.py` costing coherence at 46%
+    further, `tw/envelope_round.py` measuring hull coverage -- would print a
+    different finding depending on whether the reader had a gateway running,
+    and nothing in the output would say which finding was the real one.
+
+    `MTX-11` permits a haversine fallback "for development and infeasibility
+    triage only", and requires it to mark the plan `DEGRADED`. This one marked
+    nothing: it returned a bare `PlanarMatrix`, whose `degraded` is `None` by
+    design, and told the caller through a second return value that most
+    examples printed as a sentence and no test ever checked.
+
+    `vrp.matrix.PlanarMatrix` is untouched and still right where it is used
+    deliberately -- §7.6's instances too large to store, the generators, the
+    benchmark fixtures. Its docstring is explicit that it is a choice rather
+    than a fallback, and marking those degraded would teach readers to ignore
+    the label.
     """
-    from vrp.matrix import PlanarMatrix
-    from vrp.osrm import build_matrix
+    from vrp.matrix import build_large_matrix
 
+    # Tiled rather than one request, because the gateway caps a matrix at
+    # `MATRIX_MAX_CELLS` (10,000 committed) and a 121-stop round is 14,641
+    # cells. `build_large_matrix` produces the identical matrix -- same cells,
+    # same version -- which is `E-11`'s acceptance condition, so this costs
+    # nothing on the small rounds and is the difference between working and
+    # not on the large ones.
     try:
-        matrix, _ = build_matrix(gateway, points)
-        return matrix, True
-    except Exception:
-        # Any failure to reach the gateway, not just a refused connection: a
-        # DNS miss, a timeout and a 502 are all "no road matrix today", and an
-        # example is the wrong place to distinguish them.
-        home = points[0]
-        lat_km = 110.57
-        lon_km = 111.32 * math.cos(math.radians(home[0]))
-        coords = tuple(((lon - home[1]) * lon_km, (lat - home[0]) * lat_km)
-                       for lat, lon in points)
-        return PlanarMatrix(version=f"{name}-planar", coordinates=coords), False
+        matrix, _ = build_large_matrix(gateway, points)
+    except Exception as failure:
+        raise RuntimeError(
+            f"No road matrix from {gateway}: {failure}. Examples measure "
+            "distance on the road network and no longer fall back to straight "
+            "lines; start the gateway, or point OSRM_API_URL at one."
+        ) from failure
+    return matrix
 
 
 def planar_sites(stops: int, strategy: str = "nearest",
@@ -454,7 +466,7 @@ def planar_sites(stops: int, strategy: str = "nearest",
     duration is understated in the metro and badly *overstated* on long arcs,
     where one fixed speed stands in for a motorway. Where the magnitude
     matters rather than the mechanism -- range, driving hours -- reach for
-    `road_matrix_or_planar` instead, and say which one you got.
+    `road_matrix` instead, which requires a gateway and has no fallback.
     """
     from vrp.matrix import PlanarMatrix
     from vrp.model import Location

@@ -30,7 +30,8 @@ Four things, in order:
 
 4. **The price** (§6.7): what the territory plan cost against the free one.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -49,6 +50,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 import maps
 
@@ -109,11 +113,8 @@ def round_from_dataset(stops: int, vans: int, path: Path,
 
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
-    matrix, road = dataset.road_matrix_or_planar(points, gateway,
+    matrix = dataset.road_matrix(points, gateway,
                                                  "territories")
-    if not road:
-        print("   no gateway; distances are straight-line, so the costs"
-              " below are lower than the road gives")
 
     locations = (Location(id="D", lat=depot["latitude"], lon=depot["longitude"],
                           matrix_index=0),) + tuple(
@@ -260,7 +261,7 @@ def show_the_price(problem: Problem, vans: int) -> None:
 
     print("   Negative is not a mistake. §6.7 says consistency \"is a genuine")
     print("   cost saver, not a concession\", and here the coherent plan is the")
-    print("   shorter one by 43% -- so the report has to be able to show a")
+    print("   shorter one -- so the report has to be able to show a")
     print("   saving, or it is arguing rather than measuring.")
     print("   The Tier 6 line is the other half of the same trade, and it goes")
     print("   the other way: territories are *less* balanced here, because one")

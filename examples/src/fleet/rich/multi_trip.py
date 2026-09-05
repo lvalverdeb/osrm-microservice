@@ -28,7 +28,8 @@ Four things this shows, in order:
    not more times than the vehicle allows.
 4. **§6.9's loading bays.** Three vans, one bay, all departing at once.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -101,10 +102,10 @@ def _regional() -> tuple:
                           matrix_index=0),) + tuple(
         Location(id=f"C{i}", lat=d["latitude"], lon=d["longitude"],
                  matrix_index=i) for i, d in enumerate(chosen, 1))
-    matrix, on_road = dataset.road_matrix_or_planar(
+    matrix = dataset.road_matrix(
         [(d["latitude"], d["longitude"]) for d in [depot] + chosen],
         GATEWAY, "mt-regional")
-    return locations, matrix, chosen, depot, on_road
+    return locations, matrix, chosen, depot
 
 
 REGIONAL = _regional()
@@ -219,15 +220,12 @@ def show_the_cost() -> None:
 
     one = schedule_route(problem, "V1", ["O1"], EU_561)
     both = schedule_route(problem, "V1", ["O1", "O2"], EU_561)
-    matrix, on_road = REGIONAL[1], REGIONAL[4]
+    matrix = REGIONAL[1]
     single = (matrix.duration(0, 1) + matrix.duration(1, 0)) / 3600
     pair = (matrix.duration(0, 1) + matrix.duration(1, 2)
             + matrix.duration(2, 0)) / 3600
     print("   Perez Zeledon and Liberia, EU-561's 9-hour driving limit")
-    print("   distances: " + ("the road network, via the gateway."
-                              if on_road else
-                              "straight lines -- no gateway, so these hours "
-                              "are the wrong ruler for a driving limit."))
+    print("   distances: the road network, via the gateway.")
     print(f"   one trip  ({single:.1f}h driving): legal={one.legal}")
     print(f"   two trips ({pair:.1f}h driving): legal={both.legal}")
     print("   Planned separately, each trip is a perfectly good day's work and")

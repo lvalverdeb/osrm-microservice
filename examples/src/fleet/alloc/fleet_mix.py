@@ -35,7 +35,8 @@ Four things, in order:
    removed", by actually re-solving. Including the vehicle whose delta is not a
    number, because the work cannot be done without it.
 
-Runs offline. No gateway required. About 40 s, most of it re-solving.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail. About 40 s, most of it re-solving.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -53,6 +54,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 from pyvrp.PenaltyManager import PenaltyBoundWarning
 
@@ -103,11 +107,8 @@ def real_round(stops: int) -> tuple:
         deliveries, depot = dataset.load().spread(stops)
         points = [(depot["latitude"], depot["longitude"])]
         points += [(d["latitude"], d["longitude"]) for d in deliveries]
-        matrix, road = dataset.road_matrix_or_planar(points, GATEWAY,
+        matrix = dataset.road_matrix(points, GATEWAY,
                                                     "fleet-mix")
-        if not road:
-            print("   no gateway; distances are straight-line, so the costs"
-                  " below are lower than the road gives")
         locations = (Location(id="D", lat=depot["latitude"],
                               lon=depot["longitude"], matrix_index=0),) + tuple(
             Location(id=f"C{i + 1}", lat=d["latitude"], lon=d["longitude"],

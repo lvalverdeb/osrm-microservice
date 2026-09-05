@@ -50,7 +50,8 @@ consequence of the closure here, not an enforced rest. The returned envelope is
 not modelled as a pickup either: one out and one in is a net load of zero, so
 it would constrain nothing. It is why the routes are closed.
 
-Runs offline. Without a gateway the matrix is planar and the output says so.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
     # dataset: see docs/dataset_prep.md
 
 Usage:
@@ -375,7 +376,7 @@ def show_map(problem: Problem, solution, couriers: int) -> None:
                          ("a geographic carve-up", carved(problem, count)),
                          ("dealt round-robin", scattered(problem, count))):
         print(f"      {label:<24}{maps.coverage(split, everything):>4}%")
-    print("   The couriers land on the carve-up, not on the scattering, and")
+    print("   The couriers sit far nearer the carve-up than the scattering, and")
     print("   nothing asked them to: riding is 2% of this round's cost, so the")
     print("   solver had almost no reason to prefer a compact day. It produced")
     print("   one anyway. Compactness here is a by-product of packing a clock,")
@@ -397,12 +398,11 @@ def main() -> int:
     deliveries, depot = dataset.load(args.dataset).nearest(args.stops)
     points = [(depot["latitude"], depot["longitude"])]
     points += [(d["latitude"], d["longitude"]) for d in deliveries]
-    matrix, on_road = dataset.road_matrix_or_planar(points, GATEWAY, "envelopes")
+    matrix = dataset.road_matrix(points, GATEWAY, "envelopes")
     print(f"depot {depot['name']} -- {len(deliveries)} envelopes, "
           f"{SIGNING_SECONDS // 60} min each, shift "
           f"{clock(SHIFT.start)}-{clock(SHIFT.end)}")
-    print(f"matrix        {'road, from ' + GATEWAY if on_road else 'planar'}"
-          f"{'' if on_road else ' -- no gateway; distances are straight lines'}")
+    print(f"matrix        road, from {GATEWAY}")
 
     print(f"\nstaffing the round (up to {args.couriers} couriers, "
           f"{args.iterations} iterations each)")

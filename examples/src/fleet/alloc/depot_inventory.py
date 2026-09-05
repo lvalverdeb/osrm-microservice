@@ -32,7 +32,8 @@ Four things, in order:
    since E-14 with the honest reason "depot inventory is not modelled". It is
    modelled now.
 
-Runs offline. No gateway required.
+Requires a running gateway: distances are measured on the road network and
+there is no straight-line fallback. `examples/.env` points at the FreeBSD jail.
 
 Usage:
     uv run --package osrm-api-gateway-examples \\
@@ -49,6 +50,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "examples" / "src"))
 
+# Importing config puts OSRM_API_URL into the environment, so the
+# gateway this example now requires is the one `examples/.env` names.
+import config  # noqa: F401
 import dataset
 
 from vrp.diagnose import preflight
@@ -107,11 +111,8 @@ def instance(depots: tuple[Location, ...], vehicles: tuple[Vehicle, ...],
                  matrix_index=len(depots) + i)
         for i, d in enumerate(deliveries))
     locations = (*depots, *customers)
-    matrix, road = dataset.road_matrix_or_planar(
+    matrix = dataset.road_matrix(
         [(loc.lat, loc.lon) for loc in locations], GATEWAY, "depot-inv")
-    if not road:
-        print("   no gateway; distances are straight-line, so the costs"
-              " below are lower than the road gives")
 
     quantities = {"kg": kg} | ({"pallets": pallets} if pallets else {})
     orders = tuple(
