@@ -97,6 +97,28 @@ def test_a_group_too_small_to_bound_an_area_reports_it():
     assert maps.region(canvas, SQUARE[:2], "#000000", "two") is False
 
 
+def test_coverage_is_a_ratio_of_hulls():
+    """One group spanning everything covers all of it; a quarter covers a quarter."""
+    unit = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)]
+    assert maps.coverage([unit], unit) == 100
+    quarter = [(0.0, 0.0), (0.0, 0.5), (0.5, 0.5), (0.5, 0.0)]
+    assert maps.coverage([quarter], unit) == 25
+
+
+def test_coverage_averages_over_the_groups():
+    """Two quarters average a quarter, not a half: it is a mean, not a union."""
+    lower = [(0.0, 0.0), (0.0, 0.5), (0.5, 0.5), (0.5, 0.0)]
+    upper = [(0.5, 0.5), (0.5, 1.0), (1.0, 1.0), (1.0, 0.5)]
+    assert maps.coverage([lower, upper], SQUARE) == 25
+
+
+def test_coverage_of_points_enclosing_nothing_is_zero():
+    """A round on one spot has no whole to take a share of."""
+    dot = [(9.9, -84.1), (9.9, -84.1)]
+    assert maps.coverage([dot], dot) == 0
+    assert maps.coverage([], SQUARE) == 0
+
+
 def test_a_map_of_nothing_is_refused():
     """Defaulting to a centre would put every empty round in the same wrong place."""
     with pytest.raises(ValueError, match="at least one point"):

@@ -152,6 +152,35 @@ def area(ring: Sequence[Point]) -> float:
     return abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in pairs)) / 2
 
 
+def coverage(groups: Sequence[Sequence[Point]],
+             everything: Sequence[Point]) -> int:
+    """What share of the whole an average group's hull covers, in percent.
+
+    The number behind a picture of grouped stops, and the one that says whether
+    the grouping is geographic at all. A fleet split into territories gives
+    small disjoint hulls and a low share; a fleet split by anything else --
+    round-robin, or a clock -- gives hulls that each swell towards the whole
+    round and sit on top of one another.
+
+    Measured rather than asserted, because "three copies of the whole round" is
+    the kind of claim that stays in a docstring long after the data stopped
+    supporting it. It is a ratio of two hull areas, so the squared-degree unit
+    cancels; see `area`.
+
+    Args:
+        groups: One sequence of points per group.
+        everything: Every point, whichever group it fell in.
+
+    Returns:
+        Percent, or 0 when the points enclose no area at all.
+    """
+    whole = area(hull(everything))
+    if whole <= 0 or not groups:
+        return 0
+    shares = [area(hull(group)) for group in groups]
+    return round(sum(shares) / len(shares) / whole * 100)
+
+
 def region(target: Any, points: Sequence[Point], edge: str, label: str,
            opacity: float = 0.12) -> bool:
     """Shade the convex hull of `points`, if they make one.

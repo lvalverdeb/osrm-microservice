@@ -70,7 +70,9 @@ from pathlib import Path
 # root on sys.path, which is what makes `import vrp` below resolve.
 import config  # noqa: F401
 import dataset
+import maps
 
+from vrp.consistency import territories
 from vrp.evaluator import route_metrics
 from vrp.model import (
     Location,
@@ -280,6 +282,107 @@ def show_sizing(rows: list[tuple], total: int) -> None:
     print("   column is what was attempted, not what a courier could do.")
 
 
+def site_of(problem: Problem, step) -> tuple[float, float]:
+    """Where a step happens, as `(latitude, longitude)`."""
+    place = problem.location(step.location_id)
+    return (place.lat, place.lon)
+
+
+def draw_by_courier(canvas, problem: Problem, solution) -> list[list]:
+    """Each courier's stops and the hull around them."""
+    layer = maps.group(canvas, "by courier", shown=True)
+    groups = []
+    for index, route in enumerate(sorted(solution.routes,
+                                         key=lambda r: r.vehicle_id)):
+        sites = [site_of(problem, s) for s in route.steps if s.order_id]
+        if not sites:
+            continue
+        shade = maps.colour(index)
+        maps.region(layer, sites, shade, f"{route.vehicle_id}: {len(sites)} calls")
+        for site in sites:
+            maps.stop(layer, site, shade, route.vehicle_id, radius=4)
+        groups.append(sites)
+    maps.depot(layer, site_of(problem, solution.routes[0].steps[0]), "depot")
+    return groups
+
+
+def draw_by_half_day(canvas, problem: Problem, solution, shades: tuple) -> None:
+    """The same stops, coloured by which side of the closure they fell."""
+    layer = maps.group(canvas, "before / after lunch", shown=False)
+    for step in served_steps(solution):
+        before = step.start_service < 12 * HOUR
+        maps.stop(layer, site_of(problem, step),
+                  shades[0] if before else shades[1],
+                  f"{clock(step.start_service)}", radius=4)
+    maps.depot(layer, site_of(problem, solution.routes[0].steps[0]), "depot")
+
+
+def carved(problem: Problem, count: int) -> list[list]:
+    """The same stops split geographically, as a control for `maps.coverage`.
+
+    `vrp.consistency.territories` is the polar sweep `alloc/territories.py`
+    demonstrates: order the stops by bearing from the depot and cut the ring
+    into contiguous arcs. Running it here answers the comparison on this round
+    rather than quoting a percentage measured on another example's data, which
+    would go stale without anything saying so.
+    """
+    zones = territories(problem, count=count)
+    return [[(problem.location(problem.order(order_id).delivery.location_id).lat,
+              problem.location(problem.order(order_id).delivery.location_id).lon)
+             for order_id in members]
+            for members in zones.values()]
+
+
+def scattered(problem: Problem, count: int) -> list[list]:
+    """The same stops dealt round-robin: the least geographic split there is."""
+    groups: list[list] = [[] for _ in range(count)]
+    for position, order in enumerate(problem.orders):
+        stop = problem.location(order.delivery.location_id)
+        groups[position % count].append((stop.lat, stop.lon))
+    return groups
+
+
+def show_map(problem: Problem, solution, couriers: int) -> None:
+    """5. What the round looks like, and what it does not look like.
+
+    `alloc/territories.py` draws the same picture with the same helpers and
+    gets wedges, because the plan there is built out of geography. Here the
+    couriers were never given a territory, and the interesting part is that it
+    barely shows: their hulls come out about as compact as a deliberate
+    geographic carve-up of the same stops, and nothing like a round-robin
+    scattering. All three are measured here rather than quoted from that
+    example, whose round has different geometry and would not transfer.
+
+    The second layer is the closure. If the couriers worked a morning district
+    and an afternoon one, it would show; they do not, which is the same finding
+    from the other side.
+    """
+    print("\n5. The round, drawn")
+    canvas = maps.base_map([site_of(problem, s) for s in solution.routes[0].steps]
+                           + [site_of(problem, s) for s in served_steps(solution)])
+    groups = draw_by_courier(canvas, problem, solution)
+    shades = (maps.colour(couriers), maps.colour(couriers + 1))
+    draw_by_half_day(canvas, problem, solution, shades)
+    maps.controls(canvas)
+    legend = {f"COURIER-{n + 1}": maps.colour(n) for n in range(len(groups))}
+    legend |= {"before lunch": shades[0], "after lunch": shades[1]}
+    maps.legend(canvas, legend, "who and when")
+    maps.save(canvas, Path(__file__).parent / "envelope_round_map.html")
+    everything = [site for group in groups for site in group]
+    count = len(groups)
+    print("   an average group's hull, as a share of the whole round:")
+    for label, split in (("these couriers", groups),
+                         ("a geographic carve-up", carved(problem, count)),
+                         ("dealt round-robin", scattered(problem, count))):
+        print(f"      {label:<24}{maps.coverage(split, everything):>4}%")
+    print("   The couriers land on the carve-up, not on the scattering, and")
+    print("   nothing asked them to: riding is 2% of this round's cost, so the")
+    print("   solver had almost no reason to prefer a compact day. It produced")
+    print("   one anyway. Compactness here is a by-product of packing a clock,")
+    print("   which is worth knowing before anyone adds a territory constraint")
+    print("   to buy something they were getting for nothing.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -317,6 +420,7 @@ def main() -> int:
     show_capacity_is_slack(staffed, solution)
     show_business_hours(staffed, solution)
     show_sizing(rows, len(deliveries))
+    show_map(staffed, solution, couriers)
     return 0
 
 

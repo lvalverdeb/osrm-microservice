@@ -302,22 +302,11 @@ def draw(canvas, problem: Problem, label: str,
 
 
 def coverage(problem: Problem, assignment: dict[str, list[str]]) -> int:
-    """What share of the round an average van's hull covers, in percent.
-
-    The number behind the picture. Under territories a van holds a wedge and
-    the share is small; under round-robin every van's stops are spread over
-    the whole round, so each hull swells to nearly all of it. Measured rather
-    than asserted, because "three copies of the whole round" is the kind of
-    claim that stays in a docstring long after the data stopped supporting it.
-    """
-    sites = [site_of(problem, order.id) for order in problem.orders]
-    whole = maps.area(maps.hull(sites))
-    if whole <= 0:
-        return 0
-    shares = [maps.area(maps.hull([site_of(problem, order_id)
-                                   for order_id in order_ids]))
-              for order_ids in assignment.values()]
-    return round(sum(shares) / len(shares) / whole * 100)
+    """What share of the round an average van's hull covers, in percent."""
+    return maps.coverage(
+        [[site_of(problem, order_id) for order_id in order_ids]
+         for order_ids in assignment.values()],
+        [site_of(problem, order.id) for order in problem.orders])
 
 
 def show_map(problem: Problem, vans: int) -> None:
