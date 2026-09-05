@@ -1,0 +1,20 @@
+{
+  "name": "mixed-parcels",
+  "applies_to": ["Groceries", "Beverages", "Household", "Pharmacy",
+                 "Hardware", "Apparel", "Electronics"],
+  "problem_id": "mdhvrptw",
+  "quantity": {"dimension": "kg", "from_field": "weight_kg", "round": "up"},
+  "service": {"from_field": "service_minutes", "scale_seconds": 60},
+  "windows": [{"start": 21600, "end": 72000}],
+  "shift": {"start": 21600, "end": 72000},
+  "route": {"closed": true},
+  "assignment": {"depot": "around_each_depot"},
+  "fleet": [
+    {"class": "MOTO", "id": "{class}@{depot}", "per_depot": 1,
+     "capacities": {"kg": 25}, "fixed_cost": 6000, "cost_per_metre": 1},
+    {"class": "VAN", "id": "{class}@{depot}", "per_depot": 1,
+     "capacities": {"kg": 1200}, "fixed_cost": 35000, "cost_per_metre": 1},
+    {"class": "RIGID", "id": "{class}@{depot}", "per_depot": 1,
+     "capacities": {"kg": 5000}, "fixed_cost": 90000, "cost_per_metre": 3}
+  ]
+}
