@@ -71,6 +71,15 @@ dev = [
     # claim -- that no solver concept leaks into the domain layer -- is only
     # demonstrated by a second engine actually consuming the same Problem.
     "ortools>=9.10",
+    # `tests/test_example_maps.py` checks the geometry behind the maps the
+    # examples draw, and `tests/test_service_model_examples.py` checks that the
+    # shipped delivery models rebuild the examples they describe. Both import
+    # from `examples/src`, which reaches folium and the settings object, and CI
+    # syncs this project rather than the workspace. In `dev` for the reason
+    # pyvrp is: a hull cross-check and a model-equivalence proof that skip
+    # because a wheel is missing prove nothing. Both are pure Python and small.
+    "folium>=0.16.0",
+    "pydantic-settings>=2.2.0",
 ]
 
 [project.urls]
