@@ -50,9 +50,11 @@ of it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +68,7 @@ from vrp.model import (
     TravelMatrix,
     Vehicle,
 )
+from vrp.objective import Mode, ObjectiveSpec
 
 # --------------------------------------------------------------------------
 # The contract
@@ -130,6 +133,12 @@ COVERS: dict[type, dict[str, str]] = {
     Location: {
         "dwell_overhead": "service.dwell_overhead",
     },
+    ObjectiveSpec: {
+        "mode": "run.objective.mode",
+        "vehicle_fixed_cost": "run.objective.vehicle_fixed_cost",
+        "cost_per_metre": "run.objective.cost_per_metre",
+        "cost_per_second": "run.objective.cost_per_second",
+    },
     TimeWindow: {
         "start": "windows[].start",
         "end": "windows[].end",
@@ -177,6 +186,7 @@ EXCLUDES: dict[type, dict[str, str]] = {
                           "The model's half is the vehicle's gross_weight_kg.",
     },
     TimeWindow: {},
+    ObjectiveSpec: {},
 }
 
 
@@ -455,3 +465,96 @@ def model_for_category(category: str) -> dict[str, Any]:
         raise ValueError(f"no delivery model for category {category!r}; "
                          f"mapped: {', '.join(sorted(mapping))}")
     return model_for(mapping[category])
+
+
+# --------------------------------------------------------------------------
+# The run configuration -- `T-95`
+# --------------------------------------------------------------------------
+# A model describes an operation. None of it says how the plan was *chosen*,
+# and `ObjectiveSpec`'s mode and rates, the engine, its budget and its seed are
+# not in `Problem`. So they are a sibling section, resolved separately and
+# sealed beside the model: merging them is how a model grows until it can
+# express a replan policy.
+
+# Named engines, the same registry rule as everything else here. The budget is
+# spelled `budget` rather than `iterations` because the two adapters do not
+# agree -- PyVRP takes `iterations`, OR-Tools takes `solutions` -- and a model
+# should name a quantity rather than one engine's parameter.
+ENGINES: dict[str, str] = {"pyvrp": "iterations", "ortools": "solutions"}
+
+
+@dataclass(frozen=True)
+class RunConfig:
+    """How a plan was chosen, as opposed to what was planned."""
+
+    engine: str
+    budget: int
+    seed: int
+    objective: ObjectiveSpec
+
+
+def run_config(model: dict[str, Any]) -> RunConfig:
+    """Resolve the `run` section.
+
+    Raises:
+        ValueError: if the section is absent, or names an engine or an
+            objective mode that does not ship. Absence is an error rather than
+            a default: a default objective would be invisible and load-bearing,
+            and two people reading one model file would disagree about which
+            plan it describes with neither of them wrong.
+    """
+    if "run" not in model:
+        raise ValueError(
+            f"model {model.get('name')!r} declares no `run` section; a model "
+            "that pins a fleet but not an objective has not pinned a plan")
+    run = model["run"]
+    if run["engine"] not in ENGINES:
+        raise ValueError(f"unknown engine {run['engine']!r}; shipped: "
+                         f"{', '.join(sorted(ENGINES))}")
+    spec = run["objective"]
+    if spec["mode"] not in Mode.__members__:
+        raise ValueError(f"unknown objective mode {spec['mode']!r}; shipped: "
+                         f"{', '.join(Mode.__members__)}")
+    return RunConfig(
+        engine=run["engine"], budget=run["budget"], seed=run["seed"],
+        objective=ObjectiveSpec(
+            mode=Mode[spec["mode"]],
+            vehicle_fixed_cost=spec["vehicle_fixed_cost"],
+            cost_per_metre=spec["cost_per_metre"],
+            cost_per_second=spec["cost_per_second"]))
+
+
+def digest(model: dict[str, Any]) -> str:
+    """A sha256 over the model's canonical JSON.
+
+    Over the *resolved* model rather than the file: two files meaning the same
+    thing must seal alike, and one file whose meaning changed must not. Uses
+    `snapshot.canonical`, so this digest and the snapshot's agree about what
+    the bytes are.
+    """
+    from vrp.snapshot import canonical
+
+    return hashlib.sha256(canonical(model).encode("utf-8")).hexdigest()
+
+
+def as_config(model: dict[str, Any]) -> dict[str, Any]:
+    """What `snapshot.capture` should seal beside the problem. NFR-08, CON-4.
+
+    The model's name *and* its digest, because a plan is replayable only if the
+    thing that produced it is identified and pinned: a name alone goes stale
+    the moment somebody edits the file, and a digest alone cannot be looked up.
+    """
+    run = run_config(model)
+    return {
+        "model": model["name"],
+        "model_digest": digest(model),
+        "engine": run.engine,
+        "budget": run.budget,
+        "seed": run.seed,
+        "objective": {
+            "mode": run.objective.mode.name,
+            "vehicle_fixed_cost": run.objective.vehicle_fixed_cost,
+            "cost_per_metre": run.objective.cost_per_metre,
+            "cost_per_second": run.objective.cost_per_second,
+        },
+    }

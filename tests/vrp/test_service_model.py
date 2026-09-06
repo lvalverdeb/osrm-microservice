@@ -31,8 +31,12 @@ import pytest
 
 from vrp import servicemodel
 from vrp.model import Location, Order, StopSpec, TimeWindow, Vehicle
+from vrp.objective import ObjectiveSpec
 
-GOVERNED = (Vehicle, Order, StopSpec, Location, TimeWindow)
+# `ObjectiveSpec` joins the domain types because a model file sets it too --
+# through `run`, resolved separately (`T-95`). Governed here so a field added
+# to the objective fails the suite the same way one added to `Vehicle` does.
+GOVERNED = (Vehicle, Order, StopSpec, Location, TimeWindow, ObjectiveSpec)
 
 
 def field_names(cls: type) -> set[str]:

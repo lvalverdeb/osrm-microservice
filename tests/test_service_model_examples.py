@@ -106,6 +106,17 @@ def test_every_shipped_model_builds_something():
         assert problem.orders and problem.vehicles, path.stem
 
 
+def test_every_shipped_model_pins_how_it_is_solved():
+    """`T-95`. A model that builds a problem but names no objective is half a
+    plan: two runs of it could order two plans differently and both be right."""
+    for path in sorted(servicemodel.MODELS.glob("*.json")):
+        if path.name == "categories.json":
+            continue
+        run = servicemodel.run_config(servicemodel.model_for(path.stem))
+        assert run.engine in servicemodel.ENGINES, path.stem
+        assert run.budget > 0, path.stem
+
+
 def test_the_category_map_resolves_in_both_directions():
     """`gateway/src/config.rs`'s contract, applied to models.
 
