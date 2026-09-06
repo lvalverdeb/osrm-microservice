@@ -30,7 +30,7 @@ import dataset
 import envelope_round
 import heterogeneous_fleet
 
-from vrp import servicemodel
+from vrp import modelcheck, servicemodel
 from vrp.model import TravelMatrix
 
 
@@ -115,6 +115,32 @@ def test_every_shipped_model_pins_how_it_is_solved():
         run = servicemodel.run_config(servicemodel.model_for(path.stem))
         assert run.engine in servicemodel.ENGINES, path.stem
         assert run.budget > 0, path.stem
+
+
+def test_every_shipped_model_passes_the_gate():
+    """`T-96`. A model that ships must plan a legal round over real demand.
+
+    The matrix is the same synthetic one the rest of this file uses, so the
+    check is deterministic and needs no gateway. That makes this a check of the
+    gate and the models rather than of Costa Rican geography -- a real gate run
+    before a deployment would use a road matrix, and `dataset.road_matrix` is
+    what gives it one.
+    """
+    deliveries, depot = dataset.load(dataset.DEFAULT_PATH).nearest(8)
+    records = as_records(deliveries)
+    depots = [{"id": "DEPOT", "lat": depot["latitude"],
+               "lon": depot["longitude"]}]
+    matrix = flat_matrix(len(records) + 1)
+
+    for path in sorted(servicemodel.MODELS.glob("*.json")):
+        if path.name == "categories.json":
+            continue
+        result = modelcheck.check(servicemodel.model_for(path.stem), depots,
+                                  records, matrix)
+        assert modelcheck.passes(result), (
+            f"{path.stem} does not pass its own gate: {result.status} "
+            f"{result.refused}")
+        assert result.binding is not None, path.stem
 
 
 def test_the_category_map_resolves_in_both_directions():
