@@ -730,7 +730,15 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
     )
     return Solution(problem_id=problem.id, routes=tuple(routes),
                     unassigned=unassigned,
-                    objective_breakdown={},
+                    # INV-9: the solver's *own* distance, taken from PyVRP's
+                    # accounting over its compiled model rather than recomputed
+                    # from `problem.matrix`. Recomputing it here would hand the
+                    # verifier a copy of its own arithmetic and the invariant
+                    # could never fail; reporting nothing -- which this did --
+                    # made `verifier._check_objective` return at its first line
+                    # on every plan this adapter produced, so the SDD's "single
+                    # most valuable test in the system" checked nothing.
+                    objective_breakdown={"distance": best.distance()},
                     status="FEASIBLE" if feasible else "INFEASIBLE",
                     # NFR-04: the plan carries what its matrix was. A plan
                     # costed against arcs nobody measured is not wrong, but a

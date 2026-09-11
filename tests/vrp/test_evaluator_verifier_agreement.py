@@ -13,6 +13,7 @@ generator in T-05.
 from __future__ import annotations
 
 import random
+from itertools import pairwise
 
 from vrp.evaluator import ObjectiveWeights, build_timeline, evaluate, route_metrics
 from vrp.model import (
@@ -87,3 +88,69 @@ def test_the_two_recompute_the_same_distance():
             objective_breakdown={"distance": result.breakdown["distance"]},
         )
         assert verify(problem, solution).ok
+
+
+# --------------------------------------------------------------------------
+# INV-9 on a plan the system actually produces
+# --------------------------------------------------------------------------
+# SDD 4.3 calls INV-9 "the single most valuable test in the system": the
+# `objective_breakdown` recomputed from `routes` must equal the solver-reported
+# objective. `verifier._check_objective` honours that faithfully -- and returns
+# at once when the breakdown is empty, which is what every shipped adapter
+# reported. So on every plan PyVRP or OR-Tools produced, the most valuable test
+# in the system checked nothing.
+#
+# The number reported has to be the *solver's own*, not one recomputed from the
+# matrix, or the check compares the verifier's arithmetic with a copy of itself
+# and cannot fail. PyVRP's `Solution.distance()` is its own accounting over its
+# own compiled model, which is what makes the comparison worth making.
+
+
+def solved_round():
+    """A small instance solved through the real adapter."""
+    from vrp.solve.pyvrp_adapter import solve as pyvrp_solve
+
+    rng = random.Random(11)
+    problem = random_problem(rng, stops=4)
+    return problem, pyvrp_solve(problem, iterations=200, seed=0)
+
+
+def test_a_solved_plan_reports_an_objective_the_verifier_can_check():
+    """Without this, `_check_objective` returns at its first line, every time."""
+    _problem, solution = solved_round()
+    assert solution.objective_breakdown, (
+        "the adapter reported no objective, so INV-9 checks nothing")
+    assert "distance" in solution.objective_breakdown
+
+
+def test_inv9_catches_a_solver_that_misreports_its_distance():
+    """The drift INV-9 exists to catch, on a plan the solver actually produced."""
+    from dataclasses import replace
+
+    problem, solution = solved_round()
+    assert verify(problem, solution).ok
+
+    drifted = replace(solution, objective_breakdown=dict(
+        solution.objective_breakdown,
+        distance=solution.objective_breakdown["distance"] + 1))
+    report = verify(problem, drifted)
+    assert not report.ok
+    assert any("INV-9" in str(v) for v in report.violations), report.violations
+
+
+def test_the_reported_distance_is_the_solver_s_own_arithmetic():
+    """Not a recomputation from the matrix, which would be a tautology.
+
+    PyVRP sums distance over its compiled model; the verifier sums it over
+    `problem.matrix` from the mapped steps. Equality is evidence that the
+    compile-and-map round trip preserved the arcs, which is exactly the class
+    of bug INV-9 is for.
+    """
+    problem, solution = solved_round()
+    walked = 0
+    for route in solution.routes:
+        for before, after in pairwise(route.steps):
+            walked += problem.matrix.distance(
+                problem.location(before.location_id).matrix_index,
+                problem.location(after.location_id).matrix_index)
+    assert solution.objective_breakdown["distance"] == walked

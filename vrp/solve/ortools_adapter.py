@@ -269,7 +269,12 @@ def _map(problem: Problem, manager, routing, assignment, order_at_node,
         unassigned=tuple({"order_id": order.id, "reason_code": "NOT_PLACED",
                           "explanation": "not placed by OR-Tools"}
                          for order in problem.orders if order.id not in served),
-        objective_breakdown={},
+        # INV-9, the same reasoning as the PyVRP adapter. Every arc is costed
+        # by `matrix.distance` and nothing else is added to the objective -- no
+        # disjunction penalties -- so OR-Tools' own objective *is* its distance,
+        # and reporting it lets the verifier recompute and disagree. Reporting
+        # nothing, which this did, made the check return at its first line.
+        objective_breakdown={"distance": assignment.ObjectiveValue()},
         status="FEASIBLE" if len(served) == len(problem.orders) else "INFEASIBLE",
         solver={"solver": "ortools", "seed": seed, "iterations": solutions,
                 "matrix_version": problem.matrix.version})
