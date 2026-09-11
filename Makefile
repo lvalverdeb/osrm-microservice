@@ -94,9 +94,12 @@ compose-up:
 	$(MAKE) compose-doctor
 	@echo "Ensuring cross-platform emulation is available on Docker daemon..."
 	-docker run --privileged --rm tonistiigi/binfmt --install all
-	$(COMPOSE) build osrm-data-builder
+	@# MTX-1: one graph and one engine per routing profile. Three extracts, so
+	@# this is the slow part of a cold start -- osrm-extract runs once per
+	@# profile over the same pbf.
+	$(COMPOSE) build osrm-data-builder osrm-data-builder-bicycle osrm-data-builder-foot
 	$(COMPOSE) up -d redis
-	$(COMPOSE) up -d --build osrm
+	$(COMPOSE) up -d --build osrm osrm-cycling osrm-walking
 	$(COMPOSE) up -d --build api
 	$(MAKE) compose-health
 

@@ -13,25 +13,58 @@
 # renamed. .dockerignore stays at the repository root because that is where
 # Docker reads it from: the root of the build context, not next to the Dockerfile.
 services:
+  # MTX-1: one built graph per routing profile. OSRM's profile names are car,
+  # bicycle and foot; the gateway's vocabulary is driving, cycling and walking,
+  # and `OSRM_URL_*` on the api service is where the two meet. Each builder runs
+  # osrm-extract/partition/customize once and is tagged by profile, because
+  # `Dockerfile.osrm` copies /data from whichever tag it is told to.
   osrm-data-builder:
-    image: osrm-data-builder:latest
+    image: osrm-data-builder:car
     platform: linux/arm64
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.builder
       args:
-        - PROFILE=${PROFILE:-car}
+        - PROFILE=car
         - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
     profiles:
       - build
 
+  osrm-data-builder-bicycle:
+    image: osrm-data-builder:bicycle
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.builder
+      args:
+        - PROFILE=bicycle
+        - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
+    profiles:
+      - build
+
+  osrm-data-builder-foot:
+    image: osrm-data-builder:foot
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.builder
+      args:
+        - PROFILE=foot
+        - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
+    profiles:
+      - build
+
+  # Each engine serves one graph and listens on 5000 inside its own container;
+  # only the published host port differs. The gateway addresses them by service
+  # name, so the published ports are for humans and probes.
   osrm:
     platform: linux/arm64
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.osrm
       args:
-        - PROFILE=${PROFILE:-car}
+        - PROFILE=car
+        - DATA_IMAGE=osrm-data-builder:car
         - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
     container_name: osrm-backend
     ports:
@@ -41,6 +74,48 @@ services:
     healthcheck:
       # osrm-backend has no curl/wget; bash's /dev/tcp is the only connectivity
       # probe available without adding packages to the upstream image.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5000' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  osrm-cycling:
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.osrm
+      args:
+        - PROFILE=bicycle
+        - DATA_IMAGE=osrm-data-builder:bicycle
+        - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
+    container_name: osrm-backend-cycling
+    ports:
+      - "${OSRM_CYCLING_PORT:-5001}:5000"
+    command: sh -c "osrm-routed --algorithm mld --max-trip-size 200 /data/$${PROFILE}/$${OSM_BASE}.osrm"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5000' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  osrm-walking:
+    platform: linux/arm64
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.osrm
+      args:
+        - PROFILE=foot
+        - DATA_IMAGE=osrm-data-builder:foot
+        - OSM_FILE=${OSM_FILE:-costa-rica-latest.osm.pbf}
+    container_name: osrm-backend-walking
+    ports:
+      - "${OSRM_WALKING_PORT:-5002}:5000"
+    command: sh -c "osrm-routed --algorithm mld --max-trip-size 200 /data/$${PROFILE}/$${OSM_BASE}.osrm"
+    restart: always
+    healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5000' || exit 1"]
       interval: 10s
       timeout: 3s
@@ -74,6 +149,12 @@ services:
     # outranks `env_file:`, so these win over the shared file's values.
     environment:
       - OSRM_BASE_URL=http://osrm-backend:5000
+      # MTX-1: one engine per profile. Without these the gateway refuses
+      # cycling and walking by name rather than answering them from the car
+      # graph, which is what it did before they existed.
+      - OSRM_URL_DRIVING=http://osrm-backend:5000
+      - OSRM_URL_CYCLING=http://osrm-backend-cycling:5000
+      - OSRM_URL_WALKING=http://osrm-backend-walking:5000
       - REDIS_URL=redis://osrm-cache:6379/0
       # Vertical scaling. Defaults to 1, matching the jail's
       # osrm_api_gateway_workers -- raising it is opt-in per environment. These
@@ -88,6 +169,10 @@ services:
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
     depends_on:
       osrm:
+        condition: service_healthy
+      osrm-cycling:
+        condition: service_healthy
+      osrm-walking:
         condition: service_healthy
       redis:
         condition: service_healthy

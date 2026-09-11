@@ -1,7 +1,14 @@
 # Use the builder image as a data source
-# Note: osrm-data-builder must be available in the local registry
+# Note: the named data image must be available in the local registry.
+#
+# MTX-1 needs one graph per routing profile, and one `osrm-routed` serves one
+# graph, so this image is built once per profile. The data image is tagged by
+# profile -- `osrm-data-builder:car`, `:bicycle`, `:foot` -- and named here
+# rather than hardcoded, or all three services would serve the car graph and
+# the profile in a request would go on meaning nothing.
 ARG BUILDPLATFORM
-FROM --platform=$BUILDPLATFORM osrm-data-builder AS data
+ARG DATA_IMAGE=osrm-data-builder:car
+FROM --platform=$BUILDPLATFORM ${DATA_IMAGE} AS data
 
 FROM --platform=linux/arm64 ghcr.io/project-osrm/osrm-backend:latest
 
