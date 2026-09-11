@@ -25,7 +25,7 @@ from conftest_gateway import requires_binary
 from conftest_synthetic import requires_engine
 
 from vrp.model import UNREACHABLE
-from vrp.osrm import SnapWarning, build_matrix
+from vrp.osrm import SnapWarning, build_matrix, matrix_version
 
 pytestmark = [requires_engine, requires_binary]
 
@@ -124,12 +124,22 @@ def test_the_matrix_version_pins_the_profile(synthetic_gateway):
 
     Two profiles over the same locations must not share a version, or INV-4
     would accept a plan checked against the wrong travel data.
+
+    The second version is computed rather than fetched, and the change is the
+    point. This used to call the gateway twice, once per profile, and pass --
+    because the gateway answered both from the one car graph it had. It was
+    asserting that two version strings differ while the travel data behind them
+    was identical, which is the very thing MTX-1 forbids, in miniature. A
+    gateway that serves no cycling graph now refuses the request, so the live
+    half is driving and the profile-pinning half is checked against the pure
+    function that does the pinning.
     """
     car, _ = build_matrix(synthetic_gateway, [N1, N2], profile="driving")
-    bike, _ = build_matrix(synthetic_gateway, [N1, N2], profile="cycling")
+    bike_version = matrix_version([N1, N2], profile="cycling")
 
-    assert car.version != bike.version
+    assert car.version != bike_version
     assert "driving" in car.version
+    assert "cycling" in bike_version
 
 
 def test_the_version_is_content_addressed(synthetic_gateway):
