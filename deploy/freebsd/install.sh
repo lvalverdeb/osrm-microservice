@@ -77,6 +77,63 @@ PROFILE_LUA="/usr/local/share/osrm/profiles/${PROFILE}.lua"
 OSRM_DATA="${DATA_DIR}/${PROFILE}/${OSM_BASE}.osrm"
 OSRM_BUILT="${OSRM_DATA}.cell_metrics"
 
+# PROFILES is positional and hand-edited, so it is checked before any phase does
+# work. Every rejection below is something that would otherwise half-succeed: a
+# duplicate port leaves the second engine dead while the first looks fine, a
+# duplicate suffix installs two profiles over one rc.d name, and a profile the
+# gateway has no word for builds a graph nothing will ever route on.
+validate_profiles() {
+    _ports=""
+    _suffixes=""
+    for _entry in $PROFILES; do
+        case "$_entry" in
+            *:*:*:*) die "PROFILES entry '${_entry}' has too many fields; \
+expected <osrm-profile>:<rc.d-suffix>:<port>" ;;
+            *:*:*) : ;;
+            *) die "PROFILES entry '${_entry}' is not \
+<osrm-profile>:<rc.d-suffix>:<port>" ;;
+        esac
+
+        _p="${_entry%%:*}"
+        _rest="${_entry#*:}"
+        _sfx="${_rest%%:*}"
+        _prt="${_rest#*:}"
+
+        case "$_p" in
+            "") die "PROFILES entry '${_entry}' names no OSRM profile" ;;
+            *[!a-z]*) die "PROFILES profile '${_p}' is not a lowercase OSRM \
+profile name such as car, bicycle or foot" ;;
+        esac
+        [ -n "$(gateway_profile "$_p")" ] || die "PROFILES profile '${_p}' has \
+no gateway name; add it to gateway_profile() or the graph is built and never routed on"
+
+        case "$_prt" in
+            "" | *[!0-9]*) die "PROFILES port '${_prt}' for ${_p} is not a number" ;;
+        esac
+        [ "$_prt" -ge 1024 ] && [ "$_prt" -le 65535 ] || \
+            die "PROFILES port ${_prt} for ${_p} is outside 1024-65535"
+
+        case " ${_ports} " in
+            *" ${_prt} "*) die "PROFILES gives port ${_prt} to more than one \
+profile; the second engine would fail to bind while the first looked healthy" ;;
+        esac
+        # The car suffix is empty on purpose, so an empty string has to be a
+        # value the seen-list can hold rather than one that matches any gap in
+        # it: comparing "" against a space-padded list matches on the first
+        # entry and rejects the shipped default.
+        _key="${_sfx:-(none)}"
+        case " ${_suffixes} " in
+            *" ${_key} "*) die "PROFILES gives rc.d suffix '${_sfx}' to more \
+than one profile; they would install over one another as \
+osrm_routed${_sfx}" ;;
+        esac
+        _ports="${_ports} ${_prt}"
+        _suffixes="${_suffixes} ${_key}"
+    done
+}
+
+validate_profiles
+
 # One OSRM_URL_<PROFILE> per engine, for the gateway's .env. A profile with no
 # line here is refused by name rather than answered from the driving graph.
 for _entry in $PROFILES; do
