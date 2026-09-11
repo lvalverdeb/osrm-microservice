@@ -85,30 +85,63 @@ def matrix_version(locations: list[tuple[float, float]], profile: str,
     return f"osrm:{profile}:{digest}"
 
 
+# The gateway refuses a batch larger than `NEAREST_MAX_COORDINATES`, committed
+# at 1,000 in `deploy/env/app.env`. Matched here so a large round is split into
+# batches the gateway will accept rather than refused with a 422 it could have
+# avoided; a gateway configured lower will still say so, in its own words.
+SNAP_BATCH = 1_000
+
+
 def _snap_all(gateway: str, locations: list[tuple[float, float]], profile: str,
               threshold_m: float, timeout: float) -> list[Snap]:
-    """One /nearest per location. MTX-4.
+    """Snap every location through /nearest/batch. MTX-4.
 
-    Sequential on purpose: this runs once per matrix build, not per request, and
-    the gateway already parallelises where it matters. Doing it concurrently
-    here would trade a clear failure for a fast one.
+    One request per thousand locations rather than one per location. This runs
+    once per matrix build, and while the examples computed straight-line
+    matrices it cost nothing -- but a 120-stop round opened 121 connections
+    before a single matrix cell was fetched, and once every example needed a
+    road matrix, running them in sequence saturated the gateway. Measured
+    against the deployed one, forty coordinates took 0.56 s one at a time and
+    0.01 s batched.
+
+    Raises:
+        RuntimeError: if the gateway refuses the batch, including the 404 a
+            gateway predating `/nearest/batch` returns -- named rather than
+            worked around, because a silent fall back to one call per location
+            would restore the behaviour this exists to remove.
+        ValueError: if the answer carries a different number of results than
+            the request carried coordinates. Zip would otherwise stop at the
+            shorter sequence and hand one location's plan another's road.
     """
     snaps: list[Snap] = []
-    for latitude, longitude in locations:
-        response = httpx.post(f"{gateway}/nearest",
-                              json={"coordinate": {"latitude": latitude,
-                                                   "longitude": longitude},
-                                    "number": 1, "profile": profile},
-                              timeout=timeout)
+    for start in range(0, len(locations), SNAP_BATCH):
+        window = locations[start:start + SNAP_BATCH]
+        response = httpx.post(
+            f"{gateway}/nearest/batch",
+            json={"coordinates": [{"latitude": lat, "longitude": lon}
+                                  for lat, lon in window],
+                  "number": 1, "profile": profile},
+            timeout=timeout)
+        if response.status_code == 404:
+            raise RuntimeError(
+                f"{gateway} has no /nearest/batch; it predates the endpoint "
+                "this adapter snaps through. Redeploy the gateway.")
         if response.status_code != 200:
-            raise RuntimeError(f"/nearest returned {response.status_code}: "
-                               f"{response.text[:200]}")
-        waypoint = response.json()["waypoints"][0]
-        snapped_lon, snapped_lat = waypoint["location"]
-        snaps.append(Snap(location=(latitude, longitude),
-                          snapped=(snapped_lat, snapped_lon),
-                          distance_m=float(waypoint.get("distance", 0.0)),
-                          name=waypoint.get("name", "")))
+            raise RuntimeError(f"/nearest/batch returned "
+                               f"{response.status_code}: {response.text[:200]}")
+        results = response.json()["results"]
+        if len(results) != len(window):
+            raise ValueError(
+                f"/nearest/batch answered {len(results)} of {len(window)} "
+                "coordinates; a partial answer cannot be matched to its "
+                "locations")
+        for (latitude, longitude), result in zip(window, results, strict=True):
+            waypoint = result["waypoints"][0]
+            snapped_lon, snapped_lat = waypoint["location"]
+            snaps.append(Snap(location=(latitude, longitude),
+                              snapped=(snapped_lat, snapped_lon),
+                              distance_m=float(waypoint.get("distance", 0.0)),
+                              name=waypoint.get("name", "")))
 
     far = [snap for snap in snaps if snap.distance_m > threshold_m]
     if far:

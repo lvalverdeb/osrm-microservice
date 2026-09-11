@@ -158,3 +158,81 @@ def test_the_matrix_is_asymmetric(synthetic_gateway):
     assert matrix.is_reachable(0, 1), "eastbound along the one-way"
     assert not matrix.is_reachable(1, 0), "westbound against it"
     assert matrix.durations[0][1] != matrix.durations[1][0]
+
+
+# --------------------------------------------------------------------------
+# Snapping is batched — MTX-4, and the gateway's own /nearest/batch
+# --------------------------------------------------------------------------
+# `_snap_all` sent one `/nearest` per location, so a 120-stop round opened 121
+# connections before a single matrix cell was fetched. Measured against the
+# deployed gateway, forty coordinates took forty requests and 0.56 s one at a
+# time against one request and 0.01 s batched. That cost nothing while the
+# examples computed straight-line matrices and never called out; once every
+# example required a road matrix, running them in sequence saturated the
+# gateway and eighteen failed on connection timeouts.
+
+
+def count_posts(monkeypatch):
+    """Count posts to the snapping endpoints, still calling the real gateway."""
+    import httpx
+
+    from vrp import osrm
+
+    calls: list[str] = []
+    real = httpx.post
+
+    def counted(url, *args, **kwargs):
+        if "/nearest" in url:
+            calls.append(url)
+        return real(url, *args, **kwargs)
+
+    monkeypatch.setattr(osrm.httpx, "post", counted)
+    return calls
+
+
+def test_snapping_asks_once_rather_than_once_per_location(synthetic_gateway,
+                                                          monkeypatch):
+    calls = count_posts(monkeypatch)
+    points = [(0.0, 0.0), (0.0, 0.001), (0.0, 0.002), (0.001, 0.0)]
+    build_matrix(synthetic_gateway, points)
+    assert len(calls) == 1, f"{len(points)} locations took {len(calls)} requests"
+    assert calls[0].endswith("/nearest/batch")
+
+
+def test_every_location_still_gets_its_own_snap(synthetic_gateway):
+    """Batching must not lose the one-snap-per-location correspondence."""
+    points = [(0.0, 0.0), (0.0, 0.001), (0.0, 0.002)]
+    _matrix, snaps = build_matrix(synthetic_gateway, points)
+    assert len(snaps) == len(points)
+    assert [snap.location for snap in snaps] == points
+
+
+def test_a_far_snap_still_warns_when_batched(synthetic_gateway):
+    """MTX-4 survives the change: the warning is about the answer, not the call."""
+    with pytest.warns(SnapWarning):
+        build_matrix(synthetic_gateway, [(0.0, 0.0), (0.02, 0.02)],
+                     snap_threshold_m=1.0)
+
+
+def test_a_short_answer_is_refused_rather_than_misaligned(monkeypatch):
+    """Fewer results than coordinates must fail, not shift every snap by one.
+
+    The failure batching invites: zip stops at the shorter sequence, so a
+    gateway returning three snaps for four locations would silently hand the
+    fourth location's plan the third one's road.
+    """
+    from vrp import osrm
+
+    class Truncated:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"results": [{"waypoints": [{"location": [0.0, 0.0],
+                                                "distance": 1.0,
+                                                "name": "only one"}]}]}
+
+    monkeypatch.setattr(osrm.httpx, "post", lambda *a, **k: Truncated())
+    with pytest.raises(ValueError):
+        osrm._snap_all("http://gateway", [(0.0, 0.0), (0.1, 0.1)], "driving",
+                       50.0, 5.0)
