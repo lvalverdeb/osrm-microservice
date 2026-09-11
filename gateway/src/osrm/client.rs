@@ -36,6 +36,14 @@ pub enum OsrmError {
     /// turn into a 500, and a proxy in front answers 414. Caught here instead,
     /// so the caller is told which limit it crossed.
     RequestTooLong { bytes: usize, limit: usize },
+    /// MTX-1: the deployment has no engine for this routing profile.
+    ///
+    /// One `osrm-routed` serves one built graph, so a gateway offering three
+    /// profiles needs three engines. Before this existed the profile in the
+    /// upstream path was decorative -- OSRM ignores it and answers from
+    /// whichever graph it was started with -- so `profile=walking` returned
+    /// car routing, byte for byte, with nothing saying so.
+    ProfileUnavailable { profile: String, served: Vec<String> },
 }
 
 /// How many attempts, and how long to wait between them.
@@ -67,10 +75,78 @@ pub fn is_retryable_status(status: u16) -> bool {
     status >= 500
 }
 
+/// Which engine serves which routing profile. MTX-1.
+///
+/// `driving` is required and falls back to `OSRM_BASE_URL`, so a single-engine
+/// deployment keeps working. The others are `None` until a deployment stands
+/// up a graph for them, and a request for an unserved profile is refused by
+/// name rather than answered from the driving graph.
+#[derive(Debug, Clone)]
+pub struct Upstreams {
+    driving: String,
+    cycling: Option<String>,
+    walking: Option<String>,
+}
+
+impl Upstreams {
+    pub fn new(base: &str, driving: &str, cycling: &str, walking: &str) -> Self {
+        let some = |value: &str| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        };
+        Self {
+            driving: some(driving).unwrap_or_else(|| base.trim().to_string()),
+            cycling: some(cycling),
+            walking: some(walking),
+        }
+    }
+
+    /// The engine for `profile`, or a refusal naming what this deployment has.
+    pub fn resolve(&self, profile: &str) -> Result<&str, OsrmError> {
+        let found = match profile {
+            "cycling" => self.cycling.as_deref(),
+            "walking" => self.walking.as_deref(),
+            // Anything else, including the tile and health paths, is driving.
+            // The `Profile` enum is closed and validated at the edge, so an
+            // unrecognised name cannot arrive from a request.
+            _ => Some(self.driving.as_str()),
+        };
+        found.ok_or_else(|| OsrmError::ProfileUnavailable {
+            profile: profile.to_string(),
+            served: self.served(),
+        })
+    }
+
+    /// The profiles this deployment actually has a graph for.
+    pub fn served(&self) -> Vec<String> {
+        let mut names = vec!["driving".to_string()];
+        if self.cycling.is_some() {
+            names.push("cycling".to_string());
+        }
+        if self.walking.is_some() {
+            names.push("walking".to_string());
+        }
+        names
+    }
+}
+
+/// The profile an OSRM path names, if it names one.
+///
+/// Every upstream path this gateway builds is `/{service}/v1/{profile}/...`.
+/// Read from the URL rather than passed alongside it: the request is routed to
+/// the engine whose profile the URL actually carries, so the two cannot
+/// disagree. Passing it separately would let a handler build one profile's
+/// path and send it to another's engine.
+fn profile_in(endpoint: &str) -> Option<&str> {
+    let mut parts = endpoint.trim_start_matches('/').split('/');
+    let _service = parts.next()?;
+    (parts.next()? == "v1").then(|| parts.next()).flatten()
+}
+
 pub struct OsrmClient {
     http: reqwest::Client,
     cache: Cache<String, Arc<Vec<u8>>>,
-    base_url: String,
+    upstreams: Upstreams,
     retry: RetryPolicy,
     /// Ceiling on a constructed upstream URL. See `OsrmError::RequestTooLong`.
     max_url_bytes: usize,
@@ -82,13 +158,13 @@ pub struct OsrmClient {
 
 impl OsrmClient {
     #[allow(clippy::too_many_arguments, reason = "one call site, all settings-derived")]
-    pub fn new(http: reqwest::Client, cache: Cache<String, Arc<Vec<u8>>>, base_url: String,
+    pub fn new(http: reqwest::Client, cache: Cache<String, Arc<Vec<u8>>>, upstreams: Upstreams,
                retry: RetryPolicy, health_check_coords: &str, probe_timeout: Duration,
                metrics: Arc<Metrics>, l2: Arc<RedisCache>, max_url_bytes: usize) -> Self {
         Self {
             http,
             cache,
-            base_url,
+            upstreams,
             retry,
             max_url_bytes,
             probe_path: format!("/route/v1/driving/{health_check_coords}"),
@@ -168,7 +244,8 @@ impl OsrmClient {
     pub async fn get_tile(&self, profile: &str, z: i64, x: i64, y: i64)
         -> Result<Vec<u8>, OsrmError> {
         // Note the reordering: the gateway takes z/x/y and OSRM wants (x,y,z).
-        let url = format!("{}/tile/v1/{profile}/tile({x},{y},{z}).mvt", self.base_url);
+        let base = self.upstreams.resolve(profile)?;
+        let url = format!("{base}/tile/v1/{profile}/tile({x},{y},{z}).mvt");
         let response = self.send(self.http.get(&url)).await?;
         let status = response.status().as_u16();
         let bytes = response.bytes().await
@@ -188,7 +265,9 @@ impl OsrmClient {
     /// answer within their own short timeout rather than inheriting the
     /// request-path budget.
     pub async fn ping(&self) -> bool {
-        let url = format!("{}{}", self.base_url, self.probe_path);
+        // The health probe is a driving route; readiness is about the engine
+        // this gateway always has, not about optional profiles.
+        let url = format!("{}{}", self.upstreams.driving, self.probe_path);
         match self.http.get(&url).timeout(self.probe_timeout).send().await {
             Ok(response) => !response.status().is_server_error() && !response.status().is_client_error(),
             Err(_) => false,
@@ -197,7 +276,9 @@ impl OsrmClient {
 
     /// Attempt the upstream call, retrying 5xx and transport failures.
     async fn fetch_with_retry(&self, endpoint: &str, params: &Params) -> Result<Vec<u8>, OsrmError> {
-        let url = format!("{}{}?{}", self.base_url, endpoint, query_string(params));
+        let base = self.upstreams
+            .resolve(profile_in(endpoint).unwrap_or("driving"))?;
+        let url = format!("{base}{endpoint}?{}", query_string(params));
         // Checked before the first attempt, not inside the loop: a URL that is
         // too long is too long every time, and retrying it only multiplies the
         // wait before the same failure.
@@ -247,6 +328,9 @@ impl OsrmClient {
             OsrmError::Unavailable(_) => true,
             // Never: the URL is the same length on every attempt.
             OsrmError::RequestTooLong { .. } => false,
+            // Never: no engine is configured for the profile, and retrying
+            // cannot configure one.
+            OsrmError::ProfileUnavailable { .. } => false,
         }
     }
 
@@ -310,5 +394,69 @@ mod tests {
     fn backoff_respects_the_minimum() {
         let slow = RetryPolicy { attempts: 3, min_seconds: 5, max_seconds: 10 };
         assert_eq!(slow.backoff(1), Duration::from_secs(5));
+    }
+
+    // ----------------------------------------------------------------------
+    // MTX-1: one engine per routing profile
+    // ----------------------------------------------------------------------
+
+    fn three() -> Upstreams {
+        Upstreams::new("http://base:5000", "", "http://bike:5001", "http://foot:5002")
+    }
+
+    #[test]
+    fn driving_falls_back_to_the_base_url() {
+        // A single-engine deployment keeps working without new settings.
+        assert_eq!(three().resolve("driving").unwrap(), "http://base:5000");
+    }
+
+    #[test]
+    fn each_profile_reaches_its_own_engine() {
+        let up = three();
+        assert_eq!(up.resolve("cycling").unwrap(), "http://bike:5001");
+        assert_eq!(up.resolve("walking").unwrap(), "http://foot:5002");
+    }
+
+    #[test]
+    fn an_unserved_profile_is_refused_rather_than_answered_by_driving() {
+        // The defect this exists to remove: `profile=walking` used to return
+        // car routing byte for byte, because OSRM ignores the profile in the
+        // path and answers from whichever graph it was started with.
+        let only_driving = Upstreams::new("http://base:5000", "", "", "");
+        match only_driving.resolve("walking") {
+            Err(OsrmError::ProfileUnavailable { profile, served }) => {
+                assert_eq!(profile, "walking");
+                assert_eq!(served, vec!["driving".to_string()]);
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn served_lists_only_profiles_with_a_graph() {
+        assert_eq!(Upstreams::new("b", "", "", "").served(), vec!["driving"]);
+        assert_eq!(three().served(), vec!["driving", "cycling", "walking"]);
+    }
+
+    #[test]
+    fn the_profile_comes_from_the_path_that_is_actually_sent() {
+        // Read from the URL rather than passed beside it, so a handler cannot
+        // build one profile's path and send it to another's engine.
+        assert_eq!(profile_in("/route/v1/cycling/1,2;3,4"), Some("cycling"));
+        assert_eq!(profile_in("/table/v1/walking/1,2"), Some("walking"));
+        assert_eq!(profile_in("/nearest/v1/driving/1,2"), Some("driving"));
+    }
+
+    #[test]
+    fn a_path_that_names_no_profile_is_treated_as_driving() {
+        assert_eq!(profile_in("/health"), None);
+        assert_eq!(profile_in("/route/v2/cycling/1,2"), None);
+    }
+
+    #[test]
+    fn an_unserved_profile_is_never_retried() {
+        // Retrying cannot configure an engine.
+        assert!(!OsrmClient::retryable(&OsrmError::ProfileUnavailable {
+            profile: "walking".into(), served: vec!["driving".into()] }));
     }
 }

@@ -96,6 +96,17 @@ macro_rules! settings {
 settings! {
     // --- Core ---
     osrm_base_url: String = "OSRM_BASE_URL" / "http://localhost:5000",
+    /// MTX-1: "matrices are per routing profile". One `osrm-routed` serves one
+    /// built graph, so a gateway offering three profiles needs three engines.
+    /// Empty means this deployment does not serve that profile, and a request
+    /// for it is refused by name rather than answered from the driving graph --
+    /// which is what happened before these existed: `/route` with
+    /// `profile=walking` returned car routing, byte for byte, with nothing
+    /// saying so. Driving falls back to `OSRM_BASE_URL` so a single-engine
+    /// deployment keeps working unchanged.
+    osrm_url_driving: String = "OSRM_URL_DRIVING" / "",
+    osrm_url_cycling: String = "OSRM_URL_CYCLING" / "",
+    osrm_url_walking: String = "OSRM_URL_WALKING" / "",
     app_name: String = "APP_NAME" / "OSRM API Gateway",
     debug: bool = "DEBUG" / "false",
 

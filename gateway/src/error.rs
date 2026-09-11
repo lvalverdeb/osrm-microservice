@@ -74,6 +74,16 @@ impl IntoResponse for ApiError {
                     "Value error, Request needs a {bytes}-byte upstream URL, over the \
                      {limit}-byte limit; send fewer coordinates or split the request"))] })),
             ).into_response(),
+            // MTX-1: the name is valid and this deployment has no graph for it.
+            // 422 rather than 500, for the same reason the matrix cell budget
+            // is: the caller asked for something the server cannot be asked
+            // for, and the message says which profiles it can.
+            ApiError::Upstream(OsrmError::ProfileUnavailable { profile, served }) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "detail": [ValidationError::new_public("value_error", format!(
+                    "Value error, This deployment serves no routing graph for \
+                     profile '{profile}'; it serves {}", served.join(", ")))] })),
+            ).into_response(),
             ApiError::Upstream(OsrmError::Unavailable(_)) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "detail": "Internal server error" })),

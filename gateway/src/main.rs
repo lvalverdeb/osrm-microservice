@@ -77,7 +77,11 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     };
     let metrics = Arc::new(Metrics::new());
     let l2 = Arc::new(RedisCache::new(&settings.redis_url, settings.redis_ttl));
-    let client = OsrmClient::new(http, cache, settings.osrm_base_url.clone(), retry,
+    let upstreams = osrm::client::Upstreams::new(&settings.osrm_base_url,
+                                        &settings.osrm_url_driving,
+                                        &settings.osrm_url_cycling,
+                                        &settings.osrm_url_walking);
+    let client = OsrmClient::new(http, cache, upstreams, retry,
                                  &settings.health_check_coords,
                                  Duration::from_secs(settings.health_check_timeout),
                                  Arc::clone(&metrics), Arc::clone(&l2),
