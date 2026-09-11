@@ -528,6 +528,20 @@ def compile_problem(problem: Problem) -> _Compiled:
         if vehicle.cost_per_second:
             costs["unit_duration_cost"] = vehicle.cost_per_second
         if vehicle.overtime_cost_per_second:
+            # Wired, and inert. PyVRP charges this only for duration beyond
+            # `shift_duration`, and only up to `max_overtime`, which defaults
+            # to zero and is never set here -- so no route may run long enough
+            # to owe any. Nor could one: `shift_duration` is `max_duration`,
+            # which `INV-6` makes a hard bound, so a route that exceeded it
+            # would be rejected by the verifier whatever it cost.
+            #
+            # Left wired rather than deleted because the cost is FR-07's and
+            # the field is real; what is missing is a *permitted* overtime
+            # band, which would mean teaching `INV-6` that `max_duration` is
+            # nominal rather than hard. That is a modelling decision, not
+            # wiring, and until it is made this line can only ever be a no-op.
+            # `test_overtime_cannot_occur_so_nothing_charges_it` pins that, so
+            # the field cannot be mistaken for a live one again.
             costs["unit_overtime_cost"] = vehicle.overtime_cost_per_second
 
         # FR-09: PyVRP models multi-trip natively as reload depots, so this is

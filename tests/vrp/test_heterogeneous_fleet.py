@@ -231,3 +231,56 @@ def test_a_fleet_sharing_one_profile_is_fine():
     solution = solve(problem(fleet), iterations=200, seed=0)
 
     assert verify(problem(fleet), solution).ok
+
+
+def test_overtime_cannot_occur_so_nothing_charges_it():
+    """`overtime_cost_per_second` is a real field that can never apply.
+
+    Pinned because it reads like a live cost and is not one, and an audit of
+    this repository reported it as evaluator/solver drift -- the evaluator
+    ignoring a cost the solver charged. It is not drift: *neither* charges it,
+    and they agree because the situation cannot arise.
+
+    PyVRP charges the cost only for duration beyond `shift_duration`, capped by
+    `max_overtime`, which defaults to zero and the adapter never sets. And
+    `shift_duration` is `max_duration`, which `INV-6` treats as a hard bound --
+    so a route long enough to owe overtime is rejected by the verifier whatever
+    it cost.
+
+    Making the field live means giving `max_duration` a permitted band beyond
+    the nominal, which changes what `INV-6` means. That is a modelling decision
+    rather than wiring. Until it is taken, this test is what stops the field
+    being read as working.
+    """
+    from vrp.verify import verify
+
+    rows = ((0, 600, 600), (600, 0, 600), (600, 600, 0))
+    locations = (
+        Location(id="D", lat=9.90, lon=-84.10, matrix_index=0),
+        Location(id="A", lat=9.91, lon=-84.11, matrix_index=1),
+        Location(id="B", lat=9.92, lon=-84.12, matrix_index=2))
+    orders = tuple(
+        Order(id=name, kind="JOB", quantities={"kg": 1},
+              delivery=StopSpec(location_id=name,
+                                time_windows=(TimeWindow(start=0, end=86_400),),
+                                service_fixed=1_200))
+        for name in ("A", "B"))
+    # Nominal duty of half an hour; the round cannot be driven in under 4,200 s.
+    vehicle = Vehicle(id="V", capacities={"kg": 10},
+                      shift=TimeWindow(start=0, end=86_400),
+                      start_location_id="D", end_location_id="D",
+                      max_duration=1_800, overtime_cost_per_second=5)
+    problem = Problem(id="ot", locations=locations, orders=orders,
+                      vehicles=(vehicle,),
+                      matrix=TravelMatrix(version="m", durations=rows,
+                                          distances=rows))
+
+    solution = solve(problem, iterations=300, seed=0)
+    assert solution.status == "INFEASIBLE", (
+        "overtime is not permitted, so the round cannot be served at all; a "
+        "FEASIBLE answer here means overtime became possible and this test, "
+        "the adapter comment beside `unit_overtime_cost`, and the evaluator "
+        "all need revisiting")
+    report = verify(problem, solution)
+    assert not report.ok
+    assert any("INV-6" in str(v) for v in report.violations), report.violations
