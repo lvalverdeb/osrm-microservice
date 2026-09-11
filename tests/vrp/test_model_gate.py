@@ -21,7 +21,11 @@ today reports it for a plan that succeeded.
 
 from __future__ import annotations
 
-from vrp import modelcheck
+import json
+
+import pytest
+
+from vrp import modelcheck, servicemodel
 from vrp.model import TravelMatrix
 
 DEPOTS = [{"id": "D", "lat": 9.9400, "lon": -84.0500}]
@@ -163,3 +167,62 @@ def test_structural_checks_need_no_solve():
     assert any("flet" in c for c in complaints)
     missing_run = {k: v for k, v in BASE.items() if k != "run"}
     assert any("run" in c for c in modelcheck.structural(missing_run))
+
+
+# `T-97` closes what `T-96` left open: the gate runs per *variant*. A validated
+# master shipping six unvalidated variants is the failure composition would
+# otherwise introduce -- the master is the file under review, and the variants
+# are where the values that break a round actually live.
+
+
+@pytest.fixture
+def library(tmp_path, monkeypatch):
+    """A models directory holding a master and its variants."""
+    monkeypatch.setattr(servicemodel, "MODELS", tmp_path)
+
+    def write(name: str, body: dict) -> None:
+        (tmp_path / f"{name}.json").write_text(json.dumps(body))
+
+    write("master", dict(BASE, name="master",
+                         tunable=["fleet.VAN.per_depot",
+                                  "fleet.VAN.capacities"]))
+    return write
+
+
+def test_the_gate_checks_the_resolved_variant_not_its_master(library):
+    """The master passes; the variant that shrinks the van does not."""
+    library("branch", {"name": "branch", "base": "master",
+                       "set": {"fleet.VAN.capacities": {"kg": 1}}})
+    variant = servicemodel.model_for("branch")
+
+    assert modelcheck.structural(variant) == []
+    assert modelcheck.passes(check(servicemodel.model_for("master")))
+    assert not modelcheck.passes(check(variant))
+
+
+def test_a_variants_failure_is_attributed_to_one_overlay_field(library):
+    """Reverting each overlay field in turn -- bounded because depth is one."""
+    library("branch", {"name": "branch", "base": "master",
+                       "set": {"fleet.VAN.per_depot": 2,
+                               "fleet.VAN.capacities": {"kg": 1}}})
+    variant = servicemodel.model_for("branch")
+
+    culprit = modelcheck.attribute(variant, DEPOTS, STOPS,
+                                   matrix(len(STOPS) + 1))
+    assert culprit == "fleet.VAN.capacities"
+
+
+def test_a_variant_that_works_has_no_field_to_blame(library):
+    library("branch", {"name": "branch", "base": "master",
+                       "set": {"fleet.VAN.per_depot": 2}})
+    variant = servicemodel.model_for("branch")
+
+    assert modelcheck.attribute(variant, DEPOTS, STOPS,
+                                matrix(len(STOPS) + 1)) is None
+
+
+def test_the_gate_can_enumerate_what_ships_variants_included(library):
+    """A pre-commit hook needs the list, or it checks only what it knows."""
+    library("branch", {"name": "branch", "base": "master",
+                       "set": {"fleet.VAN.per_depot": 2}})
+    assert servicemodel.shipped() == ["branch", "master"]

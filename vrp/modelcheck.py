@@ -30,11 +30,13 @@ Attainment rather than an assignment rate: `scenarios.MixResult.service_level`
 counts placement, so a model that serves everything two hours late scores
 perfectly. `evaluator.window_attainment` is the measure that does not.
 
-**Not delivered.** Validating *composite* models -- disjoint sections, no
-chains, an overlay inside its tunable surface, attributing a variant's failure
-to one overlay field -- needs composition, which is `T-97`. `structural` here
-checks what a single model can get wrong. See
-`docs/planning/DELIVERY_MODELS_PLAN.md`.
+**Per variant, not per master** (`T-97`). Everything here resolves the model
+first, so a variant carrying only `base` and `set` is checked as what it will
+actually run, and composition's own rules -- disjoint sections, no chains, an
+overlay inside its tunable surface -- are refusals the gate reports like any
+other. `attribute` then names the one overlay field responsible, by reverting
+each in turn. A validated master shipping six unvalidated variants is the
+failure this exists to prevent. See `docs/planning/DELIVERY_MODELS_PLAN.md`.
 """
 
 from __future__ import annotations
@@ -87,6 +89,10 @@ def structural(model: dict[str, Any]) -> list[str]:
     below run in microseconds while everything else in this module runs a
     solver over a scenario set.
     """
+    try:
+        model = servicemodel.resolve_model(model).model
+    except (ValueError, KeyError) as failure:
+        return [str(failure)]
     complaints = list(servicemodel.validate_keys(model))
     try:
         servicemodel.run_config(model)
@@ -172,6 +178,7 @@ def check(model: dict[str, Any], depots: Sequence[dict[str, Any]],
                            status="REFUSED", attainment=Attainment(),
                            vehicles_used=0, unassigned=0,
                            refused="; ".join(complaints))
+    model = servicemodel.resolve_model(model).model
     run = servicemodel.run_config(model)
     try:
         problem = servicemodel.build(model, depots, deliveries, matrix)
@@ -226,6 +233,39 @@ def _engine(name: str):
 def passes(result: ModelResult) -> bool:
     """Whether this model may ship: a legal plan that serves the whole round."""
     return result.accepted and result.unassigned == 0
+
+
+def attribute(variant: dict[str, Any], depots: Sequence[dict[str, Any]],
+              deliveries: Sequence[dict[str, Any]], matrix: TravelMatrix,
+              solve=None) -> str | None:
+    """Which one overlay field is responsible for a variant failing the gate.
+
+    Reverting each `set` field in turn and re-running is a search a reader can
+    follow, and it is bounded only because an overlay is one level deep: with
+    chained variants the field to revert could live in any ancestor, and the
+    answer would be a path through files rather than a field.
+
+    Args:
+        variant: a loaded variant file -- one carrying `base` and `set`.
+        depots: records carrying `id`, `lat`, `lon`.
+        deliveries: the demand.
+        matrix: the pinned travel matrix.
+        solve: the solver, as `check` takes it.
+
+    Returns:
+        The dotted path whose reversion makes the variant pass, or None -- the
+        variant passes as it stands, or no single field accounts for it and the
+        overlay has to be read as a whole.
+    """
+    changes = variant.get("set", {})
+    if not changes or passes(check(variant, depots, deliveries, matrix, solve)):
+        return None
+    for path in changes:
+        without = dict(variant, set={k: v for k, v in changes.items()
+                                     if k != path})
+        if passes(check(without, depots, deliveries, matrix, solve)):
+            return path
+    return None
 
 
 def compare(models: Sequence[dict[str, Any]], depots: Sequence[dict[str, Any]],

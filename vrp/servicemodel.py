@@ -208,7 +208,8 @@ def known_keys() -> set[str]:
 # Keys a model carries that set no domain field directly: its identity, what it
 # applies to, and how it composes. Declared here because `known_keys` derives
 # only the fields, and a file needs these to be a file.
-STRUCTURAL_KEYS = frozenset({"name", "applies_to", "problem_id", "base", "tunable"})
+STRUCTURAL_KEYS = frozenset({"name", "applies_to", "problem_id", "base",
+                             "tunable", "use", "set"})
 
 
 def validate_keys(raw: dict[str, Any]) -> list[str]:
@@ -442,11 +443,42 @@ def model_for(name: str) -> dict[str, Any]:
     """
     path = MODELS / f"{name}.json"
     if not path.exists():
-        shipped = sorted(f.stem for f in MODELS.glob("*.json")
-                         if f.name != "categories.json")
         raise ValueError(f"unknown delivery model {name!r}; "
-                         f"shipped: {', '.join(shipped)}")
+                         f"shipped: {', '.join(shipped())}")
     return json.loads(path.read_text())
+
+
+def shipped() -> list[str]:
+    """Every model name that ships, masters and deployment variants alike.
+
+    The gate runs over this list rather than over the masters, because a
+    validated master shipping six unvalidated variants is exactly the failure
+    composition would otherwise introduce.
+    """
+    return sorted(f.stem for f in MODELS.glob("*.json")
+                  if f.name != "categories.json")
+
+
+def unreachable(mapping: dict[str, str]) -> list[str]:
+    """Shipped models no category reaches, directly or through a base.
+
+    Categories map to masters. A deployment variant is chosen by where it runs
+    rather than by what is being delivered, so it is reachable when its base
+    is: requiring a category of its own would mean inventing one per city.
+
+    Args:
+        mapping: `categories.json`, category to model name.
+
+    Returns:
+        The dead weight, sorted -- models nothing can select, which is the
+        failure this exists to name rather than a count of them.
+    """
+    mapped = set(mapping.values())
+
+    def reached(name: str) -> bool:
+        return name in mapped or model_for(name).get("base", "") in mapped
+
+    return sorted(name for name in shipped() if not reached(name))
 
 
 def model_for_category(category: str) -> dict[str, Any]:
@@ -558,3 +590,186 @@ def as_config(model: dict[str, Any]) -> dict[str, Any]:
             "cost_per_second": run.objective.cost_per_second,
         },
     }
+
+
+# --------------------------------------------------------------------------
+# Composition -- `T-97`
+# --------------------------------------------------------------------------
+# Six cities running one operation is six near-identical model files, which is
+# the repetition this design exists to remove. A master assembles *sections*
+# from named fragments instead.
+#
+# Composition is disjoint: each section is claimed by exactly one source, and
+# two sources claiming the same one is a conflict rather than something
+# resolved by order. That removes the diamond problem outright -- there is no
+# "last wins" to reason about, because overlap is illegal rather than ordered.
+# It is also what lets `provenance` name one origin per section, which is the
+# difference between a composed model being debuggable and merely tidy.
+
+FRAGMENTS = "fragments"
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """A flat model, and where each of its sections came from."""
+
+    model: dict[str, Any]
+    provenance: dict[str, str]
+
+
+def fragment_for(name: str) -> dict[str, Any]:
+    """One shipped fragment, by name.
+
+    Raises:
+        ValueError: if no fragment of that name ships, naming the ones that do.
+    """
+    path = MODELS / FRAGMENTS / f"{name}.json"
+    if not path.exists():
+        shipped = sorted(f.stem for f in (MODELS / FRAGMENTS).glob("*.json"))
+        raise ValueError(f"unknown fragment {name!r}; shipped: "
+                         f"{', '.join(shipped) or 'none'}")
+    return json.loads(path.read_text())
+
+
+def _element(items: list, key: str):
+    """The list entry identified by `key`, by `class`, `id` or `name`.
+
+    Addressed by identity rather than position, and the difference is a defect
+    waiting to happen: `fleet[0].per_depot` keeps applying after somebody
+    reorders the file and starts changing a different vehicle.
+    """
+    for item in items:
+        if isinstance(item, dict) and key in (item.get("class"),
+                                              item.get("id"),
+                                              item.get("name")):
+            return item
+    return None
+
+
+def _reach(model: dict[str, Any], path: str):
+    """Walk a dotted path, returning `(container, last_key)` or None.
+
+    None means the path does not exist, which an overlay may not invent: a typo
+    has to be a failed override rather than a setting nobody reads.
+    """
+    segments = path.split(".")
+    here: Any = model
+    for segment in segments[:-1]:
+        if isinstance(here, list):
+            here = _element(here, segment)
+        elif isinstance(here, dict) and segment in here:
+            here = here[segment]
+        else:
+            return None
+        if here is None:
+            return None
+    last = segments[-1]
+    if isinstance(here, dict) and last in here:
+        return here, last
+    return None
+
+
+def _overlay(base: Resolved, variant: dict[str, Any],
+             name: str) -> Resolved:
+    """Apply a deployment variant's `set` over its master.
+
+    Raises:
+        ValueError: if the master declares nothing tunable, if a path is
+            outside the declared surface, or if it does not already exist.
+    """
+    changes = variant.get("set", {})
+    if not changes:
+        return base
+    tunable = base.model.get("tunable") or []
+    if not tunable:
+        raise ValueError(
+            f"{name!r} sets fields but its base declares nothing `tunable`; a "
+            "master without a tunable surface is a model to copy, not one to "
+            "adjust")
+    model = json.loads(json.dumps(base.model))
+    provenance = dict(base.provenance)
+    # The resolved model *is* the variant, and the gate reports what it ran.
+    model["name"] = name
+    provenance["name"] = f"overlay:{name}"
+    for path, value in changes.items():
+        if path not in tunable:
+            raise ValueError(
+                f"{name!r} sets {path!r}, which its base does not declare "
+                f"tunable; it allows {', '.join(sorted(tunable))}")
+        found = _reach(model, path)
+        if found is None:
+            raise ValueError(
+                f"{name!r} sets {path!r}, which its base does not have; an "
+                "overlay may change a value and may not introduce one")
+        container, key = found
+        container[key] = value
+        provenance[path] = f"overlay:{name}"
+    return Resolved(model=model, provenance=provenance)
+
+
+def resolve(name: str) -> Resolved:
+    """Compose a model from its fragments, refusing any overlap.
+
+    Args:
+        name: a shipped model.
+
+    Returns:
+        The flat model and a per-section provenance, each value naming the one
+        source that supplied it -- `model:<name>` or `fragment:<name>`.
+
+    Raises:
+        ValueError: if a fragment is unknown, if a fragment uses fragments of
+            its own, or if two sources claim the same section. The last names
+            both claimants: knowing that `windows` is contested is only half of
+            what a reader needs.
+    """
+    return resolve_model(model_for(name), name)
+
+
+def resolve_model(model: dict[str, Any], name: str | None = None) -> Resolved:
+    """Resolve an already-loaded model, whose references are still by name.
+
+    The dict form is what the gate needs: it is handed a variant file to check,
+    not a name to look up.
+    """
+    name = name or model.get("name", "<unnamed>")
+
+    if "base" in model:
+        base_name = model["base"]
+        base_model = model_for(base_name)
+        if "base" in base_model:
+            raise ValueError(
+                f"{name!r} is based on {base_name!r}, which is itself based on "
+                f"{base_model['base']!r}; composition allows one level of "
+                "overlay, so that a value comes from a master or a variant and "
+                "the two are the only files to read")
+        return _overlay(resolve(base_name), model, name)
+
+    flat: dict[str, Any] = {}
+    provenance: dict[str, str] = {}
+
+    for fragment_name in model.get("use", ()):
+        fragment = fragment_for(fragment_name)
+        if "use" in fragment:
+            raise ValueError(
+                f"fragment {fragment_name!r} uses fragments of its own; "
+                "composition is one level deep, so that a value comes from "
+                "this file or from one named in it and nowhere further")
+        _claim(flat, provenance, fragment, f"fragment:{fragment_name}")
+
+    own = {key: value for key, value in model.items() if key != "use"}
+    _claim(flat, provenance, own, f"model:{name}")
+    return Resolved(model=flat, provenance=provenance)
+
+
+def _claim(flat: dict[str, Any], provenance: dict[str, str],
+           sections: dict[str, Any], source: str) -> None:
+    """Add one source's sections, or refuse the overlap."""
+    for key, value in sections.items():
+        if key in provenance:
+            raise ValueError(
+                f"section {key!r} is claimed by both {provenance[key]} and "
+                f"{source}; composition is disjoint, so an overlap is a "
+                "conflict rather than a precedence question")
+        flat[key] = value
+        provenance[key] = source

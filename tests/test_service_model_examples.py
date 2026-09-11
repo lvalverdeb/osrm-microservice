@@ -97,28 +97,28 @@ def test_every_shipped_model_builds_something():
     deliveries, depot = dataset.load(dataset.DEFAULT_PATH).nearest(8)
     records = as_records(deliveries)
     depots = [{"id": "DEPOT", "lat": depot["latitude"], "lon": depot["longitude"]}]
-    for path in sorted(servicemodel.MODELS.glob("*.json")):
-        if path.name == "categories.json":
-            continue
-        model = servicemodel.model_for(path.stem)
-        problem = servicemodel.build(model, depots, records,
-                                     flat_matrix(len(records) + 1))
-        assert problem.orders and problem.vehicles, path.stem
+    for name in servicemodel.shipped():
+        problem = servicemodel.build(servicemodel.resolve(name).model, depots,
+                                     records, flat_matrix(len(records) + 1))
+        assert problem.orders and problem.vehicles, name
 
 
 def test_every_shipped_model_pins_how_it_is_solved():
     """`T-95`. A model that builds a problem but names no objective is half a
     plan: two runs of it could order two plans differently and both be right."""
-    for path in sorted(servicemodel.MODELS.glob("*.json")):
-        if path.name == "categories.json":
-            continue
-        run = servicemodel.run_config(servicemodel.model_for(path.stem))
-        assert run.engine in servicemodel.ENGINES, path.stem
-        assert run.budget > 0, path.stem
+    for name in servicemodel.shipped():
+        run = servicemodel.run_config(servicemodel.resolve(name).model)
+        assert run.engine in servicemodel.ENGINES, name
+        assert run.budget > 0, name
 
 
 def test_every_shipped_model_passes_the_gate():
     """`T-96`. A model that ships must plan a legal round over real demand.
+
+    `T-97` made this per *variant*: the loop walks `servicemodel.shipped()`,
+    which is masters and deployment variants alike, and `modelcheck.check`
+    resolves before it gates. A validated master shipping six unvalidated
+    variants is the failure composition would otherwise introduce.
 
     The matrix is the same synthetic one the rest of this file uses, so the
     check is deterministic and needs no gateway. That makes this a check of the
@@ -132,15 +132,13 @@ def test_every_shipped_model_passes_the_gate():
                "lon": depot["longitude"]}]
     matrix = flat_matrix(len(records) + 1)
 
-    for path in sorted(servicemodel.MODELS.glob("*.json")):
-        if path.name == "categories.json":
-            continue
-        result = modelcheck.check(servicemodel.model_for(path.stem), depots,
+    for name in servicemodel.shipped():
+        result = modelcheck.check(servicemodel.model_for(name), depots,
                                   records, matrix)
         assert modelcheck.passes(result), (
-            f"{path.stem} does not pass its own gate: {result.status} "
+            f"{name} does not pass its own gate: {result.status} "
             f"{result.refused}")
-        assert result.binding is not None, path.stem
+        assert result.binding is not None, name
 
 
 def test_the_category_map_resolves_in_both_directions():
@@ -149,16 +147,20 @@ def test_the_category_map_resolves_in_both_directions():
     Every mapped category resolves to a model that ships, and every shipped
     model is reachable from the map. A model nothing maps to is dead weight
     nobody will notice; a category mapping to nothing is a 500 in waiting.
+
+    Reachable *through a base* as well as directly (`T-97`): a category maps to
+    a master, and a deployment variant is selected by where it runs rather than
+    by what is being delivered. Requiring a category of its own would mean
+    inventing one per city.
     """
     mapping = json.loads((servicemodel.MODELS / "categories.json").read_text())
-    shipped = {p.stem for p in servicemodel.MODELS.glob("*.json")
-               if p.name != "categories.json"}
+    shipped = set(servicemodel.shipped())
 
     assert set(mapping.values()) <= shipped, (
         f"categories map to models that do not ship: "
         f"{sorted(set(mapping.values()) - shipped)}")
-    assert shipped <= set(mapping.values()), (
-        f"models nothing maps to: {sorted(shipped - set(mapping.values()))}")
+    assert servicemodel.unreachable(mapping) == [], (
+        f"models nothing maps to: {servicemodel.unreachable(mapping)}")
 
     for category, name in mapping.items():
         assert category in servicemodel.model_for(name)["applies_to"], (
