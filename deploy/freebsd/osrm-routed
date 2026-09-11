@@ -14,30 +14,49 @@
 # The defaults mirror the osrm service in docker-compose.yml so both deployment
 # paths serve the same engine configuration.
 #
-# osrm_routed_enable (bool):    Set to NO by default. Set to YES to enable.
-# osrm_routed_user (str):       User to run as. Default: osrm
-# osrm_routed_base (str):       Base path of the dataset, e.g.
-#                               /var/db/osrm-backend/car/costa-rica-latest.osrm
-#                               Required; has no default.
-# osrm_routed_ip (str):         Bind address. Default: 127.0.0.1 (jail-local)
-# osrm_routed_port (int):       Bind port. Default: 5000
-# osrm_routed_max_trip_size (int): Waypoint cap for /trip. Default: 200
-# osrm_routed_logfile (str):    Log file. Default: /var/log/osrm-routed.log
+# MTX-1 needs one engine per routing profile, and one osrm-routed serves one
+# built graph, so this script runs as several instances. It takes its name from
+# its own filename -- installed as osrm_routed, osrm_routed_cycling and
+# osrm_routed_walking -- and every knob below is read as ${name}_*, so the
+# cycling instance is configured with osrm_routed_cycling_port and so on.
+#
+# One file rather than three copies: the three differ only in a port and a data
+# path, and three near-identical rc.d scripts drift the moment one is edited.
+# The eval is what that costs; rc.subr offers no other way to read a variable
+# whose name is not known until the script runs.
+#
+# ${name}_enable (bool):    Set to NO by default. Set to YES to enable.
+# ${name}_user (str):       User to run as. Default: osrm
+# ${name}_base (str):       Base path of the dataset, e.g.
+#                           /var/db/osrm-backend/car/costa-rica-latest.osrm
+#                           Required; has no default.
+# ${name}_ip (str):         Bind address. Default: 127.0.0.1 (jail-local)
+# ${name}_port (int):       Bind port. Default: 5000
+# ${name}_max_trip_size (int): Waypoint cap for /trip. Default: 200
+# ${name}_logfile (str):    Log file. Default: /var/log/${name}.log
 
 . /etc/rc.subr
 
-name="osrm_routed"
+name="${0##*/}"
 rcvar=${name}_enable
 
 load_rc_config $name
 
-: ${osrm_routed_enable:="NO"}
-: ${osrm_routed_user:="osrm"}
-: ${osrm_routed_base:=""}
-: ${osrm_routed_ip:="127.0.0.1"}
-: ${osrm_routed_port:="5000"}
-: ${osrm_routed_max_trip_size:="200"}
-: ${osrm_routed_logfile:="/var/log/osrm-routed.log"}
+eval ": \${${name}_enable:=\"NO\"}"
+eval ": \${${name}_user:=\"osrm\"}"
+eval ": \${${name}_base:=\"\"}"
+eval ": \${${name}_ip:=\"127.0.0.1\"}"
+eval ": \${${name}_port:=\"5000\"}"
+eval ": \${${name}_max_trip_size:=\"200\"}"
+eval ": \${${name}_logfile:=\"/var/log/${name}.log\"}"
+
+# Read once into fixed names, so the command below stays legible.
+eval "_user=\${${name}_user}"
+eval "_base=\${${name}_base}"
+eval "_ip=\${${name}_ip}"
+eval "_port=\${${name}_port}"
+eval "_max_trip_size=\${${name}_max_trip_size}"
+eval "_logfile=\${${name}_logfile}"
 
 _child_pidfile="/var/run/${name}.child.pid"
 
@@ -54,30 +73,33 @@ command="/usr/sbin/daemon"
 # --algorithm mld is fixed: the data phase builds MLD data with osrm-partition
 # and osrm-customize, and osrm-routed cannot serve it any other way.
 command_args="-r -t ${name} \
-    -P ${pidfile} -p ${_child_pidfile} -o ${osrm_routed_logfile} \
+    -P ${pidfile} -p ${_child_pidfile} -o ${_logfile} \
     /usr/local/bin/osrm-routed --algorithm mld \
-    --ip ${osrm_routed_ip} --port ${osrm_routed_port} \
-    --max-trip-size ${osrm_routed_max_trip_size} ${osrm_routed_base}"
+    --ip ${_ip} --port ${_port} \
+    --max-trip-size ${_max_trip_size} ${_base}"
 
-start_precmd="${name}_precmd"
+# A fixed function name, not ${name}_precmd: rc.subr treats this as a command
+# string, and with a per-instance ${name} it would look for a function named
+# after the instance and fail the precmd for every one of them.
+start_precmd="osrm_routed_precmd"
 
 osrm_routed_precmd()
 {
-    if [ -z "${osrm_routed_base}" ]; then
-        err 1 "osrm_routed_base is unset -- run 'make jail-up' to configure it."
+    if [ -z "${_base}" ]; then
+        err 1 "${name}_base is unset -- run 'make jail-up' to configure it."
     fi
     # .osrm is a base path, not a file: osrm-routed reads ${base}.<suffix>
     # siblings and never opens ${base} itself. .cell_metrics is the last one
     # osrm-customize writes, so it is what "the data is built" means.
-    if [ ! -f "${osrm_routed_base}.cell_metrics" ]; then
-        err 1 "no routing data at ${osrm_routed_base}.* -- run 'make jail-data' first."
+    if [ ! -f "${_base}.cell_metrics" ]; then
+        err 1 "no routing data at ${_base}.* -- run 'make jail-data' first."
     fi
     # This precmd is the last thing that runs as root: daemon(8) is unprivileged
     # by the time it opens these, and /var/run is not writable by the service
     # user, so both pidfiles and the log have to exist first.
-    install -o "${osrm_routed_user}" -m 644 /dev/null "${pidfile}"
-    install -o "${osrm_routed_user}" -m 644 /dev/null "${_child_pidfile}"
-    install -o "${osrm_routed_user}" -m 644 /dev/null "${osrm_routed_logfile}"
+    install -o "${_user}" -m 644 /dev/null "${pidfile}"
+    install -o "${_user}" -m 644 /dev/null "${_child_pidfile}"
+    install -o "${_user}" -m 644 /dev/null "${_logfile}"
 }
 
 run_rc_command "$1"
