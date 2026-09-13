@@ -17,9 +17,13 @@ is the only record in its cell. Measured on the shipped corpus: at a 500 m grid
 cell. Coarsening buys little anonymity and costs the benchmark its geometry.
 
 **Why 50 m.** Derived from the corpus rather than rounded up for comfort: the
-median nearest-neighbour distance between stops is 58 m, and a 50 m grid
-displaces a point by at most 35 m -- so a stop never moves past its nearest
-neighbour, and the local ordering a solver exploits survives the obfuscation.
+median nearest-neighbour distance over all 50,000 shipped stops is 66 m, and a
+50 m grid displaces a point by at most 35 m -- so a stop never moves past its
+nearest neighbour, and the local ordering a solver exploits survives the
+obfuscation. `MEDIAN_SPACING_METRES` pins that measurement at 60 rather than 66
+so a regenerated corpus drifting a few metres denser does not fail the suite
+for no reason; the tests check the pin against whatever corpus is present, so
+it cannot quietly go stale.
 
 **Why a content check rather than a type.** `write_corpus` takes `Anonymised`,
 but it re-reads the records before writing. A gate that trusts a type trusts
@@ -39,6 +43,12 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 
 GRID_METRES = 50
+
+# Measured over all 50,000 stops of the shipped corpus (median 66 m), pinned a
+# little under it for headroom. The grid must displace a stop by less than this
+# or obfuscation starts reordering near neighbours, which is the benchmark's
+# geometry rather than a privacy property.
+MEDIAN_SPACING_METRES = 60
 
 # Every field the corpus carries, and what happens to it. `servicemodel`'s
 # `COVERS`/`EXCLUDES` idiom: a field nobody has classified is refused rather

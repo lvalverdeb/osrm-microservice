@@ -87,28 +87,52 @@ def test_coordinates_are_moved_off_the_doorstep():
         assert 0 < moved <= anon.GRID_METRES * math.sqrt(2) / 2
 
 
+def corpus() -> tuple[list[dict], str]:
+    """The densest delivery corpus on this machine, and which one it is.
+
+    `data/deliveries_cr.json` is generated and gitignored, so CI only ever has
+    the committed slice -- whose stops sit 89 m apart against the full corpus's
+    66 m. A test that just measured whatever file was present would let CI
+    validate the grid against a *thinner* corpus than production data, which is
+    how a 100 m grid would pass review. Hence the pinned constant below.
+    """
+    full = anon.REPO / "data/deliveries_cr.json"
+    slice_ = anon.REPO / "examples/data/deliveries_sample.json"
+    path = full if full.exists() else slice_
+    return json.loads(path.read_text())["deliveries"], path.name
+
+
 def test_the_displacement_stays_under_the_spacing_it_has_to_preserve():
     """The grid is derived, not rounded: worst-case displacement below the
     median nearest-neighbour distance, so a stop never moves past its nearest
     neighbour and the local ordering a solver exploits survives."""
-    corpus = json.loads((anon.REPO / "data/deliveries_cr.json").read_text())
-    points = [(r["latitude"], r["longitude"]) for r in corpus["deliveries"]]
+    assert anon.GRID_METRES * math.sqrt(2) / 2 < anon.MEDIAN_SPACING_METRES, (
+        f"a {anon.GRID_METRES} m grid moves a stop up to "
+        f"{anon.GRID_METRES * math.sqrt(2) / 2:.0f} m, past the "
+        f"{anon.MEDIAN_SPACING_METRES} m spacing it is supposed to preserve")
 
-    # Each sampled stop's nearest neighbour among *all* 50,000, not among the
-    # sample: the first draft measured a thinned corpus, whose stops sit
-    # hundreds of metres apart, and passed at a 500 m grid. Buckets keep that
-    # honest and quick -- a neighbour outside the 3x3 cells around a point is
-    # further than FAR, hence above the median, so it cannot move the median.
+
+def test_the_pinned_spacing_is_not_optimistic_about_the_real_corpus():
+    """The constant above is only worth anything if it still matches the data.
+
+    Buckets keep this quick and honest: a neighbour outside the 3x3 cells round
+    a point is further than FAR, hence above the median, so it cannot move the
+    median. The first draft of this measured spacing *within* a 400-record
+    slice of an ordered corpus -- stops hundreds of metres apart -- and passed
+    at a 500 m grid.
+    """
+    records, source = corpus()
+    points = [(r["latitude"], r["longitude"]) for r in records]
+
     FAR = 500
     buckets: dict[tuple[int, int], list[tuple[float, float]]] = {}
     for lat, lon in points:
-        key = (int(lat * 110_540 // FAR), int(lon * 111_320 // FAR))
-        buckets.setdefault(key, []).append((lat, lon))
+        buckets.setdefault((int(lat * 110_540 // FAR),
+                            int(lon * 111_320 // FAR)), []).append((lat, lon))
 
     spacing = []
-    for point in points[::120]:
-        lat, lon = point
-        home = (int(lat * 110_540 // FAR), int(lon * 111_320 // FAR))
+    for point in points[::10]:
+        home = (int(point[0] * 110_540 // FAR), int(point[1] * 111_320 // FAR))
         near = [q for dx in (-1, 0, 1) for dy in (-1, 0, 1)
                 for q in buckets.get((home[0] + dx, home[1] + dy), [])
                 if q != point]
@@ -118,10 +142,10 @@ def test_the_displacement_stays_under_the_spacing_it_has_to_preserve():
     median = spacing[len(spacing) // 2]
 
     assert median < FAR, "bucket fallback would be masking the real spacing"
-    assert anon.GRID_METRES * math.sqrt(2) / 2 < median, (
-        f"a {anon.GRID_METRES} m grid moves a stop up to "
-        f"{anon.GRID_METRES * math.sqrt(2) / 2:.0f} m, past the {median:.0f} m "
-        "median spacing it is supposed to preserve")
+    assert median >= anon.MEDIAN_SPACING_METRES, (
+        f"{source} has stops {median:.0f} m apart, denser than the pinned "
+        f"{anon.MEDIAN_SPACING_METRES} m; re-derive GRID_METRES rather than "
+        "moving the pin down to meet it")
 
 
 def test_the_same_salt_reproduces_the_corpus_and_another_does_not():
@@ -145,10 +169,12 @@ def test_a_field_nobody_has_classified_refuses_rather_than_passing_through():
 
 def test_every_field_the_generator_writes_has_been_classified():
     """So adding a field to the corpus fails the suite until someone decides."""
-    corpus = json.loads((anon.REPO / "data/deliveries_cr.json").read_text())
-    written = set(corpus["deliveries"][0])
+    records, source = corpus()
+    written = {field for r in records for field in r}
 
-    assert written <= anon.CLASSIFIED, sorted(written - anon.CLASSIFIED)
+    assert written <= anon.CLASSIFIED, (
+        f"{source} carries unclassified field(s): "
+        f"{sorted(written - anon.CLASSIFIED)}")
 
 
 def test_a_written_corpus_round_trips(tmp_path):
