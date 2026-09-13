@@ -10,7 +10,7 @@ turn takes them from the original public sets.
 | `E-n22-k4.txt` | CVRP | Christofides & Eilon | 375, stated in the file's own `COMMENT` |
 | `X-n101-50-k13.vrp` | CVRP | Uchoa X-set | not stated in the file |
 | `RC208.vrp` | VRPTW | Solomon | 776.1, from `RC208.sol` alongside it |
-| `lrc206.vrp` | PDPTW | Li & Lim | not stated in the file |
+| `lrc206.vrp` | PDPTW | Li & Lim | not stated in the file — 51 shipments, precedence and same-vehicle enforced |
 | `SmallVRPSPD.vrp` | VRPSPD | PyVRP fixture | not stated in the file |
 | `pr107.tsp` | TSP | TSPLIB, Padberg & Rinaldi | not stated in the file |
 | `OkSmallMultipleDepots.txt` | multi-depot VRPTW | PyVRP fixture, with a `.sol` | not stated in the file |
@@ -29,6 +29,13 @@ performance can be related". Two of the catalogue's sections had no anchor at
 all: §5 (TSP, sixteen scenarios) and the multi-depot half of §8 (MDHVRPTW,
 twenty-nine scenarios, the second-largest). `pr107.tsp` and
 `OkSmallMultipleDepots.txt` are those two anchors.
+
+**That mapping now lives in `vrp/bench/comparable.py`, not here** (`T-100`).
+This section explains it; the module is what fails when an instance is renamed
+or a variant appears, and it checks each anchor against the crossed `Problem`
+rather than the file's `TYPE` line. `lrc206` is why: it declares `TYPE: PDPTW`
+and used to cross as 102 independent jobs, because `read_benchmark` did not
+read `PICKUP_AND_DELIVERY_SECTION`. It now crosses as 51 shipments.
 
 `PR01.vrp` is here to be refused. It is site-dependent -- its
 `VEHICLES_ALLOWED_CLIENTS_SECTION` says which vehicle may serve which customer

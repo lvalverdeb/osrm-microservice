@@ -95,6 +95,95 @@ def read_solution_cost(path: Path) -> float | None:
     return float(match.group(1)) if match else None
 
 
+def _stop(raw, locations, index: int, shift: TimeWindow, service) -> StopSpec:
+    """One visit, with whatever window and service time the file states."""
+    windows = raw.get("time_window")
+    window = (TimeWindow(start=int(windows[index][0]),
+                         end=int(windows[index][1]))
+              if windows is not None else shift)
+    fixed = int(service[index]) if hasattr(service, "__len__") else int(service)
+    return StopSpec(location_id=locations[index].id, time_windows=(window,),
+                    service_fixed=fixed)
+
+
+def _jobs(raw, locations, depot_id_of, shift: TimeWindow,
+          size: int) -> list[Order]:
+    """One single-stop order per customer node."""
+    service = raw.get("service_time", 0)
+    demands = raw.get("demand")
+    orders = []
+    for i in range(size):
+        if i in depot_id_of:
+            continue
+        orders.append(Order(
+            id=f"O{i}", kind="JOB",
+            quantities={"demand": int(demands[i]) if demands is not None else 0},
+            delivery=_stop(raw, locations, i, shift, service)))
+    return orders
+
+
+def _pairing_offset(table) -> int:
+    """How the section's node numbers sit against the rows it was parsed into.
+
+    `lrc206` numbers its nodes 0, 2, 3 ... 103 -- there is no node 1 -- so a
+    partner id is one ahead of its row. Rather than hard-code that, the offset
+    is the one under which the pairing is *symmetric*: every pickup's partner
+    names it back, with the opposite demand. A mispaired shipment reads as a
+    valid instance and answers a different problem, so guessing here and being
+    wrong is the failure mode this whole function exists to avoid.
+
+    Raises:
+        NotImplementedError: if no offset makes the section consistent, naming
+            it rather than pairing on a convention nobody has checked.
+    """
+    for offset in (1, 0):
+        def paired(index: int, row, offset=offset) -> bool:
+            partner = int(row[5]) - offset
+            if not 0 <= partner < len(table):
+                return False
+            return (int(table[partner][4]) - offset == index
+                    and int(table[partner][0]) == -int(row[0]))
+
+        if all(paired(i, row) for i, row in enumerate(table) if int(row[5]) != 0):
+            return offset
+    raise NotImplementedError(
+        "PICKUP_AND_DELIVERY_SECTION pairs no node numbering this mapping "
+        "knows: under every offset tried, some pickup's partner does not name "
+        "it back with the opposite demand")
+
+
+def _shipments(raw, locations, depot_id_of, shift: TimeWindow) -> list[Order]:
+    """`PICKUP_AND_DELIVERY_SECTION` as paired orders — `FR-01`.
+
+    Li & Lim states six columns per node: demand, window, service, then the
+    node's partner on each side. A row naming a *delivery* partner is the
+    pickup half; the negative demand on the other half is a sign convention for
+    "this is where it comes off", not a second quantity, and carrying it across
+    would fail `Order`'s validation before a solver ever saw it.
+
+    Reading this section is not optional. Dropping it leaves the points and
+    loses the precedence and the same-vehicle rule, which is a strictly easier
+    problem wearing the instance's name -- and every gap against its published
+    best-known would look fine while measuring the wrong thing.
+    """
+    table = raw["pickup_and_delivery"]
+    offset = _pairing_offset(table)
+    service = [row[3] for row in table]
+    orders = []
+    for index, row in enumerate(table):
+        if index in depot_id_of:
+            continue
+        partner = int(row[5])
+        if partner == 0:          # the delivery half; its pickup names it
+            continue
+        orders.append(Order(
+            id=f"O{index}", kind="SHIPMENT",
+            quantities={"demand": abs(int(row[0]))},
+            pickup=_stop(raw, locations, index, shift, service),
+            delivery=_stop(raw, locations, partner - offset, shift, service)))
+    return orders
+
+
 def read_benchmark(path: str | Path, *, vehicles: int | None = None) -> Benchmark:
     """Read a VRPLIB or Solomon instance into a `Problem`.
 
@@ -151,23 +240,10 @@ def read_benchmark(path: str | Path, *, vehicles: int | None = None) -> Benchmar
                else UNBOUNDED_DAY)
     shift = TimeWindow(start=0, end=horizon)
 
-    service = raw.get("service_time", 0)
-    demands = raw.get("demand")
-
-    orders = []
-    for i in range(size):
-        if i in depot_id_of:
-            continue
-        window = (TimeWindow(start=int(windows[i][0]), end=int(windows[i][1]))
-                  if windows is not None else shift)
-        per_stop = int(service[i]) if hasattr(service, "__len__") else int(service)
-        orders.append(Order(
-            id=f"O{i}", kind="JOB",
-            quantities={"demand": int(demands[i]) if demands is not None else 0},
-            delivery=StopSpec(location_id=locations[i].id,
-                              time_windows=(window,),
-                              service_fixed=per_stop)))
-
+    if "pickup_and_delivery" in raw:
+        orders = _shipments(raw, locations, depot_id_of, shift)
+    else:
+        orders = _jobs(raw, locations, depot_id_of, shift, size)
     fleet_size = vehicles or int(raw.get("vehicles", 0)) or len(orders)
     fleet = tuple(
         Vehicle(id=f"V{n}",

@@ -277,3 +277,49 @@ def test_the_multi_depot_anchor_starts_each_vehicle_at_its_own_depot():
         home = problem.vehicle(route.vehicle_id).start_location_id
         assert route.steps[0].location_id == home
         assert route.steps[-1].location_id == home
+
+
+# `T-100`. `lrc206` is the catalogue's only anchor for `PDPTW`, twenty-five
+# scenarios' worth, and it was crossing as 102 independent jobs: the reader
+# never looked at PICKUP_AND_DELIVERY_SECTION. A gap computed against Li & Lim's
+# published best-known would have been measuring a strictly easier problem --
+# no precedence, no same-vehicle enforcement -- and looking fine while doing it.
+# This is the failure the README says `PR01` exists to keep tested, on a file
+# nothing was testing it on.
+
+
+def test_a_pdptw_instance_crosses_as_shipments_not_as_independent_jobs():
+    """`FR-01`: paired pickup -> delivery, not two unrelated stops."""
+    problem = read_benchmark(INSTANCES / "lrc206.vrp").problem
+    kinds = {order.kind for order in problem.orders}
+
+    assert kinds == {"SHIPMENT"}, (
+        f"lrc206 is a Li & Lim PDPTW instance and crossed as {sorted(kinds)}; "
+        "dropping the pairing answers an easier problem with the same points")
+    assert len(problem.orders) == 51, (
+        "103 nodes is a depot and 51 pickup/delivery pairs")
+
+
+def test_each_shipment_keeps_the_pair_the_file_states():
+    """Both halves, in the file's own order, on one order."""
+    problem = read_benchmark(INSTANCES / "lrc206.vrp").problem
+
+    for order in problem.orders:
+        assert order.pickup is not None and order.delivery is not None
+        assert order.pickup.location_id != order.delivery.location_id
+
+    visited = sorted(stop.location_id for order in problem.orders
+                     for stop in (order.pickup, order.delivery))
+    assert len(visited) == len(set(visited)) == 102, (
+        "every non-depot node belongs to exactly one shipment")
+
+
+def test_a_shipment_carries_the_pickup_side_quantity():
+    """Li & Lim states the delivery half as a negative demand. A quantity is
+    what moves, not a sign convention, and a negative one would fail the model
+    before it ever reached a solver."""
+    problem = read_benchmark(INSTANCES / "lrc206.vrp").problem
+
+    quantities = [q for order in problem.orders
+                  for q in order.quantities.values()]
+    assert all(q > 0 for q in quantities), "negative demand crossed unmapped"
