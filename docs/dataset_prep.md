@@ -51,6 +51,29 @@ usable as the join key across allocation, sequencing and execution.
 
 ---
 
+## 1b. Taking a corpus out of the production boundary
+
+The dataset above is **generated**, so no address has ever left. A corpus
+derived from real deliveries is a different thing, and `NFR-07` does not let it
+be written as-is:
+
+```bash
+python -m vrp.anonymise collected.json corpus.json --salt "$SALT"
+```
+
+`vrp/anonymise.py` strips the identifiers, replaces them with salted digests,
+and snaps coordinates to a 50 m grid. The write refuses — naming the field —
+if the records still carry an `order_id` or `product_id`, and refuses records
+that were stripped by hand, because hand-stripping leaves the coordinate at the
+front door.
+
+Read that module before widening the grid or adding a column: the grid is
+derived from stop spacing (median 58 m, so 50 m moves a stop at most 35 m and
+never past its nearest neighbour), and a field nobody has classified is refused
+rather than passed through.
+
+---
+
 ## 2. Reproducing it
 
 The generator needs a running OSRM instance with Costa Rica data. Building that
