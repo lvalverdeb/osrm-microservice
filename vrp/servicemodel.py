@@ -53,6 +53,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -433,6 +434,31 @@ def build(model: dict[str, Any], depots: Sequence[dict[str, Any]],
 
 MODELS = Path(__file__).resolve().parent.parent / "models"
 
+# A deployment's own model directories, `os.pathsep`-separated, searched before
+# the shipped ones so it can add operations and override ours.
+MODEL_PATH_VAR = "VRP_MODEL_PATH"
+
+
+def model_path() -> tuple[Path, ...]:
+    """Directories searched for models, nearest first.
+
+    A delivery model is "an operation described as data", which is only true if
+    an operation this repository has never heard of can be described. One
+    directory resolved against the checkout stops at the repo boundary, and
+    stops altogether once `vrp` is installed rather than run from a tree.
+
+    Read at call time rather than at import, because a process that configures
+    itself in `main()` is the normal case -- and because the tests set `MODELS`
+    directly, which would otherwise be captured before they got the chance.
+
+    `T-96`'s gate is unaffected: it is this repository's rule about its own
+    shipped set. A deployment shipping models owns the same obligation and has
+    the same tool -- `modelcheck.check` is importable, and running it is the
+    consumer's job exactly as running it is ours.
+    """
+    extra = os.environ.get(MODEL_PATH_VAR, "")
+    return (*(Path(p) for p in extra.split(os.pathsep) if p), MODELS)
+
 
 def model_for(name: str) -> dict[str, Any]:
     """One shipped model, by name. `hos.rules_for`'s shape, for the same reason.
@@ -441,11 +467,28 @@ def model_for(name: str) -> dict[str, Any]:
         ValueError: if no model of that name ships, naming the ones that do
             rather than leaving a caller to list the directory.
     """
-    path = MODELS / f"{name}.json"
-    if not path.exists():
-        raise ValueError(f"unknown delivery model {name!r}; "
-                         f"shipped: {', '.join(shipped())}")
-    return json.loads(path.read_text())
+    for directory in model_path():
+        path = directory / f"{name}.json"
+        if path.exists():
+            return json.loads(path.read_text())
+    raise ValueError(f"unknown delivery model {name!r}; "
+                     f"shipped: {', '.join(shipped())}")
+
+
+def categories() -> dict[str, str]:
+    """The category-to-model map, merged across the path, nearest first.
+
+    A deployment that ships models needs to map its own categories to them, and
+    may need to redirect one of ours -- so the maps merge rather than the
+    nearest file winning wholesale, which would make adding one category cost
+    you every category the repository already mapped.
+    """
+    mapping: dict[str, str] = {}
+    for directory in reversed(model_path()):
+        path = directory / "categories.json"
+        if path.exists():
+            mapping.update(json.loads(path.read_text()))
+    return mapping
 
 
 def shipped() -> list[str]:
@@ -455,8 +498,9 @@ def shipped() -> list[str]:
     validated master shipping six unvalidated variants is exactly the failure
     composition would otherwise introduce.
     """
-    return sorted(f.stem for f in MODELS.glob("*.json")
-                  if f.name != "categories.json")
+    return sorted({f.stem for directory in model_path()
+                   for f in directory.glob("*.json")
+                   if f.name != "categories.json"})
 
 
 def unreachable(mapping: dict[str, str]) -> list[str]:
@@ -492,7 +536,7 @@ def model_for_category(category: str) -> dict[str, Any]:
         ValueError: if the category is not mapped. Silence would mean serving
             unknown freight by whichever model happened to be first.
     """
-    mapping = json.loads((MODELS / "categories.json").read_text())
+    mapping = categories()
     if category not in mapping:
         raise ValueError(f"no delivery model for category {category!r}; "
                          f"mapped: {', '.join(sorted(mapping))}")
@@ -623,9 +667,14 @@ def fragment_for(name: str) -> dict[str, Any]:
     Raises:
         ValueError: if no fragment of that name ships, naming the ones that do.
     """
+    for directory in model_path():
+        candidate = directory / FRAGMENTS / f"{name}.json"
+        if candidate.exists():
+            return json.loads(candidate.read_text())
     path = MODELS / FRAGMENTS / f"{name}.json"
     if not path.exists():
-        shipped = sorted(f.stem for f in (MODELS / FRAGMENTS).glob("*.json"))
+        shipped = sorted({f.stem for directory in model_path()
+                          for f in (directory / FRAGMENTS).glob("*.json")})
         raise ValueError(f"unknown fragment {name!r}; shipped: "
                          f"{', '.join(shipped) or 'none'}")
     return json.loads(path.read_text())
