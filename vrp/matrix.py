@@ -154,12 +154,36 @@ class PairCache:
 
 def _fetch_tile(gateway: str, coordinates: list[dict], tile: Tile,
                 profile: str, timeout: float) -> dict:
-    """One /matrix call restricted to a tile, over the full coordinate list."""
+    """One /matrix call carrying only the coordinates its tile addresses.
+
+    Narrowing the index lists is not enough. The gateway renders every
+    coordinate it is given into the upstream path and refuses the request over
+    `OSRM_MAX_URL_BYTES` before contacting any engine, so posting the whole
+    list made the *location* count the ceiling and tiling did not move it: a
+    1,801-stop facility needed a 37,388-byte URL against a 24,000-byte limit
+    and every one of its 361 tiles was refused. A tile addresses at most two
+    blocks, so sending just those is ~200 coordinates instead of 1,801.
+
+    The indices sent are therefore tile-local and have to be renumbered.
+    Getting that wrong is worse than the original defect -- every tile would
+    still answer, the matrix would still build, and every arc would be
+    attributed to the wrong pair -- so `sources` and `destinations` keep the
+    caller's order and the response still lines up row-for-row with it.
+    """
+    needed = sorted(set(tile.sources) | set(tile.destinations))
+    # A 1x1 tile addresses one location, and `/matrix` requires two: its
+    # `MATRIX_COORDINATES` minimum is 2, so a lone diagonal cell came back
+    # refused and stayed UNREACHABLE. One filler coordinate satisfies the
+    # bound; nothing reads it, because the index lists below never name it.
+    if len(needed) < 2 and len(coordinates) > 1:
+        filler = next(i for i in range(len(coordinates)) if i not in needed)
+        needed = sorted([*needed, filler])
+    local = {index: position for position, index in enumerate(needed)}
     response = httpx.post(
         f"{gateway}/matrix",
-        json={"coordinates": coordinates,
-              "sources": list(tile.sources),
-              "destinations": list(tile.destinations),
+        json={"coordinates": [coordinates[i] for i in needed],
+              "sources": [local[i] for i in tile.sources],
+              "destinations": [local[j] for j in tile.destinations],
               "annotations": "duration,distance",
               "profile": profile},
         timeout=timeout)
