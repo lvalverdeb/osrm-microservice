@@ -176,14 +176,19 @@ Two constitutional principles shape it and explain the module layout:
 | Area | Modules |
 |---|---|
 | Core | `model.py`, `objective.py`, `evaluator.py`, `verify/verifier.py` |
-| Data | `matrix.py`, `osrm.py`, `generate.py`, `icd.py`, `diagnose.py` |
-| Constraints | `hos/` (hours of service), `zones.py`, `locks.py`, `periodic.py` |
-| Search | `solve/` (OR-Tools, PyVRP), `lns.py`, `localsearch.py`, `setpartition.py`, `polish.py`, `portfolio.py` |
-| Dynamic | `epochs.py`, `committed.py`, `pcdispatch.py`, `triggers.py`, `synchronise.py` |
-| Learning | `calibrate.py`, `adherence.py`, `rollout.py`, `replay.py` |
-| Fleet | `allocate.py`, `depots.py`, `fleet.py`, `decompose.py` |
+| Data | `matrix.py`, `osrm.py`, `generate.py`, `icd.py`, `diagnose.py`, `anonymise.py` |
+| Constraints | `hos/` (hours of service), `zones.py`, `locks.py`, `periodic.py`, `timedependent.py`, `electric.py`, `battery.py` |
+| Search | `solve/` (OR-Tools, PyVRP), `lns.py`, `localsearch.py`, `setpartition.py`, `polish.py`, `portfolio.py`, `accelerate.py` |
+| Dynamic | `epochs.py`, `committed.py`, `pcdispatch.py`, `triggers.py`, `synchronise.py`, `policies.py` |
+| Learning | `calibrate.py`, `adherence.py`, `rollout.py`, `replay.py`, `speedfit.py` |
+| Fleet | `allocate.py`, `depots.py`, `fleet.py`, `decompose.py`, `scenarios.py` |
 | Explanation | `explain.py`, `consistency.py`, `stability.py` |
-| Benchmarks | `bench/` against the published instances in [`benchmarks/`](benchmarks) |
+| Operations as data | `servicemodel.py` (models, fragments, overlays), `modelcheck.py` (the gate they pass to ship) |
+| Service surface | `api.py`, `jobs.py`, `quote.py`, `snapshot.py`, `observe.py` |
+| Benchmarks | `bench/` and `benchmarks.py`, against the published instances in [`benchmarks/`](benchmarks) |
+
+Every module in `vrp/` appears above. The table drifted by sixteen modules
+before this was last checked, which is what an index nobody verifies does.
 
 ## Client usage
 

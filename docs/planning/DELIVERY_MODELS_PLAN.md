@@ -1,7 +1,22 @@
 # Delivery models: the operation as data, gated before it ships
 
-**Status:** proposed, 2026-09-05. Nothing here is built. The schema below was
-spiked and thrown away; the figures are measured, not estimated.
+**Status:** built, 2026-09-13. Proposed 2026-09-05, when the schema below had
+been spiked and thrown away and the figures were already measured rather than
+estimated.
+
+`T-94` shipped the contract and the builder (`vrp/servicemodel.py`), `T-95` the
+run configuration, `T-96` the gate (`vrp/modelcheck.py`), and `T-97` the
+composition rules this plan sketched: fragments claiming disjoint sections, one
+level of deployment overlay over a declared `tunable` surface, list elements
+addressed by identity, and provenance on every resolved field. The two
+conversions the sequencing asked for — `tw/envelope_round.py` and
+`rich/heterogeneous_fleet.py` — are `models/signed-envelopes.json` and
+`models/mixed-parcels.json`.
+
+The plan is kept as written rather than rewritten to match: its value now is
+the reasoning that produced the shape, and the risks below are still the risks.
+What each task actually delivered, and where it differed, is in the `T-94`
+to `T-97` rows of [the SDD](../vrp-spec-driven-development.md).
 
 ## What a delivery model is
 

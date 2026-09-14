@@ -1,6 +1,9 @@
 # Making the examples do their two jobs
 
-**Status:** proposed, 2026-09-03. Nothing here is built yet.
+**Status:** built, 2026-09-13. Proposed 2026-09-03; every phase below carries
+its own **DONE** marker, and Phase 4 folded into Phase 3 rather than running
+separately. The header is the last thing anybody updates, which is why it sat
+claiming the opposite for ten days.
 
 ## What examples are for
 
