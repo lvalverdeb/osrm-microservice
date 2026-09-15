@@ -1,17 +1,40 @@
 [project]
-name = "osrm-api-gateway"
-version = "0.2.2"
-description = "Development tooling for the OSRM API Gateway (the gateway itself is gateway/)"
+# The distribution is the `vrp` platform, because that is the part another
+# repository can depend on. It was called `osrm-api-gateway` while nothing
+# consumed it and the name cost nothing; shipping the routing platform under a
+# name that says "gateway" would mislead every consumer, and renaming is free
+# exactly once -- now, before anything pins it. The gateway itself is
+# `gateway/`, a Rust binary, and is not a Python distribution at all.
+name = "vrp-platform"
+version = "0.3.0"
+description = "Fleet-routing domain model, canonical evaluator and independent verifier"
 readme = "README.md"
 requires-python = ">=3.13"
-# The gateway is gateway/, a Rust binary. What remains here is the tooling that
-# exercises it: the load generator and the differential parity harness, which
-# drive it over HTTP and need nothing from the old implementation.
+# What `vrp/` imports at module level, and nothing else. `starlette` and
+# `uvicorn` are here because `parity/engine.py` serves recorded fixtures and
+# `T-102`'s successor hosts SDD 9.4 on them; `tests/test_packaging.py` keeps
+# this list honest against the source rather than against memory.
 dependencies = [
     "httpx>=0.27.0",
     "starlette>=0.37.0",
     "uvicorn>=0.27.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# The platform, not the workshop. `tests`, `parity` and `loadtest` exercise it
+# and are not it; shipping them would put our test tooling in a consumer's
+# install. `models/` stays out too -- see tests/test_packaging.py for why.
+packages = ["vrp"]
+# `vrp/bench/` resolves `docs/TDD/scenarios.jsonl` and `benchmarks/instances/`
+# against the repository root, so an installed copy would find neither. It is
+# the benchmark harness -- `CON-9`'s gate, run here, against this repository's
+# corpus -- and means nothing to a consumer. `vrp/benchmarks.py` does ship:
+# its reader takes the path from its caller, so it travels.
+exclude = ["vrp/bench"]
 
 
 [tool.uv.workspace]
@@ -54,6 +77,19 @@ pythonpath = [".", "tests"]
 
 
 [project.optional-dependencies]
+# `vrp.solve.pyvrp_adapter` imports pyvrp at module level and
+# `vrp.solve.ortools_adapter` imports ortools inside its entry point, so a
+# consumer that only builds and verifies Problems needs neither. Both are large
+# compiled wheels, which is why they are extras rather than dependencies.
+pyvrp = ["pyvrp>=0.14"]
+ortools = ["ortools>=9.10"]
+# `vrp/benchmarks.py` reads the public instances at module level through
+# `vrplib`, which reaches the environment today only as a transitive dependency
+# of pyvrp. That works until pyvrp drops it, at which point a reader that has
+# nothing to do with pyvrp stops importing -- so it is declared here rather
+# than inherited. `tests/test_packaging.py` is what noticed.
+bench = ["vrplib>=2.0"]
+
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

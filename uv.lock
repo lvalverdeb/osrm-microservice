@@ -12,8 +12,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "osrm-api-gateway",
     "osrm-api-gateway-examples",
+    "vrp-platform",
 ]
 
 [[package]]
@@ -561,44 +561,6 @@ wheels = [
 ]
 
 [[package]]
-name = "osrm-api-gateway"
-version = "0.2.2"
-source = { virtual = "." }
-dependencies = [
-    { name = "httpx" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "folium" },
-    { name = "httpx" },
-    { name = "ortools" },
-    { name = "pydantic-settings" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pyvrp" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "folium", marker = "extra == 'dev'", specifier = ">=0.16.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
-    { name = "ortools", marker = "extra == 'dev'", specifier = ">=9.10" },
-    { name = "pydantic-settings", marker = "extra == 'dev'", specifier = ">=2.2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "pyvrp", marker = "extra == 'dev'", specifier = ">=0.14" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.4" },
-    { name = "starlette", specifier = ">=0.37.0" },
-    { name = "uvicorn", specifier = ">=0.27.0" },
-]
-provides-extras = ["dev"]
-
-[[package]]
 name = "osrm-api-gateway-examples"
 version = "0.1.0"
 source = { editable = "examples" }
@@ -1053,6 +1015,56 @@ sdist = { url = "https://files.pythonhosted.org/packages/03/18/ccce41535dee1be77
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/d5/68e6e9bca63c0badf67002890a46d3784c958de45b65e1275ec583ca1f06/uvicorn-0.52.1-py3-none-any.whl", hash = "sha256:e4403f9d93188cf9d1088e9f40e3acd12630e2df8675316704379a7fc20fff6a", size = 79859, upload-time = "2026-08-01T18:19:29.294Z" },
 ]
+
+[[package]]
+name = "vrp-platform"
+version = "0.3.0"
+source = { editable = "." }
+dependencies = [
+    { name = "httpx" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+bench = [
+    { name = "vrplib" },
+]
+dev = [
+    { name = "folium" },
+    { name = "httpx" },
+    { name = "ortools" },
+    { name = "pydantic-settings" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pyvrp" },
+    { name = "ruff" },
+]
+ortools = [
+    { name = "ortools" },
+]
+pyvrp = [
+    { name = "pyvrp" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "folium", marker = "extra == 'dev'", specifier = ">=0.16.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
+    { name = "ortools", marker = "extra == 'dev'", specifier = ">=9.10" },
+    { name = "ortools", marker = "extra == 'ortools'", specifier = ">=9.10" },
+    { name = "pydantic-settings", marker = "extra == 'dev'", specifier = ">=2.2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pyvrp", marker = "extra == 'dev'", specifier = ">=0.14" },
+    { name = "pyvrp", marker = "extra == 'pyvrp'", specifier = ">=0.14" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.4" },
+    { name = "starlette", specifier = ">=0.37.0" },
+    { name = "uvicorn", specifier = ">=0.27.0" },
+    { name = "vrplib", marker = "extra == 'bench'", specifier = ">=2.0" },
+]
+provides-extras = ["pyvrp", "ortools", "bench", "dev"]
 
 [[package]]
 name = "vrplib"
