@@ -213,19 +213,53 @@ STRUCTURAL_KEYS = frozenset({"name", "applies_to", "problem_id", "base",
                              "tunable", "use", "set"})
 
 
+# Sections `build` reads without asking whether they are there, plus the two
+# identifiers a result is reported under. Absent, each one used to pass the gate
+# and then raise a bare `KeyError` from inside a helper -- a dict key, with no
+# model name and no file, which is the least actionable error this module could
+# produce. `run` is not here because `run_config` already refuses without it.
+#
+# The list is checked rather than trusted: `test_the_gate_and_the_builder_agree_
+# about_every_key` drops each key of a shipped model in turn and requires the
+# gate to complain or the model to build. A key added to `build` tomorrow and
+# forgotten here fails that test, which is the only reason a hand-written list
+# is defensible at all -- `COVERS` earned that lesson the expensive way.
+REQUIRED_KEYS = frozenset({
+    "name", "problem_id", "quantity", "service", "windows", "shift", "route",
+    "assignment", "fleet",
+})
+
+
 def validate_keys(raw: dict[str, Any]) -> list[str]:
     """Complaints about a model file's top-level keys.
 
     Returns:
-        One message per unrecognised key, empty when the file is clean. An
-        unknown key is an error rather than something ignored: a typo that is
-        ignored is a setting that silently did not apply, which is the failure
-        mode this module exists to refuse.
+        One message per unrecognised key and one per missing required section,
+        empty when the file is clean. An unknown key is an error rather than
+        something ignored: a typo that is ignored is a setting that silently
+        did not apply, which is the failure mode this module exists to refuse.
+        A *missing* one is the same failure seen from the other side.
     """
     allowed = known_keys() | STRUCTURAL_KEYS
     return [f"unknown model key {key!r}; the contract knows "
             f"{', '.join(sorted(allowed))}"
             for key in sorted(raw) if key not in allowed]
+
+
+def missing_sections(raw: dict[str, Any]) -> list[str]:
+    """Complaints about required sections a model file does not have.
+
+    Separate from `validate_keys`, which answers the opposite question and says
+    so: one is about keys that should not be there, this is about keys that
+    should. Callers that hold a *fragment* rather than a whole model -- and
+    composition deals in fragments -- want the first without the second.
+
+    Returns:
+        One message per missing section, naming it and why it is needed.
+    """
+    return [f"model is missing required section {key!r}; "
+            f"`build` reads it and cannot construct a Problem without it"
+            for key in sorted(REQUIRED_KEYS - set(raw))]
 
 
 # --------------------------------------------------------------------------

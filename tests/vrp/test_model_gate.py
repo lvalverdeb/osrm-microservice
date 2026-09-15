@@ -226,3 +226,47 @@ def test_the_gate_can_enumerate_what_ships_variants_included(library):
     library("branch", {"name": "branch", "base": "master",
                        "set": {"fleet.VAN.per_depot": 2}})
     assert servicemodel.shipped() == ["branch", "master"]
+
+
+# `T-103`. The gate's promise is that no model reaches `models/` without
+# passing it. A model missing a required key passed `structural` with no
+# complaint at all and then died inside `servicemodel.build` with a bare
+# `KeyError` naming a dict key -- no model name, no file, nothing a reader
+# could act on. Found from outside, by a downstream repository writing its
+# first model against `T-101`'s search path, which is exactly the reader this
+# gate exists for.
+
+
+@pytest.mark.parametrize("key", sorted(BASE))
+def test_the_gate_and_the_builder_agree_about_every_key(key: str):
+    """The property, rather than a list somebody maintains by hand.
+
+    Drop each key of a known-good model in turn. Either the gate complains --
+    and names the key, because a complaint a reader cannot act on is barely
+    better than a crash -- or the model genuinely still builds. A key that
+    `build` requires and `structural` ignores is the defect, and this finds it
+    for keys nobody has thought of yet, which is the half a fixed list misses.
+    """
+    partial = {k: v for k, v in BASE.items() if k != key}
+    complaints = modelcheck.structural(partial)
+
+    if complaints:
+        assert key in " ".join(complaints), (
+            f"the gate refused a model missing {key!r} without naming it: "
+            f"{complaints}")
+        return
+
+    # Silence is a claim that it builds. Hold it to that: anything raising
+    # here is the gate passing something the builder cannot use.
+    check(partial)
+
+
+def test_a_missing_key_is_refused_by_name_before_any_solve():
+    """The reported symptom, pinned directly. `windows` is the one a real
+    deployment hit first: §7.3 of its own specification says per-package
+    windows are not required, so leaving the key out is the obvious reading."""
+    partial = {k: v for k, v in BASE.items() if k != "windows"}
+
+    complaints = modelcheck.structural(partial)
+    assert complaints, "a model that cannot build passed a solve-free gate"
+    assert any("windows" in c for c in complaints), complaints

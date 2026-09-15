@@ -94,6 +94,7 @@ def structural(model: dict[str, Any]) -> list[str]:
     except (ValueError, KeyError) as failure:
         return [str(failure)]
     complaints = list(servicemodel.validate_keys(model))
+    complaints += servicemodel.missing_sections(model)
     try:
         servicemodel.run_config(model)
     except (ValueError, KeyError) as failure:
