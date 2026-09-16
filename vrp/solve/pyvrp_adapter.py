@@ -75,6 +75,12 @@ def shift_end_of(problem: Problem) -> int:
     return max(v.shift.end for v in problem.vehicles)
 
 
+# PyVRP stores a prize in an int64. Named rather than inlined because the
+# refusal below quotes it, and a limit a reader cannot see is one they cannot
+# design around.
+INT64_MAX = 2**63 - 1
+
+
 def tier_bonuses(problem: Problem) -> dict[int, int]:
     """Prize bonuses making priority tiers lexicographic. FR-13.
 
@@ -91,7 +97,20 @@ def tier_bonuses(problem: Problem) -> dict[int, int]:
     Bonuses compound across tiers, so a deep tier stack with large prizes can
     grow them considerably. Python integers are unbounded but PyVRP's are
     int64; the same overflow ceiling §5.1 flags for staged optimisation applies
-    here, and is not yet guarded.
+    here, and passing it is refused rather than wrapped. A wrapped bonus does
+    not fail -- it inverts the ordering this function exists to guarantee, on
+    an instance that looks ordinary, which is the worst way for a guarantee to
+    end. Measured: the bonuses pass int64 between 50 and 55 distinct tiers.
+
+    An operation reaches that by accident rather than by design. Mapping a
+    priority *score* onto `priority_tier` turns a three-class scheme into a
+    thousand tiers, and the encoding that suggests -- widely spaced numeric
+    bands -- is exactly what a specification writer reaches for when they
+    assume lexicographic tiers are unavailable.
+
+    Raises:
+        NotImplementedError: if the bonuses would exceed int64, naming the
+            depth so a reader can measure their own scheme against it.
     """
     by_tier: dict[tuple[int, int], list[int]] = {}
     for order in problem.orders:
@@ -106,6 +125,15 @@ def tier_bonuses(problem: Problem) -> dict[int, int]:
     for tier in sorted(by_tier, reverse=True):
         bonuses[tier] = beneath
         beneath += sum(prize + beneath for prize in by_tier[tier]) + 1
+    if beneath > INT64_MAX:
+        raise NotImplementedError(
+            f"this instance has {len(by_tier)} distinct priority ranks, and "
+            f"making them lexicographic needs a prize bonus of {beneath}, past "
+            f"the int64 {INT64_MAX} PyVRP stores one in. The bonus would wrap "
+            "and a lower tier would outrank a higher one -- silently, because "
+            "a wrapped plan is a valid plan. Ranks are classes, a handful of "
+            "them; if these came from a priority score, the score belongs in "
+            "`Order.prize`, which ranks within a tier and has no such ceiling")
     return bonuses
 
 

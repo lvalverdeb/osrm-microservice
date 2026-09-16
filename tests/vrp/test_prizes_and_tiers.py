@@ -23,6 +23,8 @@ case, at magnitudes chosen to break a weighting rather than to look plausible.
 
 from __future__ import annotations
 
+import pytest
+
 from vrp.model import (
     Location,
     Order,
@@ -322,3 +324,50 @@ def test_an_sla_window_is_computed_from_when_the_fault_was_reported():
         "two faults of one severity reported six hours apart are due six hours "
         "apart; one window for both turns a four-hour target into a ten-hour "
         "one for half the estate")
+
+
+# --------------------------------------------------------------------------
+# The ceiling under FR-13's mechanism
+# --------------------------------------------------------------------------
+# `tier_bonuses` makes tiers lexicographic by giving each one a prize bonus
+# exceeding everything obtainable beneath it, so the bonuses compound: the
+# recurrence is multiplicative in the number of *distinct* tiers. Python
+# integers are unbounded and PyVRP's are int64, and the module said so in a
+# docstring -- "not yet guarded" -- which is a comment, not a guard.
+#
+# A wrapped bonus does not fail. It inverts the ordering this whole section
+# exists to guarantee, silently, on an instance that looks ordinary.
+
+
+def deep_instance(tiers: int) -> Problem:
+    orders = tuple(an_order(f"O{t}", f"C{t + 1}", kg=1, priority_tier=t + 1,
+                            prize=1000)
+                   for t in range(tiers))
+    return instance(orders, capacity=10_000, stops=tiers)
+
+
+def test_a_tier_stack_the_encoding_cannot_carry_is_refused_by_name():
+    """Measured: the bonuses pass int64 between 50 and 55 distinct tiers.
+
+    A real operation reaches that by accident rather than by design -- map a
+    priority *score* to a tier and a three-class scheme becomes a thousand.
+    """
+    with pytest.raises(NotImplementedError, match="int64"):
+        solve(deep_instance(80), iterations=10, seed=0)
+
+
+def test_the_refusal_says_how_deep_the_stack_was():
+    """A limit a reader cannot measure against is a limit they cannot design
+    around."""
+    with pytest.raises(NotImplementedError) as refusal:
+        solve(deep_instance(80), iterations=10, seed=0)
+
+    assert "80" in str(refusal.value)
+
+
+def test_an_ordinary_tier_stack_is_untouched():
+    """The guard must not narrow what already worked. Three tiers is the
+    shape every shipped model and every operation in the catalogue uses."""
+    solution = solve(deep_instance(3), iterations=100, seed=0)
+
+    assert solution.status in ("FEASIBLE", "OPTIMAL")
