@@ -4,6 +4,10 @@
 was confirmed against source, configuration or this project's own measured
 results; the durations are planning estimates and are the only part that is not.
 
+> **Versión en español:** [PLAN_PUESTA_EN_MARCHA.md](PLAN_PUESTA_EN_MARCHA.md).
+> Both are maintained in parallel; where they diverge, this one is the copy
+> written against the code.
+
 Ten weeks, nine teams. Deployment itself is a days-scale exercise -- both paths
 are scripted end to end with health gates, and the stack holds no persistent
 state, so there is no migration to design and no restore to rehearse. The ten

@@ -1,0 +1,1098 @@
+<title>OSRM Gateway Go-Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+
+<style>
+:root{
+  --paper:#F5F6F4;
+  --surface:#FFFFFF;
+  --surface-2:#EDEFEC;
+  --ink:#17211E;
+  --ink-2:#3C4A46;
+  --muted:#68766F;
+  --line:#D8DDD8;
+  --line-2:#C3CBC4;
+  --accent:#0B6E5B;
+  --accent-soft:#DCEBE6;
+  --accent-ink:#07574A;
+  --signal:#A85B16;
+  --signal-soft:#F6E7D7;
+  --critical:#9E2B2B;
+  --critical-soft:#F5DEDE;
+  --ok:#2F6B3A;
+  --ok-soft:#DFEBDF;
+  --bar-it:#0B6E5B;
+  --bar-fn:#A85B16;
+  --bar-x:#4A5E68;
+  --bar-text:#FFFFFF;
+
+  --f-display:"IBM Plex Sans Condensed","Helvetica Neue",Arial,sans-serif;
+  --f-body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --f-serif:"IBM Plex Serif",Georgia,serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#101614;
+    --surface:#18201E;
+    --surface-2:#1F2A27;
+    --ink:#E6EBE8;
+    --ink-2:#C0CAC5;
+    --muted:#8B9992;
+    --line:#2C3936;
+    --line-2:#3B4A46;
+    --accent:#49A88E;
+    --accent-soft:#17332C;
+    --accent-ink:#7FC8B2;
+    --signal:#D98B43;
+    --signal-soft:#33240F;
+    --critical:#DE7272;
+    --critical-soft:#331717;
+    --ok:#6FAE74;
+    --ok-soft:#16261A;
+    --bar-it:#49A88E;
+    --bar-fn:#D98B43;
+    --bar-x:#7C929C;
+    --bar-text:#0E1614;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101614;
+  --surface:#18201E;
+  --surface-2:#1F2A27;
+  --ink:#E6EBE8;
+  --ink-2:#C0CAC5;
+  --muted:#8B9992;
+  --line:#2C3936;
+  --line-2:#3B4A46;
+  --accent:#49A88E;
+  --accent-soft:#17332C;
+  --accent-ink:#7FC8B2;
+  --signal:#D98B43;
+  --signal-soft:#33240F;
+  --critical:#DE7272;
+  --critical-soft:#331717;
+  --ok:#6FAE74;
+  --ok-soft:#16261A;
+  --bar-it:#49A88E;
+  --bar-fn:#D98B43;
+  --bar-x:#7C929C;
+  --bar-text:#0E1614;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--f-body);
+  font-size:16px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1420px;margin:0 auto;padding:0 28px 120px}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:2px solid var(--ink);padding:44px 0 26px;margin-bottom:0}
+.eyebrow{
+  font-family:var(--f-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 14px
+}
+h1{
+  font-family:var(--f-display);font-weight:700;font-size:clamp(2.5rem,6vw,4.1rem);
+  line-height:1.02;letter-spacing:-.015em;margin:0 0 18px;text-wrap:balance;max-width:16ch
+}
+.standfirst{font-size:1.12rem;color:var(--ink-2);max-width:64ch;margin:0 0 26px}
+.metastrip{
+  display:flex;flex-wrap:wrap;gap:0;border-top:1px solid var(--line);
+  font-family:var(--f-mono);font-size:12px
+}
+.metastrip div{padding:12px 22px 12px 0;margin-right:22px;border-right:1px solid var(--line);color:var(--muted)}
+.metastrip div:last-child{border-right:0}
+.metastrip b{display:block;color:var(--ink);font-weight:500;letter-spacing:0}
+
+/* ---------- layout ---------- */
+.cols{display:block}
+@media (min-width:1100px){
+  .cols{display:grid;grid-template-columns:212px minmax(0,1fr);gap:56px;align-items:start}
+  .toc{position:sticky;top:28px;padding-top:44px}
+}
+.toc{font-family:var(--f-mono);font-size:12px;line-height:1.9}
+.toc p{
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)
+}
+.toc a{display:block;color:var(--ink-2);text-decoration:none;padding:1px 0}
+.toc a:hover,.toc a:focus-visible{color:var(--accent);text-decoration:underline}
+@media (max-width:1099px){.toc{display:none}}
+
+main{padding-top:44px;min-width:0}
+section{margin:0 0 68px;scroll-margin-top:24px}
+h2{
+  font-family:var(--f-display);font-weight:700;font-size:1.86rem;letter-spacing:-.01em;
+  margin:0 0 6px;text-wrap:balance
+}
+.sectnum{
+  font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;color:var(--accent);
+  text-transform:uppercase;display:block;margin-bottom:8px
+}
+h3{
+  font-family:var(--f-display);font-weight:600;font-size:1.24rem;letter-spacing:-.005em;
+  margin:34px 0 10px;text-wrap:balance
+}
+h4{font-family:var(--f-display);font-weight:600;font-size:1.02rem;margin:22px 0 8px}
+p{margin:0 0 14px;max-width:72ch}
+.lede{color:var(--ink-2);max-width:72ch;margin-bottom:22px}
+a{color:var(--accent-ink)}
+code{
+  font-family:var(--f-mono);font-size:.87em;background:var(--surface-2);
+  padding:1px 5px;border-radius:3px;color:var(--ink)
+}
+ul{margin:0 0 16px;padding-left:20px;max-width:72ch}
+li{margin-bottom:7px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- verdict ---------- */
+.verdict{
+  background:var(--surface);border:1px solid var(--line-2);border-left:4px solid var(--accent);
+  padding:30px 34px;margin:40px 0 0
+}
+.verdict .tag{
+  font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 12px
+}
+.verdict .answer{
+  font-family:var(--f-serif);font-size:1.4rem;line-height:1.5;margin:0 0 18px;max-width:60ch
+}
+.verdict ol{margin:0;padding-left:22px;max-width:70ch}
+.verdict li{margin-bottom:10px;color:var(--ink-2)}
+.verdict li b{color:var(--ink)}
+
+/* ---------- tables ---------- */
+.scroll{overflow-x:auto;margin:0 0 20px;border:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--surface);min-width:640px}
+th{
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  text-align:left;color:var(--muted);font-weight:500;padding:11px 14px;
+  border-bottom:1px solid var(--line-2);background:var(--surface-2);white-space:nowrap;vertical-align:bottom
+}
+td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td b,td strong{color:var(--ink);font-weight:600}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:13px}
+.id{font-family:var(--f-mono);font-size:12px;color:var(--accent-ink);white-space:nowrap;font-weight:500}
+
+/* ---------- chips ---------- */
+.chip{
+  display:inline-block;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;padding:2px 7px;border-radius:2px;white-space:nowrap;font-weight:500
+}
+.chip-stop{background:var(--critical-soft);color:var(--critical)}
+.chip-gate{background:var(--signal-soft);color:var(--signal)}
+.chip-bound{background:var(--accent-soft);color:var(--accent-ink)}
+.chip-ok{background:var(--ok-soft);color:var(--ok)}
+.chip-it{background:var(--accent-soft);color:var(--accent-ink)}
+.chip-fn{background:var(--signal-soft);color:var(--signal)}
+
+/* ---------- gantt ---------- */
+.gantt{
+  overflow-x:auto;border:1px solid var(--line);background:var(--surface);margin-bottom:14px
+}
+.gantt-inner{min-width:900px;padding:0}
+.grow{
+  display:grid;grid-template-columns:240px repeat(10,1fr);align-items:center;
+  border-bottom:1px solid var(--line)
+}
+.grow:last-child{border-bottom:0}
+.ghead{background:var(--surface-2);border-bottom:1px solid var(--line-2)}
+.ghead .glabel{color:var(--muted)}
+.glabel{
+  font-family:var(--f-mono);font-size:11.5px;padding:9px 14px;color:var(--ink);
+  border-right:1px solid var(--line);letter-spacing:.02em
+}
+.gwk{
+  font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);text-align:center;padding:9px 0;border-right:1px solid var(--line)
+}
+.gcell{height:38px;border-right:1px solid var(--line);position:relative}
+.gcell:last-child{border-right:0}
+.gbar{
+  position:absolute;top:9px;bottom:9px;left:2px;right:2px;border-radius:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--f-mono);font-size:10px;color:var(--bar-text);letter-spacing:.04em
+}
+.b-it{background:var(--bar-it)}
+.b-fn{background:var(--bar-fn)}
+.b-x{background:var(--bar-x)}
+.legend{display:flex;flex-wrap:wrap;gap:20px;font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:7px}
+.sw{width:13px;height:13px;border-radius:2px;display:inline-block}
+
+/* ---------- team plan blocks ---------- */
+.team{border-top:2px solid var(--ink);padding-top:18px;margin-top:44px}
+.team-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;margin-bottom:4px}
+.team-head h3{margin:0;font-size:1.34rem}
+.team-meta{
+  font-family:var(--f-mono);font-size:11.5px;color:var(--muted);margin:0 0 16px;
+  display:flex;flex-wrap:wrap;gap:6px 18px
+}
+.team-meta b{color:var(--ink-2);font-weight:500}
+
+/* ---------- checklists ---------- */
+.cl{
+  background:var(--surface);border:1px solid var(--line);padding:22px 26px;margin:0 0 18px
+}
+.cl h4{margin-top:0;display:flex;align-items:baseline;gap:10px}
+.cl ul{list-style:none;padding:0;margin:0;max-width:none}
+.cl li{
+  display:grid;grid-template-columns:16px 1fr;gap:12px;align-items:start;
+  padding:7px 0;border-bottom:1px dotted var(--line);margin:0;font-size:14.5px
+}
+.cl li:last-child{border-bottom:0}
+.box{
+  width:13px;height:13px;border:1.5px solid var(--line-2);border-radius:2px;
+  margin-top:5px;flex:none;background:var(--paper)
+}
+.cl small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+.cl code{font-size:12.5px}
+.clgrid{display:grid;gap:18px}
+@media (min-width:820px){.clgrid{grid-template-columns:1fr 1fr}}
+
+/* ---------- callouts ---------- */
+.note{
+  border-left:3px solid var(--signal);background:var(--signal-soft);
+  padding:16px 20px;margin:0 0 20px
+}
+.note p{margin:0;max-width:66ch;font-size:14.5px;color:var(--ink)}
+.note p+p{margin-top:10px}
+.note .nlabel{
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--signal);margin-bottom:6px;display:block
+}
+footer{
+  border-top:1px solid var(--line);margin-top:60px;padding-top:20px;
+  font-family:var(--f-mono);font-size:11.5px;color:var(--muted);max-width:72ch
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Implementation program &middot; Deployment and operations</p>
+  <h1>OSRM Gateway Go-Live</h1>
+  <p class="standfirst">How nine teams take the routing suite from a repository into daily dispatch operations &mdash; what each one does, in what order, and how long it takes. Plus the honest answer to whether it can be done.</p>
+  <div class="metastrip">
+    <div><b>System</b>Rust gateway + osrm-routed + Redis</div>
+    <div><b>Options</b>Docker or FreeBSD jail</div>
+    <div><b>Duration</b>10 weeks to steady state</div>
+    <div><b>Fast path</b>4&ndash;5 days, trusted network</div>
+    <div><b>Prepared</b>12 Sep 2026</div>
+  </div>
+</header>
+
+<div class="cols">
+
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <a href="#verdict">Is it feasible</a>
+  <a href="#scope">What deploys</a>
+  <a href="#conditions">Conditions</a>
+  <a href="#teams">Teams</a>
+  <a href="#schedule">Schedule</a>
+  <a href="#plans">Team plans</a>
+  <a href="#checklists">Checklists</a>
+  <a href="#gates">Go / No-Go gates</a>
+  <a href="#steady">After go-live</a>
+  <a href="#assumptions">Assumptions</a>
+</nav>
+
+<main>
+
+<!-- ============ VERDICT ============ -->
+<section id="verdict">
+  <div class="verdict">
+    <p class="tag">The question you asked</p>
+    <p class="answer">Yes &mdash; deployment itself is a days-scale exercise, not a project. Putting it <em>into operation</em> is a ten-week program, and it turns on two things this repository deliberately does not contain.</p>
+    <ol>
+      <li><b>The gateway has no authentication and no TLS, by design.</b> <code>gateway/src/openapi.rs</code> states it and a test enforces it; the dependency list carries no TLS stack at all. Nothing here can face a network you do not fully trust until IT supplies an edge that terminates TLS and authenticates callers. That is the one genuine prerequisite, and it is not in scope of this codebase.</li>
+      <li><b>The shipped <code>/vrp</code> is capacity and geography only.</b> No time windows, no service times, no driver shifts or skills, and no time-of-day dimension anywhere &mdash; every plan assumes free-flow speed. If dispatch needs delivery windows, that is a build project, not a deployment. Confirm this in week one, before anything is provisioned.</li>
+    </ol>
+  </div>
+  <p class="lede" style="margin-top:26px">Everything else is in the suite's favour. Both deployment paths are scripted end to end with health gates and are safely re-runnable. The stack holds no persistent state &mdash; Redis is a cache, losing it costs cache hits and nothing else &mdash; so there is no data migration to design, no backup schema, and no restore rehearsal. Rollback is redeploying the previous build. That is an unusually cheap operational profile, and it is why the ten weeks below are dominated by <em>functional</em> validation rather than infrastructure.</p>
+</section>
+
+<!-- ============ SCOPE ============ -->
+<section id="scope">
+  <span class="sectnum">01</span>
+  <h2>What actually deploys</h2>
+  <p class="lede">Three processes, one of which is built from this repository. Knowing which is which prevents most of the scope arguments.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Component</th><th>Origin</th><th>Owned by</th><th>Notes for planning</th></tr></thead>
+    <tbody>
+      <tr><td><b>API gateway</b></td><td>Built from <code>gateway/</code> (Rust)</td><td>Application team</td><td>The only thing this repo ships. Same source on both deployment paths.</td></tr>
+      <tr><td><b>osrm-routed</b></td><td>Stock OSRM, C++</td><td>Platform team</td><td>One engine serves one routing profile, fixed when the map is built.</td></tr>
+      <tr><td><b>Redis</b></td><td>Stock package or image</td><td>Platform team</td><td>Cache plus shared rate-limit counters. Optional &mdash; the gateway degrades to in-process caching.</td></tr>
+      <tr><td><b>Map data</b></td><td>Geofabrik extract, processed locally</td><td>Geospatial team</td><td>~180&nbsp;MB download, then extract / partition / customize. Slow and memory-hungry.</td></tr>
+      <tr><td><b>Python <code>vrp/</code> platform</b></td><td>This repo, library only</td><td>&mdash;</td><td><b>Not a service.</b> No process hosts it; how the Rust gateway would reach it is an open design question. Out of scope for go-live.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Pick the deployment path in week one</h3>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>&nbsp;</th><th>Docker</th><th>FreeBSD jail</th></tr></thead>
+    <tbody>
+      <tr><td><b>Entry point</b></td><td class="num">make compose-up</td><td class="num">make jail-up</td></tr>
+      <tr><td><b>Target</b></td><td>Any Linux Docker host, local or remote via <code>DOCKER_HOST</code></td><td>A jail on a FreeBSD host &mdash; jails cannot run Docker</td></tr>
+      <tr><td><b>Map data built</b></td><td>On your machine, bundled into the image</td><td>Natively in the jail (<code>make jail-data</code>)</td></tr>
+      <tr><td><b>Extra host work</b></td><td>None beyond the daemon</td><td><code>make jail-host</code> for kernel tunables, loopback and resolver &mdash; <b>not optional</b></td></tr>
+      <tr><td><b>Exposure</b></td><td>Published container port</td><td>Jail loopback; <code>make jail-publish</code> edits the host's <code>pf.conf</code></td></tr>
+      <tr><td><b>Recommendation</b></td><td colspan="2">Use Docker unless the target is specifically a FreeBSD jail. The jail path exists because a jail cannot run Docker, not because it is preferable.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="nlabel">Trap, jail path only</span>
+    <p><code>net.inet.tcp.delayed_ack=0</code> is worth 67&nbsp;ms &rarr; 9&nbsp;ms on p50 latency, and it can only be set from the host. Skip <code>make jail-host</code> and the jail simply looks like slower hardware &mdash; nothing errors and nothing logs. Build the <code>jail-doctor</code> check into the provisioning checklist, not into someone's memory.</p>
+  </div>
+</section>
+
+<!-- ============ CONDITIONS ============ -->
+<section id="conditions">
+  <span class="sectnum">02</span>
+  <h2>Conditions, constraints and known traps</h2>
+  <p class="lede">Everything below is a real property of the system as it stands, confirmed against the source. Two are stop-ships; the rest are bounds to design within, and each one has an owner and a closing action.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>&nbsp;</th><th>Finding</th><th>Consequence</th><th>Closed by</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="chip chip-stop">Stop-ship</span></td>
+        <td><b>No authentication, no TLS</b> anywhere in the gateway</td>
+        <td>Cannot be exposed beyond a trusted network. Any caller who reaches the port gets the full API.</td>
+        <td>Reverse proxy or API gateway terminating TLS and authenticating callers, built by IT</td>
+        <td class="id">IT-2</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-stop">Stop-ship</span></td>
+        <td><b>No time windows, service times, skills or shifts</b> in <code>/vrp</code>; no time-of-day dimension at all</td>
+        <td>If dispatch requires delivery windows, the shipped optimiser cannot express the requirement.</td>
+        <td>Week-one fit-gap. Either accept capacity-and-geography planning, or scope a separate build.</td>
+        <td class="id">FN-1</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-gate">Gate</span></td>
+        <td>An L7 proxy without <code>FORWARDED_ALLOW_IPS</code> makes every client share one rate-limit bucket</td>
+        <td>Rate limiting silently stops working per-client. Setting it to <code>*</code> defeats limiting entirely &mdash; any caller mints a fresh bucket per request.</td>
+        <td>Set it to the proxy's CIDR and prove per-client buckets in load test</td>
+        <td class="id">IT-2</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-gate">Gate</span></td>
+        <td><b>One engine per routing profile.</b> Three profiles means three map builds and three <code>osrm-routed</code> processes</td>
+        <td>Roughly triples data-build time, disk and RAM. A 2&nbsp;GB jail will not comfortably host three.</td>
+        <td>Confirm required profiles in week one; size the host against that number</td>
+        <td class="id">IT-1</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-gate">Gate</span></td>
+        <td><b>No high availability in the repository.</b> Single node, no clustering or failover</td>
+        <td>Host loss is an outage. Two nodes behind a load balancer is possible &mdash; Redis shares the rate-limit counters &mdash; but nothing here builds or tests it.</td>
+        <td>Accept single-node with a documented RTO, or fund an HA design</td>
+        <td class="id">IT-1</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td>Matrix capped at <b>10,000 cells</b> (100 coordinates square)</td>
+        <td>Wider matrices are refused. Raising it requires <code>--max-table-size</code> changed in <em>both</em> deployment definitions, as the square root.</td>
+        <td>Size against real stop counts; change both files in one commit</td>
+        <td class="id">IT-4</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td>VRP capped at <b>2,000 stops</b>; one such solve peaked at <b>277&nbsp;MB</b>, four concurrent at <b>615&nbsp;MB</b></td>
+        <td>Peak memory is stops &times; concurrent solves. Node-wide concurrency is workers &times; <code>VRP_MAX_CONCURRENCY</code>.</td>
+        <td>Set guards from a measured RSS ceiling in the capacity run, not from defaults</td>
+        <td class="id">IT-5</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td>Coordinates travel in the URL; ~720 <code>/match</code> breadcrumbs, 24,000-byte upstream ceiling</td>
+        <td>Long GPS traces are refused with a 422 naming the limit. If a proxy fronts the <em>engine</em>, lower it &mdash; nginx and Apache cap a request line near 8&nbsp;KB.</td>
+        <td>Integration team handles the 422; IT confirms no proxy sits between gateway and engine</td>
+        <td class="id">IT-4</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td><code>process_*</code> metrics are read from <code>/proc</code> and are <b>absent on FreeBSD</b></td>
+        <td>CPU, RSS, open-FD and start-time panels will be blank on the jail path.</td>
+        <td>Build dashboards and alerts that do not depend on them</td>
+        <td class="id">IT-5</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td><code>make process-osrm</code> needs Docker <b>even when the target is the jail</b></td>
+        <td>A pure-FreeBSD shop still needs one Docker host, or must use <code>make jail-data</code> to build natively.</td>
+        <td>Decide which; the jail path builds its own data and needs no Docker</td>
+        <td class="id">IT-3</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td><code>make help</code> advertises <code>build-pkg</code>, <code>publish</code> and <code>clean-pkg</code>, <b>none of which exist</b></td>
+        <td>An engineer following the help text hits <code>No rule to make target</code>. They retired with the PyPI package.</td>
+        <td>Note it in the local runbook; ignore those three lines</td>
+        <td class="id">IT-4</td>
+      </tr>
+      <tr>
+        <td><span class="chip chip-bound">Bound</span></td>
+        <td>Settings counts disagree across docs &mdash; 29, 35 and 36 in different places</td>
+        <td>A config review driven from prose will miss settings.</td>
+        <td>Review against <code>gateway/src/config.rs</code>, which is the single source of truth</td>
+        <td class="id">IT-4</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="nlabel">Current repository state, 12 Sep 2026</span>
+    <p>The committed tree is green: <b>1,225 tests pass</b>, 5 skipped, 3 xfailed. One failure and one collection error come from work in flight at the time of writing &mdash; an untracked <code>vrp/anonymise.py</code> and its test, citing task T-88, which is still open. Neither touches the gateway or either deployment path. Treat the committed tree as the release baseline and tag it before the program starts.</p>
+  </div>
+</section>
+
+<!-- ============ TEAMS ============ -->
+<section id="teams">
+  <span class="sectnum">03</span>
+  <h2>Nine teams and what each one owns</h2>
+  <p class="lede">Codes are used throughout the schedule and the checklists. <span class="chip chip-it">IT</span> teams build and run the platform; <span class="chip chip-fn">FN</span> teams define what a good plan is and make it part of the working day. The codes group ownership; they are not an order of work.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Code</th><th>Team</th><th>Owns</th><th>Decides</th><th>Peak size</th></tr></thead>
+    <tbody>
+      <tr><td class="id">IT-1</td><td><b>Platform &amp; Infrastructure</b></td><td>Hosts, OS, Docker daemon or jail, storage, network, DNS, firewall</td><td>Deployment path, host sizing, HA posture</td><td class="num">2</td></tr>
+      <tr><td class="id">IT-2</td><td><b>Security &amp; Access</b></td><td>The edge: TLS, authentication, secrets, trusted-proxy config, exposure review</td><td>How callers prove identity; what is exposed to whom</td><td class="num">2</td></tr>
+      <tr><td class="id">IT-3</td><td><b>Geospatial Data</b></td><td>OSM extract, profile builds, refresh cadence, snapping quality</td><td>Map currency and which profiles exist</td><td class="num">1</td></tr>
+      <tr><td class="id">IT-4</td><td><b>Application &amp; Release</b></td><td>Gateway build, configuration, versioning and the <code>/v1</code> deprecation window, release and rollback</td><td>Release contents and cadence</td><td class="num">2</td></tr>
+      <tr><td class="id">IT-5</td><td><b>SRE &amp; Observability</b></td><td>Metrics, dashboards, alerts, capacity, runbook, on-call</td><td>Alert thresholds and capacity guards</td><td class="num">2</td></tr>
+      <tr><td class="id">IT-6</td><td><b>QA &amp; Validation</b></td><td>Test suite, parity regression gate, load and capacity runs, acceptance evidence</td><td>Whether a build is fit to promote</td><td class="num">2</td></tr>
+      <tr><td class="id">FN-1</td><td><b>Business Analysis</b></td><td>Fit-gap, requirements, KPI definition, acceptance criteria for a plan</td><td>What the system is required to do</td><td class="num">2</td></tr>
+      <tr><td class="id">FN-2</td><td><b>Fleet Operations &amp; Dispatch</b></td><td>Depots, vehicles, stop master data, daily use, exception handling</td><td>Whether a produced plan is drivable</td><td class="num">3&ndash;4</td></tr>
+      <tr><td class="id">FN-3</td><td><b>Integration &amp; Client Apps</b></td><td>The calling application, error handling, retries, contract conformance</td><td>How the API is consumed</td><td class="num">2</td></tr>
+      <tr><td class="id">FN-4</td><td><b>Training &amp; Change</b></td><td>SOPs, training delivery, go-live support, feedback loop</td><td>When dispatchers are ready</td><td class="num">1&ndash;2</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ============ SCHEDULE ============ -->
+<section id="schedule">
+  <span class="sectnum">04</span>
+  <h2>Ten weeks, phase by phase</h2>
+  <p class="lede">Weeks are calendar weeks with a small team working part-time on the program. Infrastructure finishes early; the tail is functional validation and parallel running, which is where the real risk sits.</p>
+
+  <div class="gantt">
+    <div class="gantt-inner">
+      <div class="grow ghead">
+        <div class="glabel">Workstream</div>
+        <div class="gwk">W1</div><div class="gwk">W2</div><div class="gwk">W3</div><div class="gwk">W4</div><div class="gwk">W5</div>
+        <div class="gwk">W6</div><div class="gwk">W7</div><div class="gwk">W8</div><div class="gwk">W9</div><div class="gwk">W10</div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">FN-1 &nbsp;Fit-gap &amp; sizing</div>
+        <div class="gcell"><div class="gbar b-fn">scope</div></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"></div><div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">IT-1 &nbsp;Hosts &amp; network</div>
+        <div class="gcell"><div class="gbar b-it">plan</div></div>
+        <div class="gcell"><div class="gbar b-it">staging</div></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">prod</div></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">IT-2 &nbsp;Edge: TLS &amp; authn</div>
+        <div class="gcell"><div class="gbar b-it">design</div></div>
+        <div class="gcell"><div class="gbar b-it">build</div></div>
+        <div class="gcell"><div class="gbar b-it">build</div></div>
+        <div class="gcell"><div class="gbar b-it">review</div></div>
+        <div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">prod</div></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">IT-3 &nbsp;Map data</div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">build</div></div>
+        <div class="gcell"><div class="gbar b-it">validate</div></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">prod</div></div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">IT-4 &nbsp;Build &amp; config</div>
+        <div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">deploy</div></div>
+        <div class="gcell"><div class="gbar b-it">tune</div></div>
+        <div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">release</div></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">cutover</div></div>
+        <div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">IT-5 &nbsp;Observability</div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">metrics</div></div>
+        <div class="gcell"><div class="gbar b-it">alerts</div></div>
+        <div class="gcell"><div class="gbar b-it">capacity</div></div>
+        <div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">on-call</div></div>
+        <div class="gcell"><div class="gbar b-it">hypercare</div></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">IT-6 &nbsp;QA &amp; acceptance</div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">suite</div></div>
+        <div class="gcell"><div class="gbar b-it">accept</div></div>
+        <div class="gcell"><div class="gbar b-it">load</div></div>
+        <div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-it">gate</div></div>
+        <div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">FN-2 &nbsp;Master data &amp; plans</div>
+        <div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-fn">depots</div></div>
+        <div class="gcell"><div class="gbar b-fn">stops</div></div>
+        <div class="gcell"><div class="gbar b-fn">criteria</div></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-fn">parallel run</div></div>
+        <div class="gcell"><div class="gbar b-fn">parallel run</div></div>
+        <div class="gcell"><div class="gbar b-fn">live</div></div>
+        <div class="gcell"><div class="gbar b-fn">live</div></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">FN-3 &nbsp;Integration</div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-fn">build</div></div>
+        <div class="gcell"><div class="gbar b-fn">build</div></div>
+        <div class="gcell"><div class="gbar b-fn">errors</div></div>
+        <div class="gcell"><div class="gbar b-fn">pilot</div></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-fn">cutover</div></div>
+        <div class="gcell"></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">FN-4 &nbsp;Training &amp; change</div>
+        <div class="gcell"></div><div class="gcell"></div><div class="gcell"></div><div class="gcell"></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-fn">SOPs</div></div>
+        <div class="gcell"><div class="gbar b-fn">train</div></div>
+        <div class="gcell"><div class="gbar b-fn">train</div></div>
+        <div class="gcell"><div class="gbar b-fn">support</div></div>
+        <div class="gcell"><div class="gbar b-fn">support</div></div>
+      </div>
+
+      <div class="grow">
+        <div class="glabel">Gates</div>
+        <div class="gcell"><div class="gbar b-x">G0</div></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-x">G1</div></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-x">G2</div></div>
+        <div class="gcell"><div class="gbar b-x">G3</div></div>
+        <div class="gcell"></div>
+        <div class="gcell"><div class="gbar b-x">G4</div></div>
+        <div class="gcell"><div class="gbar b-x">G5</div></div>
+        <div class="gcell"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:var(--bar-it)"></i> IT workstream</span>
+    <span><i class="sw" style="background:var(--bar-fn)"></i> Functional workstream</span>
+    <span><i class="sw" style="background:var(--bar-x)"></i> Decision gate</span>
+  </div>
+
+  <h3>The fast path, if you only need it on a trusted network</h3>
+  <p>Strip the functional program away and a staging deployment is four to five working days of IT effort: half a day to provision, half a day for host prerequisites, a day for the map build, half a day to deploy and health-check, a day for configuration review, and a day for smoke and load testing. That is a legitimate first milestone &mdash; get it standing in week two, then spend eight weeks proving it belongs in the business.</p>
+</section>
+
+<!-- ============ TEAM PLANS ============ -->
+<section id="plans">
+  <span class="sectnum">05</span>
+  <h2>Detailed plans, per team</h2>
+  <p class="lede">Durations are working days of elapsed time for that activity, not headcount-days. Where an activity is mostly machine time &mdash; a map build, a Rust compile in a 2&nbsp;GB jail &mdash; it is marked so, because it needs watching rather than staffing.</p>
+
+  <!-- IT-1 -->
+  <div class="team">
+    <div class="team-head"><span class="id">IT-1</span><h3>Platform &amp; Infrastructure</h3></div>
+    <p class="team-meta"><b>Weeks 1&ndash;2, then 7</b><span><b>Total:</b> 9 days</span><span><b>Blocks:</b> everything</span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1.1</td><td>Choose the deployment path and size the host against profile count, peak stops per solve and expected concurrency</td><td class="num">1</td><td>FN-1 sizing</td><td>Written decision; host spec signed</td></tr>
+        <tr><td class="num">1.2</td><td>Provision the staging host &mdash; Linux Docker host, or FreeBSD host plus jail</td><td class="num">2</td><td>1.1</td><td>SSH reachable, disk sized for the extract plus built graph</td></tr>
+        <tr><td class="num">1.3</td><td>Network, DNS and firewall: inbound only to the edge, gateway&rarr;engine on loopback or the compose network</td><td class="num">1</td><td>1.2</td><td>Engine unreachable from outside the host</td></tr>
+        <tr><td class="num">1.4</td><td><b>Jail path only:</b> <code>make jail-host</code> &mdash; kernel tunables, jail-local loopback, resolver. Then <code>make jail-doctor</code> to confirm persistence</td><td class="num">1</td><td>1.2</td><td><code>delayed_ack=0</code> set <em>and</em> persisted; Redis not answering <code>DENIED</code></td></tr>
+        <tr><td class="num">1.5</td><td>Baseline the target: <code>make compose-doctor</code> or <code>make jail-doctor</code>, recorded</td><td class="num">0.5</td><td>1.3, 1.4</td><td>Architecture and memory recorded before any build</td></tr>
+        <tr><td class="num">1.6</td><td>Decide the HA posture. Single node with a documented RTO, or fund a two-node design</td><td class="num">1</td><td>1.1</td><td>Decision recorded with the accepted outage window</td></tr>
+        <tr><td class="num">1.7</td><td>Provision production, mirroring staging exactly</td><td class="num">2</td><td>G2 passed</td><td><code>doctor</code> output matches staging</td></tr>
+        <tr><td class="num">1.8</td><td>Patching, access and change-control folded into existing IT process</td><td class="num">0.5</td><td>1.7</td><td>Hosts in the standard inventory</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- IT-2 -->
+  <div class="team">
+    <div class="team-head"><span class="id">IT-2</span><h3>Security &amp; Access</h3></div>
+    <p class="team-meta"><b>Weeks 1&ndash;4, then 7</b><span><b>Total:</b> 12 days</span><span><b>Critical path:</b> yes &mdash; this is the stop-ship</span></p>
+    <p>This team builds what the repository deliberately omits. Nothing here is configuration of the gateway; it is a component IT supplies in front of it.</p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">2.1</td><td>Design the edge: which proxy, where TLS terminates, how callers authenticate (API key, mTLS or OIDC), and what authorisation &mdash; if any &mdash; is needed per endpoint</td><td class="num">2</td><td>&mdash;</td><td>Design approved; certificate source identified</td></tr>
+        <tr><td class="num">2.2</td><td>Stand up the proxy with a valid certificate and automated renewal</td><td class="num">2</td><td>1.2, 2.1</td><td>TLS handshake clean; renewal proven, not assumed</td></tr>
+        <tr><td class="num">2.3</td><td>Implement authentication and issue credentials to the calling applications</td><td class="num">3</td><td>2.2</td><td>Unauthenticated request refused at the edge</td></tr>
+        <tr><td class="num">2.4</td><td>Set <code>FORWARDED_ALLOW_IPS</code> to the proxy's CIDR &mdash; <b>never</b> <code>*</code> &mdash; and prove per-client rate-limit buckets hold</td><td class="num">1</td><td>2.3</td><td>Two clients through the proxy each get their own allowance</td></tr>
+        <tr><td class="num">2.5</td><td>Confirm the gateway port is not reachable except through the edge, and the engine port not at all</td><td class="num">1</td><td>2.4</td><td>Port scan from outside shows only the edge</td></tr>
+        <tr><td class="num">2.6</td><td>Secrets handling: nothing sensitive in <code>deploy/env/app.env</code>, which is committed. Real process environment outranks it on both paths</td><td class="num">0.5</td><td>&mdash;</td><td>No credential in any committed file</td></tr>
+        <tr><td class="num">2.7</td><td>Exposure review and sign-off &mdash; the map data is public, the query patterns may not be</td><td class="num">2</td><td>2.5</td><td>Security sign-off recorded</td></tr>
+        <tr><td class="num">2.8</td><td>Replicate the whole edge in production</td><td class="num">1</td><td>1.7</td><td>Production edge matches staging, independently verified</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- IT-3 -->
+  <div class="team">
+    <div class="team-head"><span class="id">IT-3</span><h3>Geospatial Data</h3></div>
+    <p class="team-meta"><b>Weeks 2&ndash;3, then 7</b><span><b>Total:</b> 6 days</span><span><b>Mostly machine time</b></span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">3.1</td><td><code>make download-data</code> &mdash; the regional extract, ~180&nbsp;MB</td><td class="num">0.5</td><td>1.2</td><td>Extract present, checksum recorded</td></tr>
+        <tr><td class="num">3.2</td><td><code>make process-osrm PROFILE=car</code>, or <code>make jail-data</code> on the jail path. Machine time; memory-hungry and OOM-prone on a small host</td><td class="num">1</td><td>3.1</td><td>Graph built; peak memory recorded</td></tr>
+        <tr><td class="num">3.3</td><td>Each additional profile: a second extract pass and a second engine process</td><td class="num">1 each</td><td>3.2</td><td>One engine per profile, each with its own URL setting</td></tr>
+        <tr><td class="num">3.4</td><td><b>Snapping validation.</b> Run a sample of real depot and customer addresses through <code>/nearest</code> and review anything snapping far from the road network</td><td class="num">2</td><td>3.2</td><td>Snap-distance distribution reviewed with FN-2; outliers explained</td></tr>
+        <tr><td class="num">3.5</td><td>Agree the refresh cadence and who triggers it &mdash; monthly is a reasonable default for a stable road network</td><td class="num">0.5</td><td>3.4</td><td>Cadence documented with a named owner</td></tr>
+        <tr><td class="num">3.6</td><td>Rebuild for production and verify against the staging graph</td><td class="num">1</td><td>1.7</td><td>Same source extract; same profiles</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="note">
+      <span class="nlabel">Worth telling the functional team early</span>
+      <p>A straight line understates a real Costa Rica drive by roughly 40% at the median, and by 17.6&times; in the worst sampled pair &mdash; two points 914&nbsp;m apart, 16.1&nbsp;km by road. Two-thirds of metropolitan address pairs have a different distance out than back. Dispatchers who have been eyeballing a map will find plans counter-intuitive at first, and the plans will usually be right.</p>
+    </div>
+  </div>
+
+  <!-- IT-4 -->
+  <div class="team">
+    <div class="team-head"><span class="id">IT-4</span><h3>Application &amp; Release</h3></div>
+    <p class="team-meta"><b>Weeks 3&ndash;4, 7, 9</b><span><b>Total:</b> 8 days</span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">4.1</td><td>Tag the release baseline from a green committed tree; record the commit</td><td class="num">0.5</td><td>&mdash;</td><td>Tag exists; CI green on it</td></tr>
+        <tr><td class="num">4.2</td><td>Review every setting against <code>gateway/src/config.rs</code> &mdash; the source of truth, since the prose counts disagree. Record the intended value and why for each</td><td class="num">1</td><td>4.1</td><td>Config baseline reviewed and stored with the release</td></tr>
+        <tr><td class="num">4.3</td><td>Deploy to staging: <code>make compose-up</code> or <code>make jail-up</code>, then <code>*-health</code></td><td class="num">0.5</td><td>2.2, 3.2</td><td><code>/ready</code> passes, covering gateway and engine</td></tr>
+        <tr><td class="num">4.4</td><td>Smoke the surface: <code>/health</code>, <code>/ready</code>, <code>/metrics</code>, <code>/docs</code>, plus one real call per endpoint</td><td class="num">0.5</td><td>4.3</td><td>Every endpoint answers with real map data</td></tr>
+        <tr><td class="num">4.5</td><td>Apply capacity guards from IT-5's measurement: stop limit, solve concurrency, queue depth, matrix cells</td><td class="num">1</td><td>5.4</td><td>Guards set from measurement, not defaults</td></tr>
+        <tr><td class="num">4.6</td><td>Decide the versioning posture. Everything is served under <code>/v1</code> and at the root during deprecation; setting <code>API_SUNSET</code> commits to a date</td><td class="num">0.5</td><td>FN-3 integration</td><td>Integrators on <code>/v1</code>; sunset date set or deliberately left empty</td></tr>
+        <tr><td class="num">4.7</td><td>Write the release and rollback procedure &mdash; redeploy the previous build; no data migration, no state to unwind</td><td class="num">1</td><td>4.3</td><td>Rollback rehearsed on staging, timed</td></tr>
+        <tr><td class="num">4.8</td><td>Build and deploy the production release</td><td class="num">1</td><td>G3</td><td>Production answering behind the edge</td></tr>
+        <tr><td class="num">4.9</td><td>Cutover execution</td><td class="num">0.5</td><td>G5</td><td>Traffic on the new path; rollback still available</td></tr>
+        <tr><td class="num">4.10</td><td>Keep the two deployment definitions in step &mdash; engine flags and resource limits change in both files, in the same commit</td><td class="num">0.5</td><td>&mdash;</td><td>Convention recorded in the team's review checklist</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- IT-5 -->
+  <div class="team">
+    <div class="team-head"><span class="id">IT-5</span><h3>SRE &amp; Observability</h3></div>
+    <p class="team-meta"><b>Weeks 4&ndash;6, then 9&ndash;10</b><span><b>Total:</b> 12 days</span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">5.1</td><td>Scrape <code>/metrics</code> into Prometheus. Request counts, latency histograms, request and response sizes are all present by handler</td><td class="num">1</td><td>4.3</td><td>Series arriving and retained</td></tr>
+        <tr><td class="num">5.2</td><td>Build dashboards &mdash; latency percentiles, error rate by class, cache hit ratio, upstream engine behaviour. <b>Do not depend on <code>process_*</code> panels on the jail path</b></td><td class="num">2</td><td>5.1</td><td>Dashboard renders correctly on the chosen platform</td></tr>
+        <tr><td class="num">5.3</td><td>Alerts: 5xx rate, p95 latency, <code>/ready</code> failing, engine unreachable, Redis down (degrades to in-process cache &mdash; visible only if you watch for it), rate-limit rejections climbing</td><td class="num">2</td><td>5.2</td><td>Each alert fired deliberately once and seen</td></tr>
+        <tr><td class="num">5.4</td><td><b>Capacity assessment.</b> <code>make loadtest</code> at the expected arrival rate, then <code>make capacity</code> stepped with an OOM guard. Use a forwarded-for pool &mdash; a single-source run measures the rate limiter, not the service</td><td class="num">2</td><td>5.1</td><td>Measured RSS ceiling and safe concurrency, handed to IT-4</td></tr>
+        <tr><td class="num">5.5</td><td>Log shipping and retention. Format is the familiar Python logging line, so existing grok patterns match</td><td class="num">1</td><td>4.3</td><td>Logs searchable with retention agreed</td></tr>
+        <tr><td class="num">5.6</td><td>Adapt the repository runbook into the local operations runbook, including the <code>make help</code> targets that do not exist</td><td class="num">2</td><td>5.3</td><td>A second engineer can restart the stack from it, unaided</td></tr>
+        <tr><td class="num">5.7</td><td>Document RTO honestly: no persistent state, so recovery is rebuild and redeploy. The slow part is the map build, so keep the built graph or image retrievable</td><td class="num">1</td><td>3.2</td><td>Recovery timed once, end to end</td></tr>
+        <tr><td class="num">5.8</td><td>On-call rota, escalation path and hypercare staffing</td><td class="num">1</td><td>5.6</td><td>Rota published before cutover</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- IT-6 -->
+  <div class="team">
+    <div class="team-head"><span class="id">IT-6</span><h3>QA &amp; Validation</h3></div>
+    <p class="team-meta"><b>Weeks 4&ndash;6, then 9</b><span><b>Total:</b> 9 days</span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">6.1</td><td>Run the suite on the release commit: <code>make test</code>, <code>make lint</code>, <code>cargo test</code></td><td class="num">0.5</td><td>4.1</td><td>Green, with the result attached to the tag</td></tr>
+        <tr><td class="num">6.2</td><td>Wire the parity replay gate into CI &mdash; <code>make parity-selfcheck</code> validates the harness offline; replay exercises every endpoint with no engine and no network</td><td class="num">1</td><td>6.1</td><td>Regression gate blocking merges</td></tr>
+        <tr><td class="num">6.3</td><td><code>make examples-check</code> against staging &mdash; every example client still works end to end</td><td class="num">1</td><td>4.4</td><td>All examples pass against the deployed instance</td></tr>
+        <tr><td class="num">6.4</td><td>Endpoint acceptance against the API reference: request shapes, response shapes, and the documented error bodies</td><td class="num">3</td><td>4.4</td><td>Signed test evidence per endpoint</td></tr>
+        <tr><td class="num">6.5</td><td>Negative testing: oversized matrix, over-long match trace, stop count above the cap, solve queue saturation. Each must refuse cleanly and name the limit</td><td class="num">2</td><td>6.4</td><td>Refusals are diagnosable, not 500s</td></tr>
+        <tr><td class="num">6.6</td><td>Final acceptance pack assembled for the go-live gate</td><td class="num">1</td><td>6.5, 5.4</td><td>Evidence complete; recommendation issued</td></tr>
+        <tr><td class="num">6.7</td><td>Production verification after cutover</td><td class="num">0.5</td><td>4.9</td><td>Same smoke pack green in production</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="note">
+      <span class="nlabel">Read the load test carefully</span>
+      <p>A run reporting 100% transport errors at ~2&nbsp;ms latency on every endpoint &mdash; including <code>/health</code> and <code>/metrics</code> &mdash; is pointed at nothing. That is connection-refused, not a service under stress. Check the URL and the published port before reading it as a failure. The load-test default URL is the jail's port; the Docker path needs it passed explicitly.</p>
+    </div>
+  </div>
+
+  <!-- FN-1 -->
+  <div class="team">
+    <div class="team-head"><span class="id">FN-1</span><h3>Business Analysis</h3></div>
+    <p class="team-meta"><b>Week 1, then week 5</b><span><b>Total:</b> 8 days</span><span><b>Gates the whole program</b></span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">7.1</td><td><b>Fit-gap against what <code>/vrp</code> actually does.</b> It allocates stops to depots and sequences each vehicle's load by capacity and geography. It does not model delivery windows, service duration, driver hours, vehicle skills or traffic by time of day</td><td class="num">3</td><td>&mdash;</td><td>Every requirement marked met, worked around, or out of scope &mdash; signed</td></tr>
+        <tr><td class="num">7.2</td><td>Sizing: stops per day, stops per solve, vehicles, depots, routing profiles needed, peak concurrent solves, and the daily planning window</td><td class="num">2</td><td>7.1</td><td>Numbers handed to IT-1 for host sizing</td></tr>
+        <tr><td class="num">7.3</td><td>Define what makes a plan acceptable &mdash; the measure dispatch will actually judge it on</td><td class="num">2</td><td>7.1</td><td>Written acceptance criteria FN-2 can apply daily</td></tr>
+        <tr><td class="num">7.4</td><td>Baseline today's KPIs before anything changes: distance per drop, stops per route, planning time per day</td><td class="num">1</td><td>&mdash;</td><td>Baseline recorded &mdash; there is no second chance at this</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="note">
+      <span class="nlabel">Do 7.1 in week one and nothing before it</span>
+      <p>If the answer is that dispatch needs delivery windows, the program stops here and becomes a development project instead. The richer Python planning platform in this repository does carry those concepts &mdash; but it is a library with no process hosting it, and how the gateway would reach it is an explicitly open design question. Finding this out in week five costs four weeks of provisioning.</p>
+    </div>
+  </div>
+
+  <!-- FN-2 -->
+  <div class="team">
+    <div class="team-head"><span class="id">FN-2</span><h3>Fleet Operations &amp; Dispatch</h3></div>
+    <p class="team-meta"><b>Weeks 3&ndash;5, then 7&ndash;10</b><span><b>Total:</b> 22 days</span><span><b>Largest functional effort</b></span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">8.1</td><td>Depot master data: coordinates, and a check that each snaps to the road the vehicles actually leave from</td><td class="num">2</td><td>3.2</td><td>Every depot verified on a map, not just in a spreadsheet</td></tr>
+        <tr><td class="num">8.2</td><td>Vehicle master data: capacities in the same unit the demand is expressed in, per depot</td><td class="num">2</td><td>7.2</td><td>Fleet list complete and unit-consistent</td></tr>
+        <tr><td class="num">8.3</td><td><b>Stop geocoding quality.</b> The largest functional risk. A stop that snaps to the wrong road produces a plan that serves the road, not the address</td><td class="num">5</td><td>3.4</td><td>Snap outliers reviewed and either corrected or accepted</td></tr>
+        <tr><td class="num">8.4</td><td>Learn to read a plan: allocation, per-vehicle sequence, totals. Drive the example clients against staging with real depots and stops</td><td class="num">3</td><td>4.4</td><td>Dispatchers can interpret a plan unaided</td></tr>
+        <tr><td class="num">8.5</td><td>Apply the acceptance criteria to produced plans and record every disagreement with reasons</td><td class="num">2</td><td>7.3, 8.4</td><td>A reviewed sample with recorded verdicts</td></tr>
+        <tr><td class="num">8.6</td><td><b>Parallel run.</b> Plan the day both ways &mdash; current method and the system &mdash; and compare before committing to either</td><td class="num">8</td><td>G3</td><td>Two weeks of side-by-side days with variance explained</td></tr>
+        <tr><td class="num">8.7</td><td>Exception handling: what a dispatcher does when a plan is refused, when a stop will not snap, or when the service is unavailable</td><td class="num">2</td><td>8.6</td><td>Documented fallback that does not need IT</td></tr>
+        <tr><td class="num">8.8</td><td>Live operation with daily review during hypercare</td><td class="num">10</td><td>G5</td><td>KPIs tracking against the 7.4 baseline</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- FN-3 -->
+  <div class="team">
+    <div class="team-head"><span class="id">FN-3</span><h3>Integration &amp; Client Applications</h3></div>
+    <p class="team-meta"><b>Weeks 4&ndash;7, then 9</b><span><b>Total:</b> 14 days</span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">9.1</td><td>Read the API reference and the live <code>/docs</code>; agree the endpoints the client application will actually call</td><td class="num">1</td><td>4.4</td><td>Endpoint list agreed with FN-1</td></tr>
+        <tr><td class="num">9.2</td><td>Build the integration against <b><code>/v1</code> paths</b>, never the unversioned root &mdash; root responses already carry a deprecation header</td><td class="num">5</td><td>9.1, 2.3</td><td>Client works end to end through the authenticated edge</td></tr>
+        <tr><td class="num">9.3</td><td>Handle the refusals properly: 422 for a request over a documented cap, 429 for rate limits, 503 when the solve queue sheds. Each is actionable, not a retry-forever</td><td class="num">2</td><td>9.2</td><td>Each path exercised deliberately against staging</td></tr>
+        <tr><td class="num">9.4</td><td>Respect the caps at the client: coordinate counts, stop counts, trace lengths. Chunk before sending rather than being refused</td><td class="num">2</td><td>9.3</td><td>No avoidable 422s in a normal day</td></tr>
+        <tr><td class="num">9.5</td><td>Credential handling and rotation for the client's own identity</td><td class="num">1</td><td>2.3</td><td>Rotation possible without a code change</td></tr>
+        <tr><td class="num">9.6</td><td>Pilot support and defect turnaround during the parallel run</td><td class="num">2</td><td>8.6</td><td>Pilot defects closed or accepted</td></tr>
+        <tr><td class="num">9.7</td><td>Repoint to production at cutover</td><td class="num">1</td><td>4.8</td><td>Client on production; staging still available for testing</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- FN-4 -->
+  <div class="team">
+    <div class="team-head"><span class="id">FN-4</span><h3>Training &amp; Change Management</h3></div>
+    <p class="team-meta"><b>Weeks 6&ndash;10</b><span><b>Total:</b> 9 days</span></p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Activity</th><th>Days</th><th>Depends on</th><th>Exit criteria</th></tr></thead>
+      <tbody>
+        <tr><td class="num">10.1</td><td>Write the dispatcher SOP from the plans FN-2 actually produced, not from the API documentation</td><td class="num">3</td><td>8.5</td><td>SOP reviewed by a dispatcher who did not write it</td></tr>
+        <tr><td class="num">10.2</td><td>Train dispatchers &mdash; including why a road-distance plan disagrees with the map in their head</td><td class="num">2</td><td>10.1</td><td>Every dispatcher has planned a day on the system</td></tr>
+        <tr><td class="num">10.3</td><td>Brief drivers and supervisors on what changes for them</td><td class="num">1</td><td>10.1</td><td>Briefing delivered before the first live day</td></tr>
+        <tr><td class="num">10.4</td><td>Floor support through the first live weeks</td><td class="num">2</td><td>G5</td><td>Questions answered on the floor, not by ticket</td></tr>
+        <tr><td class="num">10.5</td><td>Collect feedback and route genuine gaps back to FN-1 as change requests</td><td class="num">1</td><td>10.4</td><td>Backlog owned and prioritised</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CHECKLISTS ============ -->
+<section id="checklists">
+  <span class="sectnum">06</span>
+  <h2>Working checklists</h2>
+  <p class="lede">Sequenced for the day the work is done. Copy into your tracker; each line is one verifiable outcome, not an intention.</p>
+
+  <div class="clgrid">
+
+    <div class="cl">
+      <h4><span class="id">IT-1</span> Platform &amp; Infrastructure</h4>
+      <ul>
+        <li><i class="box"></i><div>Deployment path chosen and written down<small>Docker unless the target is specifically a FreeBSD jail</small></div></li>
+        <li><i class="box"></i><div>Host sized against profile count and peak concurrent solves<small>Three profiles means three graphs and three engines</small></div></li>
+        <li><i class="box"></i><div>Staging host provisioned and reachable</div></li>
+        <li><i class="box"></i><div>Disk sized for extract plus built graph, per profile</div></li>
+        <li><i class="box"></i><div>Engine port unreachable from outside the host</div></li>
+        <li><i class="box"></i><div><b>Jail only:</b> <code>make jail-host</code> run<small>Kernel tunables, jail-local loopback, resolver</small></div></li>
+        <li><i class="box"></i><div><b>Jail only:</b> <code>jail-doctor</code> confirms <code>delayed_ack=0</code> is set <em>and</em> persisted<small>Worth 67&nbsp;ms &rarr; 9&nbsp;ms on p50; nothing errors if it is missing</small></div></li>
+        <li><i class="box"></i><div><code>compose-doctor</code> / <code>jail-doctor</code> baseline recorded<small>Architecture mismatch surfaces much later as a confusing failure</small></div></li>
+        <li><i class="box"></i><div>HA posture decided and the outage window accepted in writing</div></li>
+        <li><i class="box"></i><div>Production mirrors staging; doctor outputs compared</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">IT-2</span> Security &amp; Access</h4>
+      <ul>
+        <li><i class="box"></i><div>Edge design approved &mdash; TLS termination and authentication method</div></li>
+        <li><i class="box"></i><div>Certificate installed; automated renewal <em>proven</em></div></li>
+        <li><i class="box"></i><div>Authentication enforced; an unauthenticated call is refused</div></li>
+        <li><i class="box"></i><div>Credentials issued to each calling application separately</div></li>
+        <li><i class="box"></i><div><code>FORWARDED_ALLOW_IPS</code> set to the proxy CIDR<small>Unset, every client shares one rate-limit bucket</small></div></li>
+        <li><i class="box"></i><div>Confirmed it is <b>not</b> set to <code>*</code><small>That does not weaken rate limiting, it defeats it</small></div></li>
+        <li><i class="box"></i><div>Per-client rate-limit buckets proven with two clients</div></li>
+        <li><i class="box"></i><div>Gateway port reachable only through the edge; port scan evidence kept</div></li>
+        <li><i class="box"></i><div>No secret in any committed file<small><code>deploy/env/app.env</code> is committed by design</small></div></li>
+        <li><i class="box"></i><div>Exposure review signed off</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">IT-3</span> Geospatial Data</h4>
+      <ul>
+        <li><i class="box"></i><div><code>make download-data</code> complete; checksum recorded</div></li>
+        <li><i class="box"></i><div>Graph built for every required profile<small><code>make process-osrm</code>, or <code>make jail-data</code> natively</small></div></li>
+        <li><i class="box"></i><div>Peak build memory recorded<small>The extract is the most OOM-prone step on a small host</small></div></li>
+        <li><i class="box"></i><div>One engine process configured per profile</div></li>
+        <li><i class="box"></i><div>Real depot and customer addresses run through <code>/nearest</code></div></li>
+        <li><i class="box"></i><div>Snap-distance outliers reviewed with dispatch<small>A far snap serves the road, not the address</small></div></li>
+        <li><i class="box"></i><div>Refresh cadence agreed with a named owner</div></li>
+        <li><i class="box"></i><div>Built graph or image archived so recovery need not rebuild</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">IT-4</span> Application &amp; Release</h4>
+      <ul>
+        <li><i class="box"></i><div>Release commit tagged from a green tree</div></li>
+        <li><i class="box"></i><div>Every setting reviewed against <code>gateway/src/config.rs</code><small>The prose counts disagree; the code does not</small></div></li>
+        <li><i class="box"></i><div>Deployed: <code>make compose-up</code> or <code>make jail-up</code></div></li>
+        <li><i class="box"></i><div><code>*-health</code> green &mdash; <code>/ready</code> covers gateway and engine</div></li>
+        <li><i class="box"></i><div>One real call made against every endpoint</div></li>
+        <li><i class="box"></i><div>Capacity guards set from IT-5's measurement</div></li>
+        <li><i class="box"></i><div>Integrators confirmed on <code>/v1</code>; <code>API_SUNSET</code> decided</div></li>
+        <li><i class="box"></i><div>Rollback rehearsed on staging and timed</div></li>
+        <li><i class="box"></i><div>Team convention recorded: engine flags change in <em>both</em> deployment files, same commit</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">IT-5</span> SRE &amp; Observability</h4>
+      <ul>
+        <li><i class="box"></i><div><code>/metrics</code> scraped and retained</div></li>
+        <li><i class="box"></i><div>Dashboards built without depending on <code>process_*</code> on FreeBSD</div></li>
+        <li><i class="box"></i><div>Alert on 5xx rate, p95 latency, <code>/ready</code> failing, engine unreachable</div></li>
+        <li><i class="box"></i><div>Alert on Redis unavailability<small>The gateway degrades quietly to in-process caching</small></div></li>
+        <li><i class="box"></i><div>Every alert fired deliberately once and observed</div></li>
+        <li><i class="box"></i><div>Load test run with a forwarded-for pool<small>A single-source run measures the limiter, not the service</small></div></li>
+        <li><i class="box"></i><div>Capacity assessment complete; RSS ceiling handed to IT-4</div></li>
+        <li><i class="box"></i><div>Logs shipped with agreed retention</div></li>
+        <li><i class="box"></i><div>Local runbook written and proven by a second engineer</div></li>
+        <li><i class="box"></i><div>Recovery timed end to end; RTO published</div></li>
+        <li><i class="box"></i><div>On-call rota live before cutover</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">IT-6</span> QA &amp; Validation</h4>
+      <ul>
+        <li><i class="box"></i><div><code>make test</code>, <code>make lint</code>, <code>cargo test</code> green on the release commit</div></li>
+        <li><i class="box"></i><div>Parity replay gate wired into CI and blocking</div></li>
+        <li><i class="box"></i><div><code>make examples-check</code> passes against staging</div></li>
+        <li><i class="box"></i><div>Every endpoint accepted against the API reference</div></li>
+        <li><i class="box"></i><div>Oversized matrix refused cleanly, naming the limit</div></li>
+        <li><i class="box"></i><div>Over-long match trace refused with a 422, not a 500</div></li>
+        <li><i class="box"></i><div>Stop count above the cap refused; queue saturation sheds with a 503</div></li>
+        <li><i class="box"></i><div>Load-test result sanity-checked<small>100% transport errors at ~2&nbsp;ms is connection-refused, not stress</small></div></li>
+        <li><i class="box"></i><div>Acceptance pack assembled for the gate</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">FN-1</span> Business Analysis</h4>
+      <ul>
+        <li><i class="box"></i><div><b>Fit-gap signed before any provisioning starts</b></div></li>
+        <li><i class="box"></i><div>Confirmed whether delivery time windows are required<small>The shipped optimiser cannot express them</small></div></li>
+        <li><i class="box"></i><div>Confirmed whether service times, driver shifts or vehicle skills are required<small>None are modelled</small></div></li>
+        <li><i class="box"></i><div>Accepted that plans assume free-flow speed with no time-of-day traffic</div></li>
+        <li><i class="box"></i><div>Sizing delivered to IT-1: stops, vehicles, depots, profiles, concurrency</div></li>
+        <li><i class="box"></i><div>Plan acceptance criteria written in dispatch's language</div></li>
+        <li><i class="box"></i><div>Current KPI baseline captured <em>before</em> anything changes</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">FN-2</span> Fleet Operations &amp; Dispatch</h4>
+      <ul>
+        <li><i class="box"></i><div>Every depot coordinate verified on a map</div></li>
+        <li><i class="box"></i><div>Vehicle capacities expressed in the same unit as demand</div></li>
+        <li><i class="box"></i><div>Stop geocodes reviewed; far snaps corrected or accepted</div></li>
+        <li><i class="box"></i><div>Dispatchers can read an allocation and a per-vehicle sequence unaided</div></li>
+        <li><i class="box"></i><div>Acceptance criteria applied to a real sample, verdicts recorded</div></li>
+        <li><i class="box"></i><div>Two weeks of parallel running complete</div></li>
+        <li><i class="box"></i><div>Every material variance explained, not just noted</div></li>
+        <li><i class="box"></i><div>Fallback procedure written for when the service is unavailable<small>It must not require IT to execute</small></div></li>
+        <li><i class="box"></i><div>Daily KPI review running against the baseline</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">FN-3</span> Integration &amp; Client Apps</h4>
+      <ul>
+        <li><i class="box"></i><div>Endpoint list agreed and documented</div></li>
+        <li><i class="box"></i><div>Client calls <code>/v1</code> paths, not the deprecated root</div></li>
+        <li><i class="box"></i><div>Authenticated through the edge, not directly to the gateway</div></li>
+        <li><i class="box"></i><div>422 handled as a request to fix, not a request to retry</div></li>
+        <li><i class="box"></i><div>429 handled with backoff</div></li>
+        <li><i class="box"></i><div>503 from solve-queue shedding handled distinctly from an outage</div></li>
+        <li><i class="box"></i><div>Client chunks below the documented caps before sending</div></li>
+        <li><i class="box"></i><div>Credential rotation possible without a code change</div></li>
+      </ul>
+    </div>
+
+    <div class="cl">
+      <h4><span class="id">FN-4</span> Training &amp; Change</h4>
+      <ul>
+        <li><i class="box"></i><div>SOP written from real produced plans, not from API docs</div></li>
+        <li><i class="box"></i><div>SOP reviewed by a dispatcher who did not write it</div></li>
+        <li><i class="box"></i><div>Every dispatcher has planned a full day on the system</div></li>
+        <li><i class="box"></i><div>Road-distance intuition covered in training<small>A straight line understates a real drive by ~40% at the median</small></div></li>
+        <li><i class="box"></i><div>Drivers and supervisors briefed before the first live day</div></li>
+        <li><i class="box"></i><div>Floor support staffed for the first live weeks</div></li>
+        <li><i class="box"></i><div>Feedback routed to FN-1 as prioritised change requests</div></li>
+      </ul>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ GATES ============ -->
+<section id="gates">
+  <span class="sectnum">07</span>
+  <h2>Go / No-Go gates</h2>
+  <p class="lede">Six decision points. Each has an owner who can stop the program, and each exists because passing it cheaply is possible and passing it accidentally is not.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Gate</th><th>Week</th><th>Question</th><th>Evidence required</th><th>Chair</th></tr></thead>
+    <tbody>
+      <tr><td class="id">G0</td><td class="num">1</td><td>Can the shipped optimiser express what dispatch needs?</td><td>Signed fit-gap; sizing numbers; deployment path chosen</td><td class="id">FN-1</td></tr>
+      <tr><td class="id">G1</td><td class="num">3</td><td>Is staging standing and answering with real map data?</td><td><code>*-health</code> green; one real call per endpoint; config baseline recorded</td><td class="id">IT-4</td></tr>
+      <tr><td class="id">G2</td><td class="num">5</td><td>Is the edge real, and is the API contract met?</td><td>Unauthenticated call refused; per-client rate buckets proven; endpoint acceptance signed</td><td class="id">IT-2 + IT-6</td></tr>
+      <tr><td class="id">G3</td><td class="num">6</td><td>Does it hold under the expected load, and can we see it?</td><td>Capacity run complete; guards set from measurement; every alert fired once</td><td class="id">IT-5</td></tr>
+      <tr><td class="id">G4</td><td class="num">8</td><td>Are the plans drivable?</td><td>Two weeks of parallel running; variance explained; dispatch sign-off</td><td class="id">FN-2</td></tr>
+      <tr><td class="id">G5</td><td class="num">9</td><td>Go live?</td><td>All of the above; rollback rehearsed; on-call live; training delivered</td><td>Program</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ============ STEADY STATE ============ -->
+<section id="steady">
+  <span class="sectnum">08</span>
+  <h2>After go-live</h2>
+  <p class="lede">What keeps running once the program closes, and who owns it.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Cadence</th><th>Activity</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td class="num">Daily</td><td>Dispatch reviews produced plans against the acceptance criteria; exceptions logged</td><td class="id">FN-2</td></tr>
+      <tr><td class="num">Weekly</td><td>KPI review against the pre-program baseline</td><td class="id">FN-1 + FN-2</td></tr>
+      <tr><td class="num">Monthly</td><td>Map data refresh and redeploy; re-run the snapping sample afterwards</td><td class="id">IT-3</td></tr>
+      <tr><td class="num">Monthly</td><td>Capacity review against measured traffic; adjust guards only against measurement</td><td class="id">IT-5</td></tr>
+      <tr><td class="num">Quarterly</td><td>Dependency and base-image patching; rebuild and re-run the acceptance pack</td><td class="id">IT-4</td></tr>
+      <tr><td class="num">Quarterly</td><td>Certificate and credential rotation drill</td><td class="id">IT-2</td></tr>
+      <tr><td class="num">On change</td><td>Engine flags or resource limits changed in <em>both</em> deployment definitions, same commit</td><td class="id">IT-4</td></tr>
+      <tr><td class="num">Once</td><td>Retire the unversioned root paths after integrators have migrated; set <code>API_SUNSET</code> to commit to the date</td><td class="id">IT-4</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ============ ASSUMPTIONS ============ -->
+<section id="assumptions">
+  <span class="sectnum">09</span>
+  <h2>Assumptions, and what would change the plan</h2>
+  <p class="lede">Stated so the schedule can be challenged on its premises rather than its arithmetic.</p>
+
+  <h4>Assumed</h4>
+  <ul>
+    <li>One production environment plus staging, in one region, on one deployment path.</li>
+    <li>One routing profile at go-live. Each further profile adds roughly a day of build time and its own engine process.</li>
+    <li>An existing dispatch or order application to integrate with; no new user interface is being built.</li>
+    <li>Teams work the program part-time alongside existing duties &mdash; which is why elapsed weeks exceed the sum of working days.</li>
+    <li>IT can supply a reverse proxy or API gateway. Without that capability, add three to four weeks and treat it as a separate project.</li>
+    <li>Single-node operation is acceptable with a documented recovery time.</li>
+  </ul>
+
+  <h4>What would change the plan materially</h4>
+  <ul>
+    <li><b>Delivery time windows are required.</b> The program becomes a development project. Rescope at G0 &mdash; do not attempt to work around it in dispatch procedure.</li>
+    <li><b>High availability is required.</b> Add a two-node design, a load balancer, shared Redis for rate-limit counters, and the testing to prove failover. Nothing in the repository does this today; budget three to four weeks.</li>
+    <li><b>More than one region or map extract.</b> Multiplies the data workstream and the host footprint; the gateway itself is unaffected.</li>
+    <li><b>Matrices wider than 100 coordinates.</b> Requires an engine flag change in both deployment definitions, and re-measuring memory afterwards.</li>
+    <li><b>The FreeBSD jail is the target and it is memory-constrained.</b> Build times lengthen considerably and the extract can meet the OOM killer. Add a week to the data and build workstreams.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Prepared 12 September 2026 against the committed tree of the osrm-microservice repository. Every constraint cited was confirmed against source, configuration or the project's own measured results rather than inferred. Durations are planning estimates and should be re-based once the week-one fit-gap is signed.</p>
+</footer>
+
+</main>
+</div>
+</div>
