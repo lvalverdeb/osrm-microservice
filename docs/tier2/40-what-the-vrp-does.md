@@ -507,7 +507,7 @@ mode as strictly lexicographic passes most tests and is still wrong in both
 places: `MIN_COST` collapses into `MIN_VEHICLES` because one fewer vehicle
 always wins, and `PRIZE_COLLECTING` can never drop anything.
 
-## 10. Sixteen invariants and an independent verifier
+## 10. Seventeen invariants and an independent verifier
 
 This is the part of the platform that most distinguishes it, and it comes
 straight from the constitution's first principle:
@@ -535,13 +535,17 @@ straight from the constitution's first principle:
 | `INV-14` | No shipment is aboard longer than its max ride time |
 | `INV-15` | Coupled routes actually meet as their synchronisation requires |
 | `INV-16` | An electric vehicle never arrives past empty, and charges only at its own chargers |
+| `INV-17` | No route departs before every order aboard it is released (`FR-06`) |
 
 **`INV-9` is called the single most valuable test in the system.** Most silent
 optimisation bugs are an evaluator that disagrees with itself; recomputing the
 objective from the plan catches them.
 
-**`INV-10`--`INV-16` are numbered past the original nine deliberately.** Each was
-added when a real constraint turned out to have no invariant watching it.
+**`INV-10`--`INV-17` are numbered past the original nine deliberately.** Each was
+added when a real constraint turned out to have no invariant watching it. `INV-17`
+is the plainest case: sixteen invariants and none covered `FR-06`'s release times,
+so a hand-built plan or one arriving through `/verify` could have a vehicle leave
+before its load existed and still come back clean.
 
 **Does the verifier actually catch things?** Measured rather than asserted:
 `experiments/e06_mutation.py` builds a verified plan from real road distances

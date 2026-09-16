@@ -525,7 +525,7 @@ pruebas y aun así está mal en ambos casos: `MIN_COST` colapsa en `MIN_VEHICLES
 porque un vehículo menos siempre gana, y `PRIZE_COLLECTING` nunca puede
 descartar nada.
 
-## 10. Dieciséis invariantes y un verificador independiente
+## 10. Diecisiete invariantes y un verificador independiente
 
 Esta es la parte de la plataforma que más la distingue, y viene directo del
 primer principio de la constitución:
@@ -553,14 +553,18 @@ primer principio de la constitución:
 | `INV-14` | Ningún envío va a bordo más tiempo que su máximo |
 | `INV-15` | Las rutas acopladas efectivamente se encuentran como lo exige su sincronización |
 | `INV-16` | Un vehículo eléctrico nunca llega pasado de vacío, y carga solo en sus propios cargadores |
+| `INV-17` | Ninguna ruta sale antes de que esté liberada cada orden que lleva a bordo (`FR-06`) |
 
 **A `INV-9` se le llama la prueba más valiosa del sistema.** La mayoría de los
 errores silenciosos de optimización son un evaluador que se contradice a sí
 mismo; recalcular el objetivo desde el plan los atrapa.
 
-**`INV-10`--`INV-16` están numerados más allá de los nueve originales
+**`INV-10`--`INV-17` están numerados más allá de los nueve originales
 deliberadamente.** Cada uno se agregó cuando una restricción real resultó no
-tener ninguna invariante vigilándola.
+tener ninguna invariante vigilándola. `INV-17` es el caso más claro: dieciséis
+invariantes y ninguna cubría los tiempos de liberación de `FR-06`, así que un
+plan construido a mano o llegado por `/verify` podía tener un vehículo saliendo
+antes de que su carga existiera y aun así volver limpio.
 
 **¿De verdad atrapa cosas el verificador?** Medido en vez de afirmado:
 `experiments/e06_mutation.py` construye un plan verificado con distancias viales
