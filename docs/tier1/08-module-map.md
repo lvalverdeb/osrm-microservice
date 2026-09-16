@@ -4,7 +4,7 @@
 
 *Derived from `vrp/**/*.py`.*
 
-64 modules, 18,196 lines. Every module opens with what it is for and the requirements it implements; both columns are read from there.
+64 modules, 18,244 lines. Every module opens with what it is for and the requirements it implements; both columns are read from there.
 
 ## `vrp/`
 
@@ -93,4 +93,4 @@
 | Module | Lines | Purpose | Implements |
 |---|---|---|---|
 | `__init__.py` | 11 | Independent verification | — |
-| `verifier.py` | 806 | The independent verifier | CON-1, INV-1, INV-9 |
+| `verifier.py` | 854 | The independent verifier | CON-1, INV-1, INV-9 |

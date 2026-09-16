@@ -4,7 +4,7 @@
 
 *Derived from `vrp/**`, `tests/**`, `examples/src/**`, `examples/tools/**`, `parity/**`, `loadtest/**`, `gateway/src/**`, `rust-spike/src/**`.*
 
-301 identifiers cited across 8 source trees. This is the *code's* claim, not the specification's: an identifier appears here because a module, test or example names it.
+303 identifiers cited across 8 source trees. This is the *code's* claim, not the specification's: an identifier appears here because a module, test or example names it.
 
 | Family | Identifiers cited |
 |---|---|
@@ -15,10 +15,10 @@
 | `DYN-` | 5 |
 | `E-` | 69 |
 | `FR-` | 34 |
-| `INV-` | 16 |
+| `INV-` | 17 |
 | `MTX-` | 10 |
 | `NFR-` | 10 |
-| `T-` | 82 |
+| `T-` | 83 |
 | `UC-` | 47 |
 | `US-` | 2 |
 
@@ -161,7 +161,7 @@
 | `FR-03` | 1 | `tests/vrp/test_multi_capacity.py` |
 | `FR-04` | 6 | `examples/src/fleet/tw/envelope_round.py`, `tests/vrp/test_time_windows.py`, `tests/vrp/test_window_attainment.py`, `vrp/bench/catalogue.py`, `vrp/evaluator.py`, `vrp/solve/pyvrp_adapter.py` |
 | `FR-05` | 8 | `examples/src/fleet/tw/envelope_round.py`, `tests/vrp/test_service_time_model.py`, `tests/vrp/test_shipments.py`, `vrp/evaluator.py`, `vrp/model.py`, `vrp/solve/ortools_adapter.py` +2 more |
-| `FR-06` | 2 | `tests/vrp/test_preflight_diagnosis.py`, `tests/vrp/test_time_windows.py` |
+| `FR-06` | 4 | `tests/vrp/test_independent_verifier.py`, `tests/vrp/test_preflight_diagnosis.py`, `tests/vrp/test_time_windows.py`, `vrp/verify/verifier.py` |
 | `FR-07` | 7 | `examples/src/fleet/rich/heterogeneous_fleet.py`, `tests/vrp/test_allocation.py`, `tests/vrp/test_heterogeneous_fleet.py`, `vrp/evaluator.py`, `vrp/model.py`, `vrp/objective.py` +1 more |
 | `FR-08` | 4 | `examples/src/fleet/rich/heterogeneous_fleet.py`, `tests/vrp/test_heterogeneous_fleet.py`, `vrp/model.py`, `vrp/solve/pyvrp_adapter.py` |
 | `FR-09` | 4 | `examples/src/fleet/rich/multi_trip.py`, `tests/vrp/test_multi_trip.py`, `vrp/model.py`, `vrp/solve/pyvrp_adapter.py` |
@@ -211,6 +211,7 @@
 | `INV-14` | 5 | `examples/src/fleet/rich/ride_time.py`, `tests/vrp/test_independent_verifier.py`, `tests/vrp/test_shipments.py`, `vrp/solve/pyvrp_adapter.py`, `vrp/verify/verifier.py` |
 | `INV-15` | 5 | `examples/src/fleet/rich/synchronisation.py`, `tests/vrp/test_independent_verifier.py`, `tests/vrp/test_synchronisation.py`, `vrp/synchronise.py`, `vrp/verify/verifier.py` |
 | `INV-16` | 5 | `examples/src/fleet/rich/ev_recharging.py`, `tests/vrp/test_electric.py`, `vrp/electric.py`, `vrp/solve/pyvrp_adapter.py`, `vrp/verify/verifier.py` |
+| `INV-17` | 2 | `tests/vrp/test_independent_verifier.py`, `vrp/verify/verifier.py` |
 
 ## `MTX-`
 
@@ -328,6 +329,7 @@
 | `T-101` | 3 | `tests/test_packaging.py`, `tests/vrp/test_model_gate.py`, `tests/vrp/test_model_path.py` |
 | `T-102` | 1 | `tests/test_packaging.py` |
 | `T-103` | 1 | `tests/vrp/test_model_gate.py` |
+| `T-104` | 1 | `tests/vrp/test_independent_verifier.py` |
 
 ## `UC-`
 

@@ -4,7 +4,7 @@
 
 *Derived from `tests/**/*.py`, `gateway/src/**/*.rs`.*
 
-96 Python test files, 1,186 test functions, and 176 Rust unit tests.
+96 Python test files, 1,191 test functions, and 176 Rust unit tests.
 
 ## `tests/`
 
@@ -60,7 +60,7 @@
 | `test_historical_replayer.py` | 31 | The historical replayer — DYN-6, AC-3.2, §8.1, T-53 [GATE], E-53. |
 | `test_hours_of_service.py` | 20 | Hours-of-service rules engine — SDD §6.4, FR-15, FR-16, T-25 [GATE]. |
 | `test_icd_policy.py` | 10 | Iterative conditional dispatch — §8.2 step 3, T-54, E-54. |
-| `test_independent_verifier.py` | 13 | E-03 (T-04) [GATE] — the independent verifier. SDD §11.2, INV-1..INV-9. |
+| `test_independent_verifier.py` | 18 | E-03 (T-04) [GATE] — the independent verifier. SDD §11.2, INV-1..INV-9. |
 | `test_initial_state.py` | 14 | Tachograph and ELD carry-over — §6.4, AC-5.2, T-26, E-26. |
 | `test_instance_generator.py` | 6 | Randomised instances against INV-1…INV-9 — SDD §11.1 L2, T-05, E-04. |
 | `test_lns_core.py` | 16 | Ruin-and-recreate (SISR) — ALG-3b, T-34, E-34. |
