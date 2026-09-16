@@ -101,6 +101,7 @@ def verify(problem: Problem, solution: Solution) -> Report:
     _check_docks(problem, solution, report)                  # INV-12
     _check_inventory(problem, solution, report)              # INV-13
     _check_ride_times(problem, solution, report)             # INV-14
+    _check_release_times(problem, solution, report)          # INV-17
     _check_synchronisation(problem, solution, report)        # INV-15
     _check_locks(problem, solution, report)                  # INV-8
     _check_objective(problem, solution, report)              # INV-9
@@ -553,6 +554,53 @@ def _check_synchronisation(problem: Problem, solution: Solution,
                         f"{sync.second} follows {sync.first} by {gap}s of an "
                         f"allowed {sync.max_gap}s",
                         vehicle_id=second_vehicle, order_id=sync.second)
+
+
+def _check_release_times(problem: Problem, solution: Solution,
+                         report: Report) -> None:
+    """INV-17: nothing departs before it exists. FR-06.
+
+    `FR-06` is a MUST -- "an order cannot depart before goods are available" --
+    and the PyVRP adapter passes `release_time` through, so plans that engine
+    builds respect it. Nothing checked it, and §11.2 makes this module the gate
+    precisely because it shares no code with any solver: "the solver gets it
+    right" is the one argument a verifier may not accept. A second engine, a
+    hand-built plan, or an integrator's plan arriving through `/verify` had
+    nothing standing between a vehicle leaving before its load existed and a
+    report calling the plan sound.
+
+    Measured at the route's *departure*, not at the stop. A release time is a
+    fact about the depot -- when the goods are there to be loaded -- so the
+    constraint binds when the vehicle leaves carrying them, which is what
+    `FR-06`'s "cannot depart" says and what the adapter hands PyVRP. Checking
+    it at the delivery instead would pass a van that left empty-handed and
+    arrived after the goods existed.
+
+    Zero means unconstrained rather than "released at midnight", which is the
+    field's default and the reading every caller already relies on.
+
+    Numbered past INV-16 for the reason INV-10 was: none of the sixteen covers
+    it, and a plan dispatching stock that has not arrived satisfies every one
+    of them.
+    """
+    released = {order.id: order.release_time for order in problem.orders
+                if order.release_time}
+    if not released:
+        report.not_applicable.add("INV-17")
+        return
+
+    for route in solution.routes:
+        if not route.steps:
+            continue
+        departure = route.steps[0].departure
+        for step in route.steps:
+            when = released.get(step.order_id)
+            if when is not None and departure < when:
+                report.fail("INV-17",
+                            f"{step.order_id} is released at {when} but its "
+                            f"route departs at {departure}",
+                            vehicle_id=route.vehicle_id,
+                            order_id=step.order_id)
 
 
 def _check_ride_times(problem: Problem, solution: Solution,

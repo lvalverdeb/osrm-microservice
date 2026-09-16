@@ -173,19 +173,20 @@ def test_inv9_catches_objective_drift():
 
 def test_invariants_with_no_subject_report_as_not_applicable():
     """This fixture declares no hours-of-service rules (INV-7), no locks
-    (INV-8), no depot inventory (INV-13), no ride-time bounds (INV-14) and no
-    synchronisations (INV-15), so none of the five has a subject.
+    (INV-8), no depot inventory (INV-13), no ride-time bounds (INV-14), no
+    synchronisations (INV-15) and no release times (INV-17), so none of the six
+    has a subject.
 
     A verifier that returned 'ok' for an invariant it cannot evaluate would be
     lying by omission, and the lie would survive until someone shipped an
     illegal duty timeline. The set grows as the model does -- INV-13 joined it
-    with T-45, INV-14 with T-74 and INV-15 with T-76 -- which is the point: an
-    invariant added
+    with T-45, INV-14 with T-74, INV-15 with T-76 and INV-17 with T-104 --
+    which is the point: an invariant added
     without a subject on this fixture must say so rather than quietly pass.
     """
     report = verify(problem(), legal_solution())
     assert report.not_applicable == {"INV-7", "INV-8", "INV-13", "INV-14",
-                                     "INV-15"}
+                                     "INV-15", "INV-17"}
     assert report.ok is True
 
 
@@ -215,3 +216,85 @@ def test_the_verifier_does_not_import_the_evaluator():
     # Importing the domain types is allowed and expected: they are data, not
     # logic, and both sides must agree on what a Step is.
     assert any(name.startswith("vrp.model") or name == "vrp.model" for name in imported)
+
+
+# --- INV-17: release times (FR-06) ---------------------------------------
+# `FR-06` is a MUST -- "an order cannot depart before goods are available" --
+# and the adapter passes `release_time` to PyVRP, so plans this engine builds
+# respect it. Nothing checked it. §11.2 makes the verifier the gate precisely
+# because it shares no code with any solver, so "the solver gets it right" is
+# the one argument it may not accept: a second engine, a hand-built plan, or a
+# plan from an integrator through `/verify` had nothing standing between a
+# van leaving before its load existed and a report saying the plan was sound.
+#
+# Found from a delivery network whose envelopes are line-hauled to a depot
+# overnight and delivered the next morning: "depot-bound envelopes are only
+# dispatched from a depot after they have physically arrived there" is a
+# release time, and it is the coupling between the two stages.
+
+
+def released(when: int) -> Problem:
+    """`OA` is not available until `when`; the route below leaves at 0."""
+    base = problem()
+    orders = (replace(base.orders[0], release_time=when), base.orders[1])
+    return replace(base, orders=orders)
+
+
+def test_inv17_catches_a_route_that_departs_before_its_load_exists():
+    report = verify(released(5_000), legal_solution())
+
+    assert "INV-17" in codes(report)
+    assert not report.ok
+
+
+def test_inv17_names_the_order_and_both_times():
+    """A violation a dispatcher cannot act on is barely better than none."""
+    report = verify(released(5_000), legal_solution())
+    violation, = [v for v in report.violations if v.invariant == "INV-17"]
+
+    assert violation.order_id == "OA"
+    assert "5000" in violation.detail and "0" in violation.detail
+
+
+def shifted(solution: Solution, delta: int) -> Solution:
+    """The same plan, every clock moved by `delta`, so travel stays consistent
+    and only the departure time changes."""
+    routes = tuple(
+        replace(route, steps=tuple(
+            replace(step, arrival=step.arrival + delta,
+                    start_service=step.start_service + delta,
+                    departure=step.departure + delta)
+            for step in route.steps))
+        for route in solution.routes)
+    return replace(solution, routes=routes)
+
+
+def test_inv17_binds_on_the_departure_not_on_the_arrival():
+    """The distinction the invariant is about, and the one a plausible reading
+    gets wrong.
+
+    The route leaves at 0 carrying goods released at 200 and reaches the stop
+    at 300. Checking the *stop* would see 300 >= 200 and pass it -- a van that
+    left before its load existed and was excused because it dawdled on the way.
+    """
+    report = verify(released(200), legal_solution())
+
+    assert "INV-17" in codes(report)
+
+
+def test_inv17_accepts_a_departure_exactly_at_the_release_time():
+    """The bound is inclusive: goods available at 200 may leave at 200. An
+    exclusive bound would refuse a plan that is precisely on time, which is the
+    plan a good solver produces."""
+    report = verify(released(200), shifted(legal_solution(), 200))
+
+    assert "INV-17" not in codes(report)
+
+
+def test_inv17_says_so_when_no_order_carries_a_release_time():
+    """An invariant with no subject reports that rather than quietly passing,
+    which is how `INV-14` and `INV-7` already behave."""
+    report = verify(problem(), legal_solution())
+
+    assert "INV-17" in report.not_applicable
+    assert "INV-17" not in codes(report)
