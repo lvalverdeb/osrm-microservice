@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: property-soak examples examples-check examples-slice help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: property-soak examples examples-check examples-slice help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue tier1 corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -58,6 +58,7 @@ help:
 	@echo "  examples-slice - Rebuild the committed corpus slice from the full dataset"
 	@echo "  test           - Run the pytest suite"
 	@echo "  catalogue      - Rebuild the VRP scenario catalogue from vrp-catalogue-v2.1.src.md"
+	@echo "  tier1          - Rebuild docs/tier1, the documentation derived from the sources"
 	@echo "  corpus         - The P0 scenario corpus at all three sizes (slow)"
 	@echo "  lint           - Run ruff checks"
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
@@ -267,6 +268,10 @@ lint:
 # builder parses the authored form and emits a normalised one, so it cannot read
 # its own output: edits made to the generated .md are silently lost on the next
 # run, and for a while the source was not committed at all. Edit the .src.md.
+tier1:  ## docs/tier1, regenerated from the code, the manifests and the binary
+	cargo build --manifest-path gateway/Cargo.toml
+	uv run python docs/tier1/build.py
+
 catalogue:
 	uv run python docs/TDD/build_catalogue.py \
 	  docs/TDD/vrp-catalogue-v2.1.src.md \
