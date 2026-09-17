@@ -656,6 +656,27 @@ plan's own estimate.
 | "Why was this order left unassigned?" | `vrp/` platform -- `explain`, `diagnose` | Explainability is a product requirement (`CON-5`) |
 | "Is this plan, from any system, actually legal?" | `vrp/api.py` `/verify` | Deliberately public and solver-independent |
 | "Is our planner getting worse?" | `vrp/` platform -- `adherence`, `rollout` | Measured against GPS, not against itself |
+| "Which van goes to which depot, and when does it leave?" | **Neither** | An assignment with a deadline, not a routing problem. See below |
+
+### When the answer is neither
+
+A stage of an operation can look like routing and not be one. Line-haul --
+moving sorted work from a hub to a regional depot overnight -- is the clear
+case: each van serves one destination per trip, so there is nothing to
+sequence, and the deadline belongs to the *destination* rather than to a stop.
+It is an assignment against a departure time, and the departure time is itself
+derived rather than given: release, minus transit, minus unloading.
+
+A consuming repository built exactly this in September 2026 and it uses no part
+of the solver -- no `Problem`, no adapter, standard library only. Reaching for
+the platform there would have invented a route where there is a single leg.
+
+**The question worth asking of any stage is what is actually open.** If it is an
+order, it is routing. If it is only *which vehicle* and *when it leaves*, it is
+assignment, and the platform's contribution is the travel matrix that tells you
+how long the leg takes. The same reading is what keeps a TSP from being treated
+as a different product: it is this system's degenerate case, and line-haul is
+the case on the other side of the boundary.
 
 ## 17. Five worked scenarios
 
