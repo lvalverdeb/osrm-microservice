@@ -667,9 +667,19 @@ sequence, and the deadline belongs to the *destination* rather than to a stop.
 It is an assignment against a departure time, and the departure time is itself
 derived rather than given: release, minus transit, minus unloading.
 
-A consuming repository built exactly this in September 2026 and it uses no part
-of the solver -- no `Problem`, no adapter, standard library only. Reaching for
-the platform there would have invented a route where there is a single leg.
+A consuming repository built all five stages of one operation in September
+2026, and they are not uniform:
+
+| Stage | Problem type | What it needs from here |
+|---|---|---|
+| Pickups | Dynamic VRP | Insertion pricing and re-optimisation, once the cadence is built; the admission half needs none |
+| Line-haul | Assignment with a deadline | **Nothing.** Standard library only -- no `Problem`, no adapter |
+| Last mile | Static CVRP | The full platform |
+| Return run | Static CVRP | The platform, with stops aggregated by site rather than by parcel |
+
+Two of the four modules that exist today import no part of this library at all.
+Reaching for the platform in line-haul would have invented a route where there
+is a single leg.
 
 **The question worth asking of any stage is what is actually open.** If it is an
 order, it is routing. If it is only *which vehicle* and *when it leaves*, it is
