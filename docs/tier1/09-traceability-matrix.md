@@ -4,7 +4,7 @@
 
 *Derived from `vrp/**`, `tests/**`, `examples/src/**`, `examples/tools/**`, `parity/**`, `loadtest/**`, `gateway/src/**`, `rust-spike/src/**`.*
 
-303 identifiers cited across 8 source trees. This is the *code's* claim, not the specification's: an identifier appears here because a module, test or example names it.
+304 identifiers cited across 8 source trees. This is the *code's* claim, not the specification's: an identifier appears here because a module, test or example names it.
 
 | Family | Identifiers cited |
 |---|---|
@@ -18,7 +18,7 @@
 | `INV-` | 17 |
 | `MTX-` | 10 |
 | `NFR-` | 10 |
-| `T-` | 83 |
+| `T-` | 84 |
 | `UC-` | 47 |
 | `US-` | 2 |
 
@@ -221,7 +221,7 @@
 | `MTX-2` | 3 | `tests/vrp/test_matrix_cache.py`, `tests/vrp/test_osrm_adapter.py`, `vrp/matrix.py` |
 | `MTX-3` | 1 | `tests/vrp/test_osrm_adapter.py` |
 | `MTX-4` | 3 | `tests/vrp/test_osrm_adapter.py`, `vrp/matrix.py`, `vrp/osrm.py` |
-| `MTX-5` | 15 | `examples/src/fleet/dynamic/dispatch_waves.py`, `examples/src/fleet/infra/degraded_matrix.py`, `examples/src/fleet/objective_modes.py`, `examples/src/fleet/rich/hours_of_service.py`, `examples/src/fleet/verify_delivery_plan.py`, `tests/vrp/test_osrm_adapter.py` +9 more |
+| `MTX-5` | 16 | `examples/src/fleet/dynamic/dispatch_waves.py`, `examples/src/fleet/infra/degraded_matrix.py`, `examples/src/fleet/objective_modes.py`, `examples/src/fleet/rich/hours_of_service.py`, `examples/src/fleet/verify_delivery_plan.py`, `tests/vrp/test_osrm_adapter.py` +10 more |
 | `MTX-6` | 4 | `examples/src/dataset.py`, `tests/vrp/test_matrix_cache.py`, `tests/vrp/test_osrm_adapter.py`, `vrp/osrm.py` |
 | `MTX-7` | 3 | `tests/vrp/test_matrix_cache.py`, `tests/vrp/test_matrix_tiling.py`, `vrp/matrix.py` |
 | `MTX-9` | 5 | `examples/src/fleet/rich/time_dependent.py`, `tests/vrp/test_arc_class_profiles.py`, `vrp/model.py`, `vrp/speedfit.py`, `vrp/timedependent.py` |
@@ -330,6 +330,7 @@
 | `T-102` | 1 | `tests/test_packaging.py` |
 | `T-103` | 1 | `tests/vrp/test_model_gate.py` |
 | `T-104` | 1 | `tests/vrp/test_independent_verifier.py` |
+| `T-105` | 2 | `tests/vrp/test_prizes_and_tiers.py`, `vrp/solve/pyvrp_adapter.py` |
 
 ## `UC-`
 

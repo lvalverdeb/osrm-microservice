@@ -4,7 +4,7 @@
 
 *Derived from `tests/**/*.py`, `gateway/src/**/*.rs`.*
 
-96 Python test files, 1,191 test functions, and 176 Rust unit tests.
+96 Python test files, 1,194 test functions, and 176 Rust unit tests.
 
 ## `tests/`
 
@@ -87,7 +87,7 @@
 | `test_preemption.py` | 7 | Urgent work displacing planned work — FR-27, DYN-5, T-77. |
 | `test_preflight_diagnosis.py` | 19 | Pre-flight rejection reasons — §6.5, FR-01, AC-1.3, T-14, E-14. |
 | `test_prize_collecting_dispatch.py` | 13 | Prize-collecting dispatch — §8.2 step 2, T-55, E-55. |
-| `test_prizes_and_tiers.py` | 17 | Optional orders and priority tiers — FR-12, FR-13, T-27, E-27. |
+| `test_prizes_and_tiers.py` | 20 | Optional orders and priority tiers — FR-12, FR-13, T-27, E-27. |
 | `test_process_portfolio.py` | 7 | Process-based parallelism for engines that hold the GIL — NFR-05, §7.7, T-91. |
 | `test_pyvrp_adapter.py` | 6 | E-12 (T-12) — PyVRP adapter: model compiler and solution mapper. |
 | `test_quote.py` | 10 | Insertion and removal quotes — NFR-02, §9.4, T-85. |

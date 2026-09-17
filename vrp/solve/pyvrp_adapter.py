@@ -81,6 +81,52 @@ def shift_end_of(problem: Problem) -> int:
 INT64_MAX = 2**63 - 1
 
 
+def _refuse_unreachable(problem: Problem) -> None:
+    """Refuse an instance containing an arc that does not exist. MTX-5, T-105.
+
+    The edge loop below already omits unreachable pairs, and omitting is not
+    the same as forbidding: PyVRP routes through a missing edge and returns
+    the plan with `INFEASIBLE`. So a caller who checks the status is safe and
+    one who counts stops is not, and what they get is a route that visits the
+    unreachable stop **first** -- because the sentinel is -1, and in a
+    minimisation that is not "outside the range of any real cost" but the most
+    attractive value in the matrix.
+
+    This adapter cannot express a forbidden arc, so an instance containing one
+    is beyond the mapping and is named rather than approximated, as the other
+    refusals here are. `diagnose.preflight` says *which* order is stranded and
+    why; this is the backstop for a caller who did not ask it.
+
+    Raises:
+        NotImplementedError: naming a pair and the total, so a reader can look
+            one up rather than search a matrix for minus ones.
+    """
+    served = {order.id: stop.location_id for order in problem.orders
+              for stop in (order.pickup, order.delivery) if stop}
+    homes = {vehicle.start_location_id for vehicle in problem.vehicles}
+    homes |= {v.end_location_id for v in problem.vehicles if v.end_location_id}
+    index = {location.id: location.matrix_index for location in problem.locations}
+    needed = sorted({index[name] for name in set(served.values()) | homes
+                     if name in index})
+
+    broken = [(a, b) for a in needed for b in needed
+              if a != b and not problem.matrix.is_reachable(a, b)]
+    if not broken:
+        return
+
+    name_of = {location.matrix_index: location.id
+               for location in problem.locations}
+    first, second = broken[0]
+    raise NotImplementedError(
+        f"{len(broken)} of this instance's arcs are unreachable, the first "
+        f"from {name_of[first]} to {name_of[second]}, and this adapter cannot "
+        "express a forbidden arc: omitting the edge does not stop PyVRP "
+        "routing through it, and MTX-5 makes an unreachable pair "
+        "hard-infeasible rather than expensive. Drop the stranded stops before "
+        "solving -- `vrp.diagnose.preflight` reports which they are"
+    )
+
+
 def tier_bonuses(problem: Problem) -> dict[int, int]:
     """Prize bonuses making priority tiers lexicographic. FR-13.
 
@@ -620,9 +666,11 @@ def compile_problem(problem: Problem) -> _Compiled:
                 if not matrix.is_reachable(origin.matrix_index,
                                            destination.matrix_index):
                     # MTX-5: an unreachable pair is a hard-infeasible arc, so
-                    # the edge is simply absent. Adding it at any finite cost
-                    # is what lets a solver route through a road that does not
-                    # exist.
+                    # the edge is absent. Absent is not forbidden -- PyVRP
+                    # routes through a missing edge and reports INFEASIBLE --
+                    # which is why `_refuse_unreachable` runs before any of
+                    # this. Skipping here keeps a phantom cost out of the
+                    # model for the instances that do get built.
                     continue
                 model.add_edge(
                     handles[origin.matrix_index],
@@ -858,6 +906,7 @@ def solve(problem: Problem, iterations: int = 500, seed: int = 0) -> Solution:
               "iterations": iterations, "matrix_version": problem.matrix.version}
     if not problem.vehicles:
         return _nothing_to_dispatch(problem, record)
+    _refuse_unreachable(problem)
     compiled = compile_problem(problem)
     result = compiled.model.solve(stop=MaxIterations(iterations), seed=seed,
                                   display=False)

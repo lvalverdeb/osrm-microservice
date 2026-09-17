@@ -4,7 +4,7 @@
 
 *Derived from `vrp/**/*.py`.*
 
-64 modules, 18,244 lines. Every module opens with what it is for and the requirements it implements; both columns are read from there.
+64 modules, 18,293 lines. Every module opens with what it is for and the requirements it implements; both columns are read from there.
 
 ## `vrp/`
 
@@ -86,7 +86,7 @@
 |---|---|---|---|
 | `__init__.py` | 6 | Solver adapters. SDD §7.3 | — |
 | `ortools_adapter.py` | 289 | OR-Tools adapter | CON-3, T-30 |
-| `pyvrp_adapter.py` | 868 | PyVRP adapter | T-12 |
+| `pyvrp_adapter.py` | 917 | PyVRP adapter | T-12 |
 
 ## `vrp/verify/`
 

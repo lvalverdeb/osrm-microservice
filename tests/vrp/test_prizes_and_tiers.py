@@ -371,3 +371,104 @@ def test_an_ordinary_tier_stack_is_untouched():
     solution = solve(deep_instance(3), iterations=100, seed=0)
 
     assert solution.status in ("FEASIBLE", "OPTIMAL")
+
+
+# --------------------------------------------------------------------------
+# An arc that does not exist — `MTX-5`, `T-105`
+# --------------------------------------------------------------------------
+# The adapter already skips unreachable pairs when it builds edges, citing
+# MTX-5: "the edge is simply absent. Adding it at any finite cost is what lets
+# a solver route through a road that does not exist." Absent is not forbidden.
+# PyVRP routes through the missing edge anyway and reports INFEASIBLE, so the
+# comment claims a guarantee the library does not give.
+#
+# It matters because the sentinel is -1. In a minimisation that is not "outside
+# the range of any real cost" -- it is the most attractive value there is, so
+# the unreachable stop is visited *first*. Found on real Costa Rica road data,
+# where disconnected pairs are ordinary.
+
+
+def islanded() -> Problem:
+    """Three customers, one of them with no road connection either way."""
+    from vrp.model import UNREACHABLE
+    size = 4
+    grid = [[0 if i == j else 600 for j in range(size)] for i in range(size)]
+    for i in range(size):
+        if i != 3:
+            grid[i][3] = UNREACHABLE
+            grid[3][i] = UNREACHABLE
+    rows = tuple(tuple(row) for row in grid)
+    locations = tuple(
+        Location(id="D" if i == 0 else f"C{i}", lat=9.9 + i / 100, lon=-84.0,
+                 matrix_index=i)
+        for i in range(size))
+    orders = tuple(an_order(f"O{i}", f"C{i}", kg=1) for i in (1, 2, 3))
+    return Problem(
+        id="island", locations=locations, orders=orders,
+        vehicles=(Vehicle(id="V1", capacities={"kg": 10}, shift=DAY,
+                          start_location_id="D", end_location_id="D"),),
+        matrix=TravelMatrix(version="i", durations=rows, distances=rows))
+
+
+def test_an_instance_with_an_unreachable_arc_is_refused_by_name():
+    """Refusing is the only honest answer this adapter can give.
+
+    It cannot express a forbidden arc -- omitting the edge does not forbid it
+    -- so an instance containing one is beyond the mapping, and `MTX-5` says
+    the arc is hard-infeasible rather than expensive. `diagnose.preflight`
+    reports which order is stranded; this is the backstop for a caller who did
+    not ask.
+    """
+    with pytest.raises(NotImplementedError, match="unreachable"):
+        solve(islanded(), iterations=50, seed=0)
+
+
+def test_the_refusal_names_a_pair_a_reader_can_look_up():
+    with pytest.raises(NotImplementedError) as refusal:
+        solve(islanded(), iterations=50, seed=0)
+
+    assert "C3" in str(refusal.value) or "3" in str(refusal.value)
+
+
+def test_a_fully_connected_instance_is_untouched():
+    """The guard must not narrow what already worked."""
+    solution = solve(deep_instance(3), iterations=100, seed=0)
+
+    assert solution.status in ("FEASIBLE", "OPTIMAL")
+
+
+def severed() -> Problem:
+    """Two customers reachable from the depot but not from each other.
+
+    The shape real road data produced: a one-way system or a river between two
+    addresses that the depot can reach separately. A depot-to-stop check sees
+    nothing wrong, and a route serving both in sequence crosses an arc that
+    does not exist.
+    """
+    from vrp.model import UNREACHABLE
+    size = 4
+    grid = [[0 if i == j else 600 for j in range(size)] for i in range(size)]
+    grid[1][2] = UNREACHABLE
+    grid[2][1] = UNREACHABLE
+    rows = tuple(tuple(row) for row in grid)
+    locations = tuple(
+        Location(id="D" if i == 0 else f"C{i}", lat=9.9 + i / 100, lon=-84.0,
+                 matrix_index=i)
+        for i in range(size))
+    orders = tuple(an_order(f"O{i}", f"C{i}", kg=1) for i in (1, 2, 3))
+    return Problem(
+        id="severed", locations=locations, orders=orders,
+        vehicles=(Vehicle(id="V1", capacities={"kg": 10}, shift=DAY,
+                          start_location_id="D", end_location_id="D"),),
+        matrix=TravelMatrix(version="s", durations=rows, distances=rows))
+
+
+def test_two_stops_unreachable_from_each_other_are_caught_too():
+    """Every pair among the stops, not only the arcs out of the depot.
+
+    This is the case that actually occurred: `ddn`'s day-one run failed on
+    `no route from 2336 to 1443`, two delivery points, each perfectly
+    reachable from its facility.
+    """
+    with pytest.raises(NotImplementedError, match="unreachable"):
+        solve(severed(), iterations=50, seed=0)
