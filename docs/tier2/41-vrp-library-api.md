@@ -937,6 +937,7 @@ and it would pass, which is worse than failing.
 | `VerificationError` | `api` | A `/verify` payload is not readable |
 | `SnapshotTampered` | `snapshot` | A snapshot's payload no longer matches its digest |
 | `UnsendableEngine` | `portfolio` | An engine cannot be dispatched to a worker process |
+| `NotImplementedError` | `solve.pyvrp_adapter` | An instance contains an unreachable arc. The adapter cannot express a forbidden one, so it is named rather than approximated — see §10 |
 | `NotImplementedError` | `solve.pyvrp_adapter` | `tier_bonuses` would need a prize bonus past int64 — roughly 50–55 distinct `priority_tier` values. Refused rather than wrapped, because a wrapped bonus inverts the ranking silently on an instance that looks ordinary. Ranks are classes; a score belongs in `Order.prize`, which has no such ceiling |
 
 ---
@@ -959,6 +960,7 @@ real package.
 | `report.ok` | `Report` is `(violations, not_applicable)`. Use `bool(report)` |
 | `score().values` is a dict | It is a `TierValues` wrapping `.values` — index it by `Tier` |
 | `build_matrix(..., [(lon, lat)])` | `(latitude, longitude)`, the opposite of the JSON bodies |
+| An unreachable arc is merely expensive | It is `-1`, the **cheapest** value in the matrix. Before `v0.3.3` the solver was drawn to the stranded stop and visited it *first*; it now raises. The gateway's sentinel is `1e12` and fails the opposite way — admissible rather than attractive |
 | `vrp/bench` is importable anywhere | Checkout only. It is excluded from the wheel, so an installed copy has no `vrp.bench` |
 | `Lock(kind="PIN_TO_VEHICLE")` | `PIN_ORDER_TO_VEHICLE`. The error lists all eight valid kinds |
 | `sweep(..., solve=...)` takes your solver | It must return an **assignment dict**, not a `Solution` — `Solve = Callable[[Problem], dict[str, list[str]]]` |
@@ -967,6 +969,42 @@ real package.
 | `Scenario.order_ids` | `Scenario.orders` — real `Order` objects, not ids |
 
 ---
+
+### An unreachable arc is refused, not priced
+
+`vrp/model.py` sets `UNREACHABLE = -1`. In a minimisation that is not "outside
+the range of any real cost" — it is the most attractive value in the matrix.
+
+The adapter has always omitted unreachable edges when compiling, citing MTX-5
+while doing it. **Omitting is not forbidding.** PyVRP routes through a missing
+edge anyway and returns the plan marked `INFEASIBLE`, so the comment asserted a
+guarantee the library does not give. A caller who checked `status` was safe; one
+who counted stops got a route that visited the stranded stop first.
+
+Since `v0.3.3` the adapter refuses before compiling:
+
+```python
+solve(problem)          # an instance with a severed pair
+# NotImplementedError: 2 of this instance's arcs are unreachable, the first
+# from O2 to O3, and this adapter cannot express a forbidden arc …
+```
+
+It does **not** substitute a large number of its own — MTX-5 forbids that too,
+because a large-finite sentinel gets optimised back into the solution. For
+*which* order is stranded rather than that one is, `diagnose.preflight` answers
+first; this is the backstop for a caller who did not ask.
+
+**This is a break, not only an improvement.** An instance with an unreachable
+pair used to return a plan with `INFEASIBLE`. It now raises, so anything
+inspecting or counting that plan gets an exception instead.
+
+Two shapes, both refused — the second is the one real road data produced, two
+delivery points reachable from their facility but not from each other:
+
+```
+island cut off from the depot too                    -> refused, 6 arcs
+two stops reachable from depot, not from each other  -> refused, 2 arcs
+```
 
 ## 11. Reproducing this
 
