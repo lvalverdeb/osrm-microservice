@@ -159,7 +159,7 @@ shows up as a refusal you cannot miss.
 **The failure mode is giving a prize to work that is not optional.** The plan
 comes back shorter and feasible, and the missing work has to be *noticed*
 rather than *reported*. A consuming repository hit exactly this decision on a
-return run in September 2026 — envelopes going back to a customer are not
+return run in September 2026 — work going back to a customer is not
 declinable, so the orders carry no prize, and a fleet too small for the work
 reports `INFEASIBLE` instead of quietly returning fewer parcels.
 
