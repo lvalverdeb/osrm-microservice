@@ -188,6 +188,38 @@ with warnings.catch_warnings():
 `matrix_version(locations, profile, extract_version)` computes the same hash
 without calling anything, for checking whether a cached plan is still valid.
 
+### At hub scale, and the two things that bite there
+
+`build_large_matrix` (in `vrp.matrix`) tiles the work when the set is past the
+gateway's cell cap. Measured on a real Costa Rica night, 17 September 2026: a hub-scale set of
+roughly **1,600 stops** tiles into **289 requests** and builds in **29.4 s** —
+and a whole night's facilities inside a minute. Matrix build is not where a
+hub-scale night is at risk.
+
+**That figure is with the engine on the same machine.** Tiles are fetched per
+request, so a deployment with the engine one hop away pays the round trip 289
+times — roughly +14 s at 50 ms RTT, ~44 s total. It changes no decision, but it
+is the part of the number that is environment rather than algorithm.
+
+**A hub-scale batch exceeds `RATE_LIMIT_MATRIX` on defaults, and fails
+quietly.** The shipped limit is `300/minute` and 289 tiles sits just under it; a batch
+roughly twice that shed nearly half its tiles. A shed tile is not an error — `build_large_matrix`
+records it as `NFR-04` degradation and returns a matrix whose missing cells carry
+`UNREACHABLE`. So the failure arrives as a plan built on a road network that does
+not exist, and since the sentinel is `-1` a reachability check reads the gap as
+*unreachable addresses* rather than as *unfetched tiles*.
+
+```python
+matrix, snaps = build_matrix(...)
+if matrix.degraded:                     # a string saying why, or None
+    raise RuntimeError(matrix.degraded) # for a night's routes, refuse it
+```
+
+`NFR-04`'s degrade-rather-than-fail is right for live dispatch, where a worse
+answer beats no answer. It is wrong for a batch that plans tomorrow, which is not
+a worse plan but a plan for the wrong roads. **Check `degraded` yourself**;
+nothing downstream will.
+
 ### 4.2 Construct the `Problem`
 
 ```python
