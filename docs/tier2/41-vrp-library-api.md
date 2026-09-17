@@ -135,6 +135,37 @@ vrp.model.ValidationError: unknown kind 'DELIVERY'
   pickup first (`INV-2`). `max_ride_time` is only legal on a `SHIPMENT`, because
   a job has one stop and its elapsed time is already its service duration.
 
+### A prize makes an order declinable; its absence makes it required
+
+`prize` reads like a ranking weight and is not one. `must_be_served` decides
+whether a plan may leave an order out at all, and the rule is in its docstring:
+
+> Tier 0 is must-serve whatever it is worth. Everything else is declinable once
+> it carries a prize -- an order with no prize has no price at which declining
+> is acceptable, so a plan must place it or report infeasible.
+
+So the choice is between two different answers to an overloaded day:
+
+| | Behaviour when the fleet is short |
+|---|---|
+| Order carries a `prize` | The solver declines the least valuable work and returns a **shorter plan** |
+| Order carries no `prize` | The solver **reports `INFEASIBLE`** rather than dropping anything |
+
+Neither is the safe default — they answer different questions. Work that is
+genuinely optional wants a prize, and the shortfall shows up as unassigned
+orders you can price. Work that is obligatory wants none, and the shortfall
+shows up as a refusal you cannot miss.
+
+**The failure mode is giving a prize to work that is not optional.** The plan
+comes back shorter and feasible, and the missing work has to be *noticed*
+rather than *reported*. A consuming repository hit exactly this decision on a
+return run in September 2026 — envelopes going back to a customer are not
+declinable, so the orders carry no prize, and a fleet too small for the work
+reports `INFEASIBLE` instead of quietly returning fewer parcels.
+
+Tier 0 overrides both: it is must-serve whatever prize it carries, which is how
+an SLA deadline is expressed as a constraint rather than as a weight.
+
 ---
 
 ## 4. The end-to-end workflow
