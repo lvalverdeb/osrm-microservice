@@ -350,7 +350,31 @@ phase_doctor() {
         for p in osrm-backend redis python313 uv; do
             if pkg info -e "$p" 2>/dev/null; then printf "%s " "$p"; fi
         done
-        echo ""'
+        echo ""
+        # Enabled in rc.conf is not the same as started at boot. An rc.d script
+        # can report its rcvar as YES when executed and still be skipped by
+        # /etc/rc, which *sources* scripts -- the discrepancy that left three
+        # engines down for two hours after the 2026-09-17 reboot while every
+        # by-hand "service ... start" worked. service -e is what rc will
+        # actually run, so the two lists are compared rather than trusted.
+        printf "Autostart: "
+        _boot=$(service -e 2>/dev/null)
+        _n=0
+        _bad=""
+        for _f in /etc/rc.d/* /usr/local/etc/rc.d/*; do
+            [ -f "$_f" ] || continue
+            # nojail scripts are enabled host-side and correctly skipped in a
+            # jail -- devd, netif, resolv and friends. Not a finding.
+            grep -qE "^# KEYWORD:.*nojail" "$_f" && continue
+            "$_f" rcvar 2>/dev/null | grep -qE "_enable=.?YES" || continue
+            _n=$((_n + 1))
+            printf "%s\n" "$_boot" | grep -qxF "$_f" || _bad="${_bad} ${_f##*/}"
+        done
+        if [ -n "$_bad" ]; then
+            echo "MISMATCH --${_bad} enabled but absent from the boot list; will not come back after a reboot"
+        else
+            echo "${_n} enabled, all in the boot list"
+        fi'
 }
 
 stage_into_jail() {
