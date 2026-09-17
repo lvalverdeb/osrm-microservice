@@ -6,7 +6,7 @@
 # exactly once -- now, before anything pins it. The gateway itself is
 # `gateway/`, a Rust binary, and is not a Python distribution at all.
 name = "vrp-platform"
-version = "0.3.2"
+version = "0.3.3"
 description = "Fleet-routing domain model, canonical evaluator and independent verifier"
 readme = "README.md"
 requires-python = ">=3.13"
