@@ -227,10 +227,11 @@ def test_the_verifier_does_not_import_the_evaluator():
 # plan from an integrator through `/verify` had nothing standing between a
 # van leaving before its load existed and a report saying the plan was sound.
 #
-# Found from a delivery network whose envelopes are line-hauled to a depot
-# overnight and delivered the next morning: "depot-bound envelopes are only
-# dispatched from a depot after they have physically arrived there" is a
-# release time, and it is the coupling between the two stages.
+# Found from outside, by a downstream repository whose stages are coupled by
+# exactly this: one leg carries goods to a depot, a later leg dispatches them
+# from it, and the second may not begin before the first has landed. That
+# coupling is a release time, and a single-stage plan never produces one --
+# which is how sixteen invariants came to exist without it.
 
 
 def released(when: int) -> Problem:
