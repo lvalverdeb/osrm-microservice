@@ -53,8 +53,10 @@ echo 'permit nopass :wheel' > /usr/local/etc/doas.conf
 pkg install -y sudo && visudo
 
 # Option C -- deploy as root instead
-#   install an SSH key in /root/.ssh/authorized_keys, then:
-make jail-up JAIL_HOST=root@10.211.55.33
+#   Only when neither A nor B is possible. Install an SSH key in
+#   /root/.ssh/authorized_keys first: without one this blocks on a
+#   password prompt instead of failing, because root rejects key auth.
+make jail-up JAIL_HOST=root@<host>
 ```
 
 ## Usage
