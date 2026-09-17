@@ -1,8 +1,9 @@
 #!/bin/sh
 #
-# PROVIDE: osrm_routed
-# REQUIRE: LOGIN cleanvar
-# KEYWORD: shutdown
+# Shared implementation behind the osrm-routed services. This is *not* an rc.d
+# script and carries no PROVIDE/REQUIRE header: install.sh writes one thin
+# wrapper per profile into /usr/local/etc/rc.d, and those carry the header and
+# source this file.
 #
 # Replaces the `osrm` rc.d script shipped by www/osrm-backend, which cannot
 # start with any flags set. rc.subr expands ${name}_flags between the command
@@ -15,15 +16,24 @@
 # paths serve the same engine configuration.
 #
 # MTX-1 needs one engine per routing profile, and one osrm-routed serves one
-# built graph, so this script runs as several instances. It takes its name from
-# its own filename -- installed as osrm_routed, osrm_routed_cycling and
-# osrm_routed_walking -- and every knob below is read as ${name}_*, so the
-# cycling instance is configured with osrm_routed_cycling_port and so on.
+# built graph, so this runs as several instances. Each wrapper sets ${name} to
+# a literal -- osrm_routed, osrm_routed_cycling, osrm_routed_walking -- and
+# every knob below is read as ${name}_*, so the cycling instance is configured
+# with osrm_routed_cycling_port and so on.
 #
-# One file rather than three copies: the three differ only in a port and a data
-# path, and three near-identical rc.d scripts drift the moment one is edited.
-# The eval is what that costs; rc.subr offers no other way to read a variable
-# whose name is not known until the script runs.
+# ${name} must be a literal and cannot come from $0. /etc/rc *sources* rc.d
+# scripts rather than executing them, so at boot $0 is the sourcing shell's,
+# not the script's: the rcvar lookup then names a variable nobody sets,
+# checkyesno returns false, and the engine silently does not start -- no error,
+# no log line. That is how all three engines stayed down after the 2026-09-17
+# reboot while the gateway, whose name was already a literal, came back. Every
+# manual `service osrm_routed start` hid it, because executing the script does
+# give $0 the right value.
+#
+# One implementation rather than three copies: the three differ only in a port
+# and a data path, and three near-identical scripts drift the moment one is
+# edited. The eval is what that costs; rc.subr offers no other way to read a
+# variable whose name is not known until the script runs.
 #
 # ${name}_enable (bool):    Set to NO by default. Set to YES to enable.
 # ${name}_user (str):       User to run as. Default: osrm
@@ -37,7 +47,10 @@
 
 . /etc/rc.subr
 
-name="${0##*/}"
+if [ -z "${name}" ]; then
+    echo "osrm-routed: name unset -- source this from an rc.d wrapper" >&2
+    exit 1
+fi
 rcvar=${name}_enable
 
 load_rc_config $name
