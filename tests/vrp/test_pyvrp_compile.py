@@ -151,17 +151,19 @@ def test_locations_are_the_problems_in_matrix_order_plus_a_sink_if_open(compiled
     assert [location.name for location in result.model.locations] == expected
 
 
+def expected_depot_names(problem: Problem) -> set[str]:
+    names = {vehicle.start_location_id for vehicle in problem.vehicles}
+    names |= {vehicle.ends_at for vehicle in problem.vehicles if not vehicle.open_route}
+    names |= {name for vehicle in problem.vehicles for name in vehicle.reload_locations}
+    if any(vehicle.open_route for vehicle in problem.vehicles):
+        names.add(SINK)
+    return names
+
+
 def test_depots_are_where_vehicles_start_end_and_reload(compiled):
     problem, result = compiled
-    expected = {vehicle.start_location_id for vehicle in problem.vehicles}
-    expected |= {vehicle.ends_at for vehicle in problem.vehicles
-                 if not vehicle.open_route}
-    expected |= {name for vehicle in problem.vehicles
-                 for name in vehicle.reload_locations}
-    if any(vehicle.open_route for vehicle in problem.vehicles):
-        expected.add(SINK)
     depots = result.model.depots
-    assert {depot.name for depot in depots} == expected
+    assert {depot.name for depot in depots} == expected_depot_names(problem)
     index_of = {location.id: location.matrix_index for location in problem.locations}
     index_of[SINK] = len(problem.locations)
     start, end = shift_bounds(problem)
@@ -170,51 +172,57 @@ def test_depots_are_where_vehicles_start_end_and_reload(compiled):
         assert (depot.tw_early, depot.tw_late) == (start, end)
 
 
-def expected_clients(problem: Problem) -> list[dict]:
+def expected_client(problem: Problem, order: Order, window, windows) -> dict:
+    """One client: the order's facts at one of its windows."""
+    stop = order.delivery or order.pickup
+    location = problem.location(stop.location_id)
     dims = dimensions(problem)
-    bonuses = tier_bonuses(problem)
+    amounts = [order.quantities.get(name, 0) for name in dims]
+    zeros = [0] * len(dims)
+    grouped = len(windows) > 1
+    return {
+        "name": order.id,
+        "location": location.matrix_index,
+        "delivery": amounts if order.delivery is not None else zeros,
+        "pickup": amounts if order.delivery is None else zeros,
+        "service": service_time(order, problem.vehicles[0], location),
+        "release": order.release_time,
+        "prize": order.prize + tier_bonuses(problem)[precedence(order)],
+        "required": False if grouped else must_be_served(order),
+        "window": window_bounds(window, problem),
+        "grouped": grouped,
+    }
+
+
+def expected_clients(problem: Problem) -> list[dict]:
     rows = []
-    for order in problem.orders:
-        if order.kind == "SHIPMENT":
-            continue
-        stop = order.delivery or order.pickup
-        location = problem.location(stop.location_id)
-        amounts = [order.quantities.get(name, 0) for name in dims]
-        zeros = [0] * len(dims)
-        windows = stop.time_windows or (None,)
-        for window in windows:
-            rows.append({
-                "name": order.id,
-                "location": location.matrix_index,
-                "delivery": amounts if order.delivery is not None else zeros,
-                "pickup": amounts if order.delivery is None else zeros,
-                "service": service_time(order, problem.vehicles[0], location),
-                "release": order.release_time,
-                "prize": order.prize + bonuses[precedence(order)],
-                "required": False if len(windows) > 1 else must_be_served(order),
-                "window": window_bounds(window, problem),
-                "grouped": len(windows) > 1,
-            })
+    for order in jobs(problem):
+        windows = (order.delivery or order.pickup).time_windows or (None,)
+        rows.extend(expected_client(problem, order, window, windows)
+                    for window in windows)
     return rows
+
+
+def observed_client(client) -> dict:
+    return {
+        "name": client.name,
+        "location": client.location,
+        "delivery": list(client.delivery),
+        "pickup": list(client.pickup),
+        "service": client.service_duration,
+        "release": client.release_time,
+        "prize": client.prize,
+        "required": client.required,
+        "window": (client.tw_early, client.tw_late),
+        "grouped": client.group is not None,
+    }
 
 
 def test_clients_carry_each_orders_facts_one_per_window(compiled):
     problem, result = compiled
     expected = expected_clients(problem)
-    clients = result.model.clients
-    assert len(clients) == len(expected)
     assert result.order_by_client == {i: row["name"] for i, row in enumerate(expected)}
-    for client, row in zip(clients, expected, strict=True):
-        assert client.name == row["name"]
-        assert client.location == row["location"]
-        assert list(client.delivery) == row["delivery"]
-        assert list(client.pickup) == row["pickup"]
-        assert client.service_duration == row["service"]
-        assert client.release_time == row["release"]
-        assert client.prize == row["prize"]
-        assert client.required is row["required"]
-        assert (client.tw_early, client.tw_late) == row["window"]
-        assert (client.group is not None) is row["grouped"]
+    assert [observed_client(client) for client in result.model.clients] == expected
 
 
 def test_an_order_with_several_windows_is_one_required_exclusive_group(compiled):
@@ -228,73 +236,120 @@ def test_an_order_with_several_windows_is_one_required_exclusive_group(compiled)
         assert len(group.clients) == len((order.delivery or order.pickup).time_windows)
 
 
+def first_window(windows, fallback: tuple[int, int]) -> tuple[int, int]:
+    """What a shipment end is bounded by: its first window, else the shift."""
+    return (windows[0].start, windows[0].end) if windows else fallback
+
+
+def expected_shipment(problem: Problem, order: Order) -> dict:
+    collect = problem.location(order.pickup.location_id)
+    deliver = problem.location(order.delivery.location_id)
+    vehicle = problem.vehicles[0]
+    pickup = first_window(order.pickup.time_windows, shift_bounds(problem))
+    delivery = first_window(order.delivery.time_windows, shift_bounds(problem))
+    return {
+        "name": order.id,
+        "pickup": (collect.matrix_index, pickup[0], pickup[1],
+                   service_time(order, vehicle, collect)),
+        "delivery": (deliver.matrix_index, delivery[0], delivery_deadline(problem, order),
+                     service_time(order, vehicle, deliver)),
+        "amount": [order.quantities.get(d, 0) for d in dimensions(problem)],
+        "prize": order.prize + tier_bonuses(problem)[precedence(order)],
+        "required": must_be_served(order),
+    }
+
+
+def observed_shipment(shipment) -> dict:
+    return {
+        "name": shipment.name,
+        "pickup": (shipment.pickup.location, shipment.pickup.tw_early,
+                   shipment.pickup.tw_late, shipment.pickup.service_duration),
+        "delivery": (shipment.delivery.location, shipment.delivery.tw_early,
+                     shipment.delivery.tw_late, shipment.delivery.service_duration),
+        "amount": list(shipment.amount),
+        "prize": shipment.prize,
+        "required": shipment.required,
+    }
+
+
 def test_shipments_carry_both_ends(compiled):
     problem, result = compiled
-    dims = dimensions(problem)
-    bonuses = tier_bonuses(problem)
     orders = [order for order in problem.orders if order.kind == "SHIPMENT"]
-    shipments = result.model.shipments
-    assert len(shipments) == len(orders)
     assert result.order_by_shipment == {i: order.id for i, order in enumerate(orders)}
-    start, end = shift_bounds(problem)
-    for shipment, order in zip(shipments, orders, strict=True):
-        collect = problem.location(order.pickup.location_id)
-        deliver = problem.location(order.delivery.location_id)
-        assert shipment.name == order.id
-        assert shipment.pickup.location == collect.matrix_index
-        assert shipment.delivery.location == deliver.matrix_index
-        assert list(shipment.amount) == [order.quantities.get(d, 0) for d in dims]
-        assert shipment.prize == order.prize + bonuses[precedence(order)]
-        assert shipment.required is must_be_served(order)
-        pickup_windows = order.pickup.time_windows
-        assert shipment.pickup.tw_early == (pickup_windows[0].start if pickup_windows else start)
-        assert shipment.pickup.tw_late == (pickup_windows[0].end if pickup_windows else end)
-        delivery_windows = order.delivery.time_windows
-        assert shipment.delivery.tw_early == (
-            delivery_windows[0].start if delivery_windows else start)
-        assert shipment.delivery.tw_late == delivery_deadline(problem, order)
-        assert shipment.pickup.service_duration == service_time(
-            order, problem.vehicles[0], collect)
-        assert shipment.delivery.service_duration == service_time(
-            order, problem.vehicles[0], deliver)
+    observed = [observed_shipment(shipment) for shipment in result.model.shipments]
+    assert observed == [expected_shipment(problem, order) for order in orders]
+
+
+def expected_costs(vehicle) -> dict:
+    """A cost the vehicle leaves at zero compiles to PyVRP's own default."""
+    return {
+        "fixed_cost": vehicle.fixed_cost or BARE.fixed_cost,
+        "unit_distance_cost": vehicle.cost_per_metre or BARE.unit_distance_cost,
+        "unit_duration_cost": vehicle.cost_per_second or BARE.unit_duration_cost,
+        "unit_overtime_cost": (vehicle.overtime_cost_per_second
+                               or BARE.unit_overtime_cost),
+    }
+
+
+def expected_limits(vehicle) -> dict:
+    """An unset limit compiles to PyVRP's own "no limit"."""
+    return {
+        "shift_duration": (BARE.shift_duration if vehicle.max_duration is None
+                           else vehicle.max_duration),
+        "max_distance": (BARE.max_distance if vehicle.max_distance is None
+                         else vehicle.max_distance),
+    }
+
+
+def expected_reloads(vehicle, depot_names: set[str]) -> dict:
+    if vehicle.max_reloads and vehicle.reload_locations:
+        return {"reload_depots": sorted(name for name in vehicle.reload_locations
+                                        if name in depot_names),
+                "max_reloads": vehicle.max_reloads}
+    return {"reload_depots": [], "max_reloads": BARE.max_reloads}
+
+
+def expected_vehicle(problem: Problem, vehicle, depot_names: set[str]) -> dict:
+    return {
+        "name": vehicle.id,
+        "num_available": 1,
+        "capacity": [vehicle.capacities.get(d, 0) for d in dimensions(problem)],
+        "start": vehicle.start_location_id,
+        "end": SINK if vehicle.open_route else vehicle.ends_at,
+        "shift": (vehicle.shift.start, vehicle.shift.end),
+        **expected_costs(vehicle),
+        **expected_limits(vehicle),
+        **expected_reloads(vehicle, depot_names),
+    }
+
+
+def observed_vehicle(kind, depots) -> dict:
+    return {
+        "name": kind.name,
+        "num_available": kind.num_available,
+        "capacity": list(kind.capacity),
+        "start": depots[kind.start_depot].name,
+        "end": depots[kind.end_depot].name,
+        "shift": (kind.tw_early, kind.tw_late),
+        "fixed_cost": kind.fixed_cost,
+        "unit_distance_cost": kind.unit_distance_cost,
+        "unit_duration_cost": kind.unit_duration_cost,
+        "unit_overtime_cost": kind.unit_overtime_cost,
+        "shift_duration": kind.shift_duration,
+        "max_distance": kind.max_distance,
+        "reload_depots": [depots[i].name for i in kind.reload_depots],
+        "max_reloads": kind.max_reloads,
+    }
 
 
 def test_vehicle_types_carry_the_fleet(compiled):
     problem, result = compiled
-    dims = dimensions(problem)
-    types = result.model.vehicle_types
     depots = result.model.depots
-    assert len(types) == len(problem.vehicles)
+    names = {depot.name for depot in depots}
     assert result.vehicle_ids == [vehicle.id for vehicle in problem.vehicles]
-    for kind, vehicle in zip(types, problem.vehicles, strict=True):
-        assert kind.name == vehicle.id
-        assert kind.num_available == 1
-        assert list(kind.capacity) == [vehicle.capacities.get(d, 0) for d in dims]
-        assert depots[kind.start_depot].name == vehicle.start_location_id
-        assert depots[kind.end_depot].name == (SINK if vehicle.open_route
-                                               else vehicle.ends_at)
-        assert (kind.tw_early, kind.tw_late) == (vehicle.shift.start, vehicle.shift.end)
-        assert kind.fixed_cost == (vehicle.fixed_cost or BARE.fixed_cost)
-        assert kind.unit_distance_cost == (vehicle.cost_per_metre
-                                           or BARE.unit_distance_cost)
-        assert kind.unit_duration_cost == (vehicle.cost_per_second
-                                           or BARE.unit_duration_cost)
-        assert kind.unit_overtime_cost == (vehicle.overtime_cost_per_second
-                                           or BARE.unit_overtime_cost)
-        assert kind.shift_duration == (BARE.shift_duration
-                                       if vehicle.max_duration is None
-                                       else vehicle.max_duration)
-        assert kind.max_distance == (BARE.max_distance
-                                     if vehicle.max_distance is None
-                                     else vehicle.max_distance)
-        if vehicle.max_reloads and vehicle.reload_locations:
-            names = {depot.name for depot in depots}
-            assert [depots[i].name for i in kind.reload_depots] == sorted(
-                name for name in vehicle.reload_locations if name in names)
-            assert kind.max_reloads == vehicle.max_reloads
-        else:
-            assert list(kind.reload_depots) == []
-            assert kind.max_reloads == BARE.max_reloads
+    observed = [observed_vehicle(kind, depots) for kind in result.model.vehicle_types]
+    assert observed == [expected_vehicle(problem, vehicle, names)
+                        for vehicle in problem.vehicles]
 
 
 def test_one_profile_per_distinct_eligibility_set(compiled):
@@ -308,37 +363,44 @@ def test_one_profile_per_distinct_eligibility_set(compiled):
             "vehicles with the same restrictions must share one profile")
 
 
+def expected_arc(problem: Problem, forbidden: frozenset[int],
+                 origin: int, destination: int, measure) -> int:
+    """One cell of a profile's matrix: 0 on the diagonal, the pinned value
+    where the arc is routable for this profile, MISSING otherwise."""
+    if origin == destination:
+        return 0
+    if destination in forbidden or not problem.matrix.is_reachable(origin, destination):
+        return MISSING
+    return measure(origin, destination)
+
+
+def expected_matrix(problem: Problem, forbidden: frozenset[int], measure) -> list[list[int]]:
+    n = len(problem.locations)
+    core = [[expected_arc(problem, forbidden, i, j, measure) for j in range(n)]
+            for i in range(n)]
+    if not any(vehicle.open_route for vehicle in problem.vehicles):
+        return core
+    # Every stop reaches the sink for free, and nothing leaves it: an open
+    # route ends there.
+    return [row + [0] for row in core] + [[MISSING] * n + [0]]
+
+
+def forbidden_by_profile(problem: Problem, result) -> dict[int, frozenset[int]]:
+    return {kind.profile: _eligibility_key(problem, vehicle)
+            for kind, vehicle in zip(result.model.vehicle_types, problem.vehicles,
+                                     strict=True)}
+
+
 def test_edges_are_the_matrix_minus_the_forbidden_and_unreachable(compiled):
     problem, result = compiled
     data = result.model.data()
-    matrix = problem.matrix
-    n = len(problem.locations)
-    has_sink = any(vehicle.open_route for vehicle in problem.vehicles)
-    forbidden_of = {}
-    for kind, vehicle in zip(result.model.vehicle_types, problem.vehicles, strict=True):
-        forbidden_of[kind.profile] = _eligibility_key(problem, vehicle)
+    forbidden_of = forbidden_by_profile(problem, result)
     assert set(forbidden_of) == set(range(data.num_profiles))
     for profile, forbidden in forbidden_of.items():
-        distance = data.distance_matrix(profile)
-        duration = data.duration_matrix(profile)
-        for origin in range(n):
-            for destination in range(n):
-                if origin == destination:
-                    assert distance[origin][destination] == 0
-                    continue
-                absent = (destination in forbidden
-                          or not matrix.is_reachable(origin, destination))
-                if absent:
-                    assert distance[origin][destination] == MISSING, (origin, destination)
-                    assert duration[origin][destination] == MISSING
-                else:
-                    assert distance[origin][destination] == matrix.distance(origin, destination)
-                    assert duration[origin][destination] == matrix.duration(origin, destination)
-            if has_sink:
-                assert distance[origin][n] == 0 and duration[origin][n] == 0
-        if has_sink:
-            # Nothing leaves the sink: an open route ends there.
-            assert all(distance[n][j] == MISSING for j in range(n))
+        assert data.distance_matrix(profile).tolist() == expected_matrix(
+            problem, forbidden, problem.matrix.distance)
+        assert data.duration_matrix(profile).tolist() == expected_matrix(
+            problem, forbidden, problem.matrix.duration)
 
 
 def test_refusals_still_refuse():
@@ -353,47 +415,38 @@ def test_refusals_still_refuse():
         compile_problem(FIXTURES["UC-071"]())
 
 
+def jobs(problem: Problem) -> list[Order]:
+    return [order for order in problem.orders if order.kind != "SHIPMENT"]
+
+
+# One predicate per branch of the compiler, named for what the branch handles.
+COMPILE_BRANCHES: dict[str, Callable[[Problem], bool]] = {
+    "open route": lambda p: any(v.open_route for v in p.vehicles),
+    "shipment": lambda p: any(o.kind == "SHIPMENT" for o in p.orders),
+    "several windows": lambda p: any(
+        len((o.delivery or o.pickup).time_windows) > 1 for o in jobs(p)),
+    "pickup only": lambda p: any(o.delivery is None for o in jobs(p)),
+    "soft window": lambda p: any(
+        w.hardness == "SOFT" for o in p.orders for s in o.stops for w in s.time_windows),
+    "release time": lambda p: any(o.release_time for o in p.orders),
+    "prize": lambda p: any(o.prize for o in p.orders),
+    "locks": lambda p: bool(p.locks),
+    "skills": lambda p: any(v.skills for v in p.vehicles),
+    "reloads": lambda p: any(v.max_reloads and v.reload_locations for v in p.vehicles),
+    "limits": lambda p: any(
+        v.max_duration is not None or v.max_distance is not None for v in p.vehicles),
+    "costs": lambda p: any(
+        v.fixed_cost or v.cost_per_metre or v.cost_per_second for v in p.vehicles),
+    "unreachable arc": lambda p: any(
+        not p.matrix.is_reachable(i, j)
+        for i in range(len(p.locations)) for j in range(len(p.locations)) if i != j),
+    "several profiles": lambda p: len({_eligibility_key(p, v) for v in p.vehicles}) > 1,
+}
+
+
 def test_the_sources_walk_every_compile_branch():
     """A characterisation over fixtures only characterises what they contain."""
-    seen: set[str] = set()
-    for build in SOURCES.values():
-        problem = build()
-        if any(v.open_route for v in problem.vehicles):
-            seen.add("open route")
-        if any(o.kind == "SHIPMENT" for o in problem.orders):
-            seen.add("shipment")
-        jobs = [o for o in problem.orders if o.kind != "SHIPMENT"]
-        if any(len((o.delivery or o.pickup).time_windows) > 1 for o in jobs):
-            seen.add("several windows")
-        if any(o.delivery is None for o in jobs):
-            seen.add("pickup only")
-        if any(w.hardness == "SOFT" for o in problem.orders for s in o.stops
-               for w in s.time_windows):
-            seen.add("soft window")
-        if any(o.release_time for o in problem.orders):
-            seen.add("release time")
-        if any(o.prize for o in problem.orders):
-            seen.add("prize")
-        if problem.locks:
-            seen.add("locks")
-        if any(v.skills for v in problem.vehicles):
-            seen.add("skills")
-        if any(v.max_reloads and v.reload_locations for v in problem.vehicles):
-            seen.add("reloads")
-        if any(v.max_duration is not None or v.max_distance is not None
-               for v in problem.vehicles):
-            seen.add("limits")
-        if any(v.fixed_cost or v.cost_per_metre or v.cost_per_second
-               for v in problem.vehicles):
-            seen.add("costs")
-        n = len(problem.locations)
-        if any(not problem.matrix.is_reachable(i, j)
-               for i in range(n) for j in range(n) if i != j):
-            seen.add("unreachable arc")
-        if len({_eligibility_key(problem, v) for v in problem.vehicles}) > 1:
-            seen.add("several profiles")
-    assert seen == {
-        "open route", "shipment", "several windows", "pickup only", "soft window",
-        "release time", "prize", "locks", "skills", "reloads", "limits", "costs",
-        "unreachable arc", "several profiles",
-    }
+    problems = [build() for build in SOURCES.values()]
+    reached = {name for name, has in COMPILE_BRANCHES.items()
+               if any(has(problem) for problem in problems)}
+    assert reached == set(COMPILE_BRANCHES)
