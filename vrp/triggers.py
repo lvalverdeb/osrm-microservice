@@ -35,7 +35,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
-from itertools import pairwise
 
 from vrp.committed import (
     commit_locks,
@@ -43,7 +42,7 @@ from vrp.committed import (
     loading_locks,
     moved_since,
 )
-from vrp.evaluator import evaluate, route_metrics
+from vrp.evaluator import evaluate, route_distance, route_metrics
 from vrp.model import Lock, Problem, Route, Solution
 
 # DYN-5's four events. Anything outside this list is a typo, and a typo that
@@ -445,26 +444,13 @@ def _insert(problem: Problem, assignment: dict[str, list[str]], order_id: str,
             candidate = current[:position] + [order_id] + current[position:]
             if not route_is_legal(problem, vehicle_id, candidate):
                 continue
-            cost = _length(problem, vehicle_id, candidate)
+            cost = route_distance(problem, vehicle_id, candidate)
             if home is not None and vehicle_id != home:
                 cost += churn_weight
             if best is None or cost < best[0]:
                 best = (cost, vehicle_id, candidate)
     if best is not None:
         assignment[best[1]] = best[2]
-
-
-def _length(problem: Problem, vehicle_id: str, order_ids: list[str]) -> int:
-    vehicle = problem.vehicle(vehicle_id)
-    index = {loc.id: loc.matrix_index for loc in problem.locations}
-    nodes = [index[vehicle.start_location_id]]
-    for order_id in order_ids:
-        order = problem.order(order_id)
-        stop = order.delivery or order.pickup
-        nodes.append(index[stop.location_id])
-    nodes.append(index[vehicle.end_location_id or vehicle.start_location_id])
-    return sum(problem.matrix.distance(a, b)
-               for a, b in pairwise(nodes))
 
 
 def _rebuild(problem: Problem, previous: Solution,

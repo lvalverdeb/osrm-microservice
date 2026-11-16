@@ -30,9 +30,9 @@ diagnosis; it changes whenever either does.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from itertools import pairwise
 
 from vrp.diagnose import preflight
+from vrp.evaluator import route_distance
 from vrp.model import Order, Problem, Solution
 
 
@@ -111,20 +111,8 @@ def _detour(problem: Problem, vehicle_id: str, carried: list[str],
     that is the vehicle-level question and T-44 owns it.
     """
     without = [other for other in carried if other != order_id]
-    return _length(problem, vehicle_id, carried) - _length(problem, vehicle_id,
+    return route_distance(problem, vehicle_id, carried) - route_distance(problem, vehicle_id,
                                                            without)
-
-
-def _length(problem: Problem, vehicle_id: str, order_ids: list[str]) -> int:
-    vehicle = problem.vehicle(vehicle_id)
-    index = {loc.id: loc.matrix_index for loc in problem.locations}
-    nodes = [index[vehicle.start_location_id]]
-    for order_id in order_ids:
-        order = problem.order(order_id)
-        stop = order.delivery or order.pickup
-        nodes.append(index[stop.location_id])
-    nodes.append(index[vehicle.end_location_id or vehicle.start_location_id])
-    return sum(problem.matrix.distance(a, b) for a, b in pairwise(nodes))
 
 
 def would_fit_if(problem: Problem, order_id: str) -> tuple[Change, ...]:

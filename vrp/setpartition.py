@@ -37,9 +37,8 @@ Placement: **Python**. A MILP over a column pool, off the request path.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from itertools import pairwise
 
-from vrp.evaluator import route_is_legal
+from vrp.evaluator import route_distance, route_is_legal
 from vrp.hos.schedule import schedule_route
 from vrp.model import Problem, Route, Solution
 
@@ -65,24 +64,6 @@ class PooledRoute:
     @property
     def key(self) -> tuple[str, tuple[str, ...]]:
         return self.vehicle_id, self.order_ids
-
-
-def route_distance(problem: Problem, vehicle_id: str,
-                   order_ids: list[str]) -> int:
-    """What this route costs, read from the matrix.
-
-    Not from whatever produced it. INV-9's argument applies to a pool with
-    particular force: its columns come from several engines, each of which
-    counted something slightly different.
-    """
-    vehicle = problem.vehicle(vehicle_id)
-    index = {location.id: location.matrix_index for location in problem.locations}
-    nodes = [index[vehicle.start_location_id]]
-    nodes += [index[(problem.order(o).delivery or problem.order(o).pickup
-                     ).location_id] for o in order_ids]
-    nodes.append(index[vehicle.end_location_id])
-    return sum(problem.matrix.distance(a, b)
-               for a, b in pairwise(nodes))
 
 
 @dataclass

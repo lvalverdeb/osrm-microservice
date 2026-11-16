@@ -240,6 +240,34 @@ def _charge_step(problem: Problem, vehicle: Vehicle, stop: ChargeStop,
             arrival + plugged, charger.matrix_index, stop.to_soc_ppt)
 
 
+def route_distance(problem: Problem, vehicle_id: str,
+                   order_ids: list[str]) -> int:
+    """Distance a vehicle drives to serve these orders in this sequence.
+
+    Read from the matrix, start to stops to the closing depot, never from
+    whatever engine produced the sequence (INV-9). An empty sequence costs
+    nothing: a vehicle with nothing to do does not leave the depot.
+
+    Args:
+        problem: The problem whose matrix and locations price the route.
+        vehicle_id: The vehicle whose start and end depots frame the route.
+        order_ids: The orders in the order they are visited.
+
+    Returns:
+        Total matrix distance along the route, in the matrix's units.
+    """
+    if not order_ids:
+        return 0
+    vehicle = problem.vehicle(vehicle_id)
+    index = {location.id: location.matrix_index for location in problem.locations}
+    nodes = [index[vehicle.start_location_id]]
+    for order_id in order_ids:
+        stop = problem.order(order_id).delivery or problem.order(order_id).pickup
+        nodes.append(index[stop.location_id])
+    nodes.append(index[vehicle.ends_at])
+    return sum(problem.matrix.distance(a, b) for a, b in pairwise(nodes))
+
+
 def route_metrics(problem: Problem, timeline: tuple[Step, ...]) -> dict[str, int]:
     """Distance, driving, waiting and service for one expanded timeline."""
     matrix = problem.matrix

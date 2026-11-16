@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vrp.evaluator import ObjectiveWeights, evaluate, route_is_legal
+from vrp.evaluator import ObjectiveWeights, evaluate, route_distance, route_is_legal
 from vrp.model import Problem
 
 
@@ -97,14 +97,14 @@ def quote_insertion(problem: Problem, assignment: dict[str, list[str]],
         # lengths across vehicles picks whichever van has the fewest stops
         # already -- it would always beat a full route however short the
         # detour onto it, which is the opposite of a cheapest insertion.
-        base = _length(problem, vehicle_id, current)
+        base = route_distance(problem, vehicle_id, current)
         for position in range(len(current) + 1):
             route = current[:position] + [order_id] + current[position:]
             if not route_is_legal(problem, vehicle_id, route):
                 continue
             # The detour picks; the canonical objective prices. Scoring every
             # trial canonically would make a quote O(fleet) evaluations.
-            detour = _length(problem, vehicle_id, route) - base
+            detour = route_distance(problem, vehicle_id, route) - base
             if best is None or detour < best[0]:
                 best = (detour, vehicle_id, route)
 
@@ -172,21 +172,3 @@ def _cost_of_serving(problem: Problem, assignment: dict[str, list[str]],
     """
     result = evaluate(problem, assignment, weights)
     return result.total - result.breakdown.get("unassigned_penalty", 0)
-
-
-def _length(problem: Problem, vehicle_id: str, order_ids: list[str]) -> int:
-    """Travel distance for a route, depot to depot.
-
-    Distance rather than the canonical objective on purpose: this runs once per
-    candidate position, and the canonical score is taken twice at the end.
-    """
-    vehicle = problem.vehicle(vehicle_id)
-    index = {location.id: location.matrix_index for location in problem.locations}
-    here = index[vehicle.start_location_id]
-    total = 0
-    for order_id in order_ids:
-        stop = problem.order(order_id).delivery or problem.order(order_id).pickup
-        there = index[stop.location_id]
-        total += problem.matrix.distance(here, there)
-        here = there
-    return total + problem.matrix.distance(here, index[vehicle.ends_at])

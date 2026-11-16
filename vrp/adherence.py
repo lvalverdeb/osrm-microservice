@@ -39,6 +39,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 
+from vrp.evaluator import route_distance
 from vrp.model import Problem, Solution
 
 # Dissimilarity in parts per thousand, per CON-4: this project does not
@@ -178,30 +179,10 @@ def adherence(problem: Problem, planned: Solution,
             vehicle_id=actual.vehicle_id, driver_id=actual.driver_id,
             depot_id=actual.depot_id, territory=actual.territory,
             dissimilarity=dissimilarity(intended, actual.sequence),
-            planned_cost=_length(problem, actual.vehicle_id, intended),
-            realised_cost=_length(problem, actual.vehicle_id,
+            planned_cost=route_distance(problem, actual.vehicle_id, intended),
+            realised_cost=route_distance(problem, actual.vehicle_id,
                                   list(actual.sequence))))
     return rows
-
-
-def _length(problem: Problem, vehicle_id: str, order_ids: list[str]) -> int:
-    """What driving this sequence costs, recomputed from the matrix.
-
-    §11.4 calls plan adherence "the metric that tells you whether the model is
-    right", so it cannot be measured with the solver's own figures -- that is
-    CON-6's point, one layer down.
-    """
-    if not order_ids:
-        return 0
-    vehicle = problem.vehicle(vehicle_id)
-    index = {loc.id: loc.matrix_index for loc in problem.locations}
-    nodes = [index[vehicle.start_location_id]]
-    for order_id in order_ids:
-        order = problem.order(order_id)
-        stop = order.delivery or order.pickup
-        nodes.append(index[stop.location_id])
-    nodes.append(index[vehicle.end_location_id or vehicle.start_location_id])
-    return sum(problem.matrix.distance(a, b) for a, b in pairwise(nodes))
 
 
 def aggregate(rows: Sequence[Adherence], by: str) -> dict[str, Group]:

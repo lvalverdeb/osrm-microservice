@@ -7,7 +7,9 @@ most silent optimisation bugs.
 
 from __future__ import annotations
 
-from vrp.evaluator import ObjectiveWeights, build_timeline, evaluate
+from dataclasses import replace
+
+from vrp.evaluator import ObjectiveWeights, build_timeline, evaluate, route_distance
 from vrp.model import (
     Location,
     Order,
@@ -106,3 +108,24 @@ def test_evaluation_is_deterministic():
     runs = {evaluate(problem(), {"V1": ["OA", "OB"]}, weights=weights).total
             for _ in range(50)}
     assert len(runs) == 1
+
+
+def test_route_distance_is_read_from_the_matrix_in_travel_order():
+    """Hand-worked against the asymmetric fixture: D->A->B->D is 5000+9000+14000.
+
+    Reversing the stops takes different arcs (D->B is 12000, A->D is 5000), so
+    the figure must follow the direction of travel, not a set of visited places.
+    """
+    assert route_distance(problem(), "V1", ["OA", "OB"]) == 28000
+    assert route_distance(problem(), "V1", ["OB", "OA"]) == 26000
+
+
+def test_route_distance_of_an_empty_route_is_nothing():
+    """A vehicle with nothing to do does not leave the depot.
+
+    The vehicle ends at B, 12000 from its start, so a helper that priced the
+    bare start-to-end leg would be caught here rather than hidden by a zero arc.
+    """
+    base = problem()
+    vehicle = replace(base.vehicles[0], end_location_id="B")
+    assert route_distance(replace(base, vehicles=(vehicle,)), "V1", []) == 0
