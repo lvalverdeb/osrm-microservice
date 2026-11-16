@@ -236,6 +236,17 @@ Exit criterion: no function in `verifier.py` over the complexity threshold,
 no `Report` consumer changed, every `INV-n` string still emitted from exactly
 one place.
 
+### What the examples sweep could and could not show
+
+`make examples-check` after both refactors: 37 passed, 6 skipped, 38 failed,
+every failure the same `RuntimeError: No road matrix` because the FreeBSD
+jail gateway was unreachable from this machine on 2026-11-16, and the
+examples refuse to fall back to straight lines by design. The 37 that passed
+are the offline ones and they do drive the compiler, the mapper and the
+verifier. The 38 are unverified against this change until the gateway is up;
+the run takes about 55 minutes when it is down, because each example waits
+out a TCP timeout.
+
 ## Phase 3: hold the line
 
 **Steps 1 and 2 done 2026-11-16**, gate proven: with the baseline in place
