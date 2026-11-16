@@ -1,0 +1,192 @@
+{
+ "schema_version": 1,
+ "generated_by": "spaghetti 2.6.2",
+ "_comment": "Accepted complexity findings in vrp/, by fingerprint, scoped to the error-level rules so it only ever shrinks. Regenerate with `make spaghetti-baseline`; remove entries as docs/planning/VRP_CODE_HEALTH_PLAN.md phases land.",
+ "findings": {
+  "00fb29854716e007": {
+   "rule": "high-complexity",
+   "file": "vrp/hos/schedule.py",
+   "message": "schedule_route() has complexity 24 (max 10)"
+  },
+  "01c33c9987bcb11f": {
+   "rule": "high-complexity",
+   "file": "vrp/benchmarks.py",
+   "message": "read_benchmark() has complexity 22 (max 10)"
+  },
+  "0d49d8c390707f77": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/solve/ortools_adapter.py",
+   "message": "_map() has cognitive complexity 31 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "0db1defc12ddd0e2": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/verify/verifier.py",
+   "message": "_check_coverage() has cognitive complexity 24 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "1330dd90fe804fc0": {
+   "rule": "high-complexity",
+   "file": "vrp/localsearch.py",
+   "message": "accelerated_search() has complexity 16 (max 10)"
+  },
+  "1515012ad59c81ea": {
+   "rule": "high-complexity",
+   "file": "vrp/diagnose.py",
+   "message": "_eligible() has complexity 19 (max 10)"
+  },
+  "15bfe891b3540e28": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/solve/pyvrp_adapter.py",
+   "message": "compile_problem() has cognitive complexity 74 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "1ed34ba2b0887e2c": {
+   "rule": "high-complexity",
+   "file": "vrp/solve/pyvrp_adapter.py",
+   "message": "_refuse_unreachable() has complexity 16 (max 10)"
+  },
+  "20562045a27b850c": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/hos/schedule.py",
+   "message": "schedule_route() has cognitive complexity 24 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "2412bd30c799a74b": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/localsearch.py",
+   "message": "naive_search() has cognitive complexity 31 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "26597a9f2ed90fa4": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/solve/pyvrp_adapter.py",
+   "message": "map_solution() has cognitive complexity 53 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "306cd93fa59e96f8": {
+   "rule": "high-complexity",
+   "file": "vrp/diagnose.py",
+   "message": "preflight() has complexity 21 (max 10)"
+  },
+  "3079461bd7519ade": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/localsearch.py",
+   "message": "accelerated_search() has cognitive complexity 38 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "3d781b37e222ba91": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/diagnose.py",
+   "message": "preflight() has cognitive complexity 23 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "4074904a466bae4a": {
+   "rule": "high-complexity",
+   "file": "vrp/solve/pyvrp_adapter.py",
+   "message": "map_solution() has complexity 24 (max 10)"
+  },
+  "482d039eb3624209": {
+   "rule": "high-complexity",
+   "file": "vrp/decompose.py",
+   "message": "partition_quality() has complexity 17 (max 10)"
+  },
+  "4e8da492480605f1": {
+   "rule": "high-complexity",
+   "file": "vrp/verify/verifier.py",
+   "message": "_check_route() has complexity 28 (max 10)"
+  },
+  "5ccf0ba76fdb9ae8": {
+   "rule": "high-complexity",
+   "file": "vrp/triggers.py",
+   "message": "reoptimise() has complexity 25 (max 10)"
+  },
+  "6c3b66c1de9dfc00": {
+   "rule": "high-complexity",
+   "file": "vrp/decompose.py",
+   "message": "repair_boundaries() has complexity 18 (max 10)"
+  },
+  "6e975a943254d03e": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/polish.py",
+   "message": "tsptw_sequence() has cognitive complexity 45 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "77f6c778420a1266": {
+   "rule": "high-complexity",
+   "file": "vrp/modelcheck.py",
+   "message": "check() has complexity 16 (max 10)"
+  },
+  "86891e62193ee8c2": {
+   "rule": "high-complexity",
+   "file": "vrp/lns.py",
+   "message": "sisr_ruin() has complexity 17 (max 10)"
+  },
+  "91f526f2a4015e46": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/verify/verifier.py",
+   "message": "_check_one_lock() has cognitive complexity 32 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "93b94f75a62f22f6": {
+   "rule": "high-complexity",
+   "file": "vrp/explain.py",
+   "message": "_remedy() has complexity 20 (max 10)"
+  },
+  "990c6febc042b5f9": {
+   "rule": "high-complexity",
+   "file": "vrp/solve/ortools_adapter.py",
+   "message": "_refuse() has complexity 18 (max 10)"
+  },
+  "9995c24df23e2cea": {
+   "rule": "high-complexity",
+   "file": "vrp/objective.py",
+   "message": "score() has complexity 18 (max 10)"
+  },
+  "abb4159c0f60b3be": {
+   "rule": "high-complexity",
+   "file": "vrp/verify/verifier.py",
+   "message": "_check_coverage() has complexity 22 (max 10)"
+  },
+  "ac92cff2a1999d43": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/lns.py",
+   "message": "sisr_ruin() has cognitive complexity 23 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "b5b8ba19daac9a41": {
+   "rule": "high-complexity",
+   "file": "vrp/evaluator.py",
+   "message": "build_timeline() has complexity 16 (max 10)"
+  },
+  "bab19336c31de6f4": {
+   "rule": "high-complexity",
+   "file": "vrp/polish.py",
+   "message": "tsptw_sequence() has complexity 22 (max 10)"
+  },
+  "bea7f1f497f54793": {
+   "rule": "high-complexity",
+   "file": "vrp/solve/ortools_adapter.py",
+   "message": "_map() has complexity 18 (max 10)"
+  },
+  "cca846e7ab825ab3": {
+   "rule": "high-complexity",
+   "file": "vrp/model.py",
+   "message": "__post_init__() has complexity 17 (max 10)"
+  },
+  "d7fbcb27128b1540": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/matrix.py",
+   "message": "build_large_matrix() has cognitive complexity 33 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  },
+  "e4937abaf6d4dd51": {
+   "rule": "high-complexity",
+   "file": "vrp/solve/pyvrp_adapter.py",
+   "message": "compile_problem() has complexity 55 (max 10)"
+  },
+  "e8a1d644cdf136fc": {
+   "rule": "high-complexity",
+   "file": "vrp/verify/verifier.py",
+   "message": "_check_one_lock() has complexity 30 (max 10)"
+  },
+  "eaeb07565c2e9637": {
+   "rule": "high-complexity",
+   "file": "vrp/matrix.py",
+   "message": "build_large_matrix() has complexity 22 (max 10)"
+  },
+  "f4b824b3be089a31": {
+   "rule": "high-cognitive-complexity",
+   "file": "vrp/verify/verifier.py",
+   "message": "_check_route() has cognitive complexity 32 (max 15) \u2014 flatten nesting: return early, extract the inner loop or branch into a named function"
+  }
+ }
+}

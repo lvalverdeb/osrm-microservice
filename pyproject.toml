@@ -58,6 +58,17 @@ ignore = [
     "B008",
 ]
 
+[tool.spaghetti]
+# Scanned by `make spaghetti`. Only the error-level findings fail the run, and
+# the ones that existed on 2026-11-16 are accepted by fingerprint in the
+# baseline, so the count can only go down. docs/planning/VRP_CODE_HEALTH_PLAN.md
+# says which entries are expected to leave and in what order.
+fail-on = "error"
+baseline = ".spaghetti-baseline.json"
+
+[tool.spaghetti.packages]
+vrp = "vrp"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

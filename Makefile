@@ -18,7 +18,7 @@ PROFILE ?= car
 COMPOSE_FILE ?= deploy/docker/docker-compose.yml
 COMPOSE ?= docker compose -f $(COMPOSE_FILE) -p osrm-microservice
 
-.PHONY: property-soak examples examples-check examples-slice help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue tier1 corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
+.PHONY: spaghetti property-soak examples examples-check examples-slice help download-data process-osrm compose-doctor compose-up compose-down compose-logs compose-health clean test lint catalogue tier1 corpus loadtest capacity jail-doctor jail-host jail-stage jail-bootstrap jail-data jail-up jail-down jail-logs jail-health jail-publish jail-unpublish parity parity-record parity-replay parity-selfcheck compose-spike-up compose-spike-down compose-spike-logs compose-spike-health jail-spike-up jail-spike-down jail-spike-logs jail-spike-health spike-bench
 
 help:
 	@echo "Two deployment options, see docs/deployment.md:"
@@ -61,6 +61,7 @@ help:
 	@echo "  tier1          - Rebuild docs/tier1, the documentation derived from the sources"
 	@echo "  corpus         - The P0 scenario corpus at all three sizes (slow)"
 	@echo "  lint           - Run ruff checks"
+	@echo "  spaghetti      - Code-shape scan of vrp/, gated by .spaghetti-baseline.json"
 	@echo "  loadtest       - Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION)"
 	@echo "                   LOADTEST_URL defaults to $(LOADTEST_URL) (the jail); pass it for Docker"
 	@echo "  capacity       - Full capacity assessment with an OOM guard (LOADTEST_URL, CAPACITY_ARGS)"
@@ -262,6 +263,15 @@ corpus:  ## The P0 scenario corpus at all three sizes (CAT-VRP-003 13.1)
 
 lint:
 	uv run ruff check .
+
+# Code-shape scanner, configured in pyproject.toml under [tool.spaghetti]. Exits
+# non-zero on any error-level finding not accepted in .spaghetti-baseline.json.
+# Not part of `lint` because CI has no `spaghetti` binary; a target that skips
+# when the tool is missing would look like a gate without being one. The
+# baseline is edited by hand, removals only: `--update-baseline` would accept
+# every current finding at every severity, which is the opposite of a gate.
+spaghetti:
+	spaghetti --severity warning
 
 
 # docs/TDD/vrp-catalogue-v2.1.md and scenarios.jsonl are both generated. The
