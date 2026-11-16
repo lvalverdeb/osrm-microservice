@@ -4,7 +4,7 @@
 
 *Derived from `Makefile`.*
 
-44 targets. The compose file is not at the repository root, so a bare `docker compose up` finds nothing: the targets are the interface.
+45 targets. The compose file is not at the repository root, so a bare `docker compose up` finds nothing: the targets are the interface.
 
 ## Targets
 
@@ -38,6 +38,7 @@
 | `test` | — | Run the pytest suite |
 | `corpus` | — | The P0 scenario corpus at all three sizes (CAT-VRP-003 13.1) |
 | `lint` | — | Run ruff checks |
+| `spaghetti` | — | Code-shape scan of vrp/, gated by .spaghetti-baseline.json |
 | `tier1` | — | docs/tier1, regenerated from the code, the manifests and the binary |
 | `catalogue` | — | Rebuild the VRP scenario catalogue from vrp-catalogue-v2.1.src.md |
 | `loadtest` | — | Load-test a running gateway (LOADTEST_URL/SCENARIO/RATE/DURATION) |

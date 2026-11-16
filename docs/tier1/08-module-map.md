@@ -4,7 +4,7 @@
 
 *Derived from `vrp/**/*.py`.*
 
-64 modules, 18,293 lines. Every module opens with what it is for and the requirements it implements; both columns are read from there.
+64 modules, 18,438 lines. Every module opens with what it is for and the requirements it implements; both columns are read from there.
 
 ## `vrp/`
 
@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `__init__.py` | 5 | Vehicle routing domain model, canonical evaluator, and independent verifier. | — |
 | `accelerate.py` | 175 | The optional GPU accelerator profile | NFR-09, T-67 |
-| `adherence.py` | 237 | Telematics ingestion and plan adherence | CON-6, T-61 |
+| `adherence.py` | 218 | Telematics ingestion and plan adherence | CON-6, T-61 |
 | `allocate.py` | 259 | Operational allocation reporting | FR-30, FR-33, FR-36, T-44 |
 | `anonymise.py` | 231 | The gate a corpus derived from real deliveries passes to be written | T-88 |
 | `api.py` | 230 | The public /verify contract | CON-1, T-66 |
@@ -26,8 +26,8 @@
 | `diagnose.py` | 336 | Pre-flight rejection diagnosis | AC-1.3, FR-01, T-14 |
 | `electric.py` | 178 | Planning where an electric van charges | FR-20, T-41 |
 | `epochs.py` | 179 | The epoch controller and must-go classifier | AC-3.1, DYN-1, DYN-2, FR-22 |
-| `evaluator.py` | 504 | Canonical evaluator | T-03 |
-| `explain.py` | 244 | The explanation service | CON-5, FR-36, T-60 |
+| `evaluator.py` | 532 | Canonical evaluator | T-03 |
+| `explain.py` | 232 | The explanation service | CON-5, FR-36, T-60 |
 | `fleet.py` | 221 | Fleet minimisation with absence-based acceptance | FR-32, T-35 |
 | `generate.py` | 306 | Randomised instance generator for property testing | T-05 |
 | `icd.py` | 191 | Iterative conditional dispatch | T-54 |
@@ -46,18 +46,18 @@
 | `policies.py` | 115 | Baseline dispatch policies | T-52 |
 | `polish.py` | 414 | Route-level exact polishing | ALG-5, T-39 |
 | `portfolio.py` | 319 | Portfolio runner with canonical scoring | T-36 |
-| `quote.py` | 192 | Insertion and removal quotes | NFR-02, T-85 |
+| `quote.py` | 174 | Insertion and removal quotes | NFR-02, T-85 |
 | `replay.py` | 429 | The historical replayer | AC-3.2, DYN-6, T-53 |
 | `rollout.py` | 210 | Shadow mode and canary rollout | T-65 |
 | `scenarios.py` | 280 | Tactical fleet sizing over a scenario set | FR-34, T-46, US-4 |
 | `servicemodel.py` | 858 | Delivery models: an operation described as data | T-94 |
-| `setpartition.py` | 258 | Set-partitioning polish over the route pool | ALG-6, T-38 |
+| `setpartition.py` | 239 | Set-partitioning polish over the route pool | ALG-6, T-38 |
 | `snapshot.py` | 188 | Immutable snapshots, and plans replayable from them | CON-4, NFR-08, T-89 |
 | `speedfit.py` | 348 | Speed-profile calibration | T-63 |
 | `stability.py` | 120 | Churn: measuring it, pricing it, and choosing how much to pay | T-57 |
 | `synchronise.py` | 178 | Making coupled routes actually meet | DEC-1, FR-26, T-76 |
 | `timedependent.py` | 234 | Travel that depends on when you leave | FR-14, MTX-9, T-40 |
-| `triggers.py` | 503 | Trigger engine and locked re-optimisation | AC-2.1, AC-2.3, DYN-5 |
+| `triggers.py` | 489 | Trigger engine and locked re-optimisation | AC-2.1, AC-2.3, DYN-5 |
 | `zones.py` | 178 | The zone-sequence prior | T-64 |
 
 ## `vrp/bench/`
@@ -86,11 +86,11 @@
 |---|---|---|---|
 | `__init__.py` | 6 | Solver adapters. SDD §7.3 | — |
 | `ortools_adapter.py` | 289 | OR-Tools adapter | CON-3, T-30 |
-| `pyvrp_adapter.py` | 917 | PyVRP adapter | T-12 |
+| `pyvrp_adapter.py` | 1040 | PyVRP adapter | T-12 |
 
 ## `vrp/verify/`
 
 | Module | Lines | Purpose | Implements |
 |---|---|---|---|
 | `__init__.py` | 11 | Independent verification | — |
-| `verifier.py` | 854 | The independent verifier | CON-1, INV-1, INV-9 |
+| `verifier.py` | 930 | The independent verifier | CON-1, INV-1, INV-9 |

@@ -168,7 +168,7 @@
 | `FR-10` | 8 | `examples/src/fleet/p0/must_work_at_v1.py`, `examples/src/fleet/rich/skills_and_access.py`, `tests/vrp/test_compatibility.py`, `tests/vrp/test_p0_scenarios.py`, `vrp/diagnose.py`, `vrp/model.py` +2 more |
 | `FR-11` | 7 | `examples/src/fleet/rich/skills_and_access.py`, `tests/vrp/test_compatibility.py`, `tests/vrp/test_p0_scenarios.py`, `vrp/model.py`, `vrp/servicemodel.py`, `vrp/solve/pyvrp_adapter.py` +1 more |
 | `FR-12` | 5 | `examples/src/fleet/rich/prizes_and_priority.py`, `examples/src/fleet/tw/sla_windows.py`, `tests/vrp/test_prizes_and_tiers.py`, `vrp/model.py`, `vrp/solve/pyvrp_adapter.py` |
-| `FR-13` | 9 | `examples/src/fleet/dynamic/preemption.py`, `examples/src/fleet/rich/priority_sources.py`, `examples/src/fleet/rich/prizes_and_priority.py`, `tests/vrp/test_objective_tiering.py`, `tests/vrp/test_preemption.py`, `tests/vrp/test_prizes_and_tiers.py` +3 more |
+| `FR-13` | 10 | `examples/src/fleet/dynamic/preemption.py`, `examples/src/fleet/rich/priority_sources.py`, `examples/src/fleet/rich/prizes_and_priority.py`, `tests/vrp/test_objective_tiering.py`, `tests/vrp/test_preemption.py`, `tests/vrp/test_prizes_and_tiers.py` +4 more |
 | `FR-14` | 9 | `examples/src/fleet/rich/planning_under_congestion.py`, `examples/src/fleet/rich/time_dependent.py`, `tests/vrp/test_catalogue_coverage.py`, `tests/vrp/test_planning_under_congestion.py`, `tests/vrp/test_time_dependent.py`, `tests/vrp/test_time_dependent_routes.py` +3 more |
 | `FR-15` | 4 | `examples/src/fleet/rich/hours_of_service.py`, `tests/vrp/test_hours_of_service.py`, `vrp/bench/catalogue.py`, `vrp/hos/rules.py` |
 | `FR-16` | 3 | `tests/vrp/test_hours_of_service.py`, `tests/vrp/test_service_model.py`, `vrp/hos/rules.py` |
@@ -203,7 +203,7 @@
 | `INV-6` | 4 | `tests/vrp/test_heterogeneous_fleet.py`, `tests/vrp/test_independent_verifier.py`, `vrp/solve/pyvrp_adapter.py`, `vrp/verify/verifier.py` |
 | `INV-7` | 7 | `examples/src/fleet/rich/hours_of_service.py`, `tests/vrp/test_hours_of_service.py`, `tests/vrp/test_independent_verifier.py`, `tests/vrp/test_verify_endpoint.py`, `vrp/generate.py`, `vrp/model.py` +1 more |
 | `INV-8` | 9 | `examples/src/fleet/dynamic/committed_state.py`, `examples/src/fleet/rich/locks_and_overrides.py`, `tests/vrp/test_committed_state.py`, `tests/vrp/test_independent_verifier.py`, `tests/vrp/test_locks.py`, `tests/vrp/test_p0_scenarios.py` +3 more |
-| `INV-9` | 21 | `examples/src/fleet/alloc/fleet_mix.py`, `examples/src/fleet/rich/priority_sources.py`, `examples/src/fleet/verify_delivery_plan.py`, `tests/vrp/test_allocation.py`, `tests/vrp/test_canonical_evaluator.py`, `tests/vrp/test_evaluator_verifier_agreement.py` +15 more |
+| `INV-9` | 20 | `examples/src/fleet/alloc/fleet_mix.py`, `examples/src/fleet/rich/priority_sources.py`, `examples/src/fleet/verify_delivery_plan.py`, `tests/vrp/test_allocation.py`, `tests/vrp/test_canonical_evaluator.py`, `tests/vrp/test_evaluator_verifier_agreement.py` +14 more |
 | `INV-10` | 8 | `examples/src/fleet/adversarial/pathological_instances.py`, `examples/src/fleet/rich/skills_and_access.py`, `tests/vrp/test_compatibility.py`, `tests/vrp/test_p0_scenarios.py`, `tests/vrp/test_pathological.py`, `tests/vrp/test_synchronisation.py` +2 more |
 | `INV-11` | 4 | `examples/src/fleet/rich/multi_trip.py`, `tests/vrp/test_multi_trip.py`, `vrp/solve/pyvrp_adapter.py`, `vrp/verify/verifier.py` |
 | `INV-12` | 6 | `examples/src/fleet/rich/large_instance_decomposition.py`, `examples/src/fleet/rich/multi_trip.py`, `tests/vrp/test_decomposition.py`, `tests/vrp/test_multi_trip.py`, `vrp/decompose.py`, `vrp/verify/verifier.py` |
@@ -359,11 +359,11 @@
 | `UC-064` | 3 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py` |
 | `UC-065` | 3 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py` |
 | `UC-066` | 3 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py` |
-| `UC-067` | 4 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py`, `vrp/model.py` |
+| `UC-067` | 5 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `tests/vrp/test_pyvrp_compile.py`, `vrp/bench/fixtures.py`, `vrp/model.py` |
 | `UC-068` | 3 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py` |
 | `UC-069` | 4 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `tests/vrp/test_time_dependent.py`, `vrp/bench/fixtures.py` |
 | `UC-070` | 4 | `examples/src/fleet/adversarial/pathological_instances.py`, `examples/src/fleet/infra/degraded_matrix.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py` |
-| `UC-071` | 4 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py`, `vrp/solve/pyvrp_adapter.py` |
+| `UC-071` | 5 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `tests/vrp/test_pyvrp_compile.py`, `vrp/bench/fixtures.py`, `vrp/solve/pyvrp_adapter.py` |
 | `UC-072` | 5 | `examples/src/fleet/adversarial/pathological_instances.py`, `examples/src/fleet/infra/degraded_matrix.py`, `tests/vrp/test_pathological.py`, `vrp/bench/catalogue.py`, `vrp/bench/fixtures.py` |
 | `UC-073` | 4 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py`, `vrp/decompose.py` |
 | `UC-074` | 3 | `examples/src/fleet/adversarial/pathological_instances.py`, `tests/vrp/test_pathological.py`, `vrp/bench/fixtures.py` |

@@ -4,7 +4,7 @@
 
 *Derived from `tests/**/*.py`, `gateway/src/**/*.rs`.*
 
-96 Python test files, 1,195 test functions, and 176 Rust unit tests.
+97 Python test files, 1,213 test functions, and 176 Rust unit tests.
 
 ## `tests/`
 
@@ -38,7 +38,7 @@
 | `test_benchmark_comparability.py` | 7 | `T-100` — §13.3, as data rather than as prose. |
 | `test_benchmark_gate.py` | 8 | E-16 (T-16) [GATE] — benchmark harness and the regression gate. SDD §11.3, CON-9. |
 | `test_benchmark_readers.py` | 17 | Public benchmark instances read into our model — §11.3, T-06, E-05. |
-| `test_canonical_evaluator.py` | 6 | E-02 (T-03) — canonical evaluator: recompute objective and timeline. |
+| `test_canonical_evaluator.py` | 8 | E-02 (T-03) — canonical evaluator: recompute objective and timeline. |
 | `test_catalogue_coverage.py` | 17 | The catalogue as a gate — `CAT-VRP-003` §13.6, §0.5, §0.6. |
 | `test_churn.py` | 17 | Stability and the churn/cost trade-off — §8.3, T-57, E-57. |
 | `test_committed_state.py` | 18 | The committed-state manager — DYN-4, AC-2.2, §8.3, T-50, E-50. |
@@ -60,12 +60,12 @@
 | `test_historical_replayer.py` | 31 | The historical replayer — DYN-6, AC-3.2, §8.1, T-53 [GATE], E-53. |
 | `test_hours_of_service.py` | 20 | Hours-of-service rules engine — SDD §6.4, FR-15, FR-16, T-25 [GATE]. |
 | `test_icd_policy.py` | 10 | Iterative conditional dispatch — §8.2 step 3, T-54, E-54. |
-| `test_independent_verifier.py` | 18 | E-03 (T-04) [GATE] — the independent verifier. SDD §11.2, INV-1..INV-9. |
+| `test_independent_verifier.py` | 23 | E-03 (T-04) [GATE] — the independent verifier. SDD §11.2, INV-1..INV-9. |
 | `test_initial_state.py` | 14 | Tachograph and ELD carry-over — §6.4, AC-5.2, T-26, E-26. |
 | `test_instance_generator.py` | 6 | Randomised instances against INV-1…INV-9 — SDD §11.1 L2, T-05, E-04. |
 | `test_lns_core.py` | 16 | Ruin-and-recreate (SISR) — ALG-3b, T-34, E-34. |
 | `test_lock_conflicts.py` | 7 | Minimal conflicting lock sets — §6.6, FR-21, CON-7, T-29, E-29. |
-| `test_locks.py` | 13 | Operator locks and INV-8 — §6.6, FR-21, CON-7, part of T-29. |
+| `test_locks.py` | 14 | Operator locks and INV-8 — §6.6, FR-21, CON-7, part of T-29. |
 | `test_matrix_cache.py` | 12 | Tiling and pair-level caching — MTX-6, MTX-7, MTX-10, T-11, E-11. |
 | `test_matrix_tiling.py` | 4 | Tiling narrows cells; it must narrow coordinates too — `MTX-7`. |
 | `test_model_composition.py` | 17 | Composition: fragments, and why they do not have precedence. |
@@ -90,6 +90,7 @@
 | `test_prizes_and_tiers.py` | 21 | Optional orders and priority tiers — FR-12, FR-13, T-27, E-27. |
 | `test_process_portfolio.py` | 7 | Process-based parallelism for engines that hold the GIL — NFR-05, §7.7, T-91. |
 | `test_pyvrp_adapter.py` | 6 | E-12 (T-12) — PyVRP adapter: model compiler and solution mapper. |
+| `test_pyvrp_compile.py` | 10 | Characterisation of `compile_problem`: the PyVRP model, read back. |
 | `test_quote.py` | 10 | Insertion and removal quotes — NFR-02, §9.4, T-85. |
 | `test_reoptimisation_latency.py` | 16 | Trigger engine, locked re-optimisation and the delta — DYN-5, AC-2.1, AC-2.3, |
 | `test_route_polish.py` | 19 | Route-level exact polishing — ALG-5, T-39, E-39. |
