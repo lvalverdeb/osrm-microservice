@@ -14,6 +14,8 @@ import ast
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from vrp.model import (
     Location,
     Order,
@@ -24,6 +26,7 @@ from vrp.model import (
     StopSpec,
     TimeWindow,
     TravelMatrix,
+    ValidationError,
     Vehicle,
 )
 from vrp.verify import verify
@@ -76,6 +79,16 @@ def legal_solution() -> Solution:
 
 def codes(report) -> set[str]:
     return {violation.invariant for violation in report.violations}
+
+
+def details(report, invariant: str) -> list[str]:
+    """What one invariant said, so a test can tell its checks apart.
+
+    Asserting only on the code lets two checks of the same invariant mask each
+    other: a step with a bad start_service also has a bad departure, and
+    either alone keeps "INV-3" in the report.
+    """
+    return [v.detail for v in report.violations if v.invariant == invariant]
 
 
 # --- the verifier must accept what is legal ------------------------------
@@ -299,3 +312,57 @@ def test_inv17_says_so_when_no_order_carries_a_release_time():
 
     assert "INV-17" in report.not_applicable
     assert "INV-17" not in codes(report)
+
+
+# --- one check per site: each of these fires one detail and no sibling ----
+
+def test_inv1_catches_an_order_both_served_and_listed_unassigned():
+    listed = ({"order_id": "OB", "reason_code": "NOT_PLACED", "explanation": "x"},)
+    report = verify(problem(), replace(legal_solution(), unassigned=listed))
+    assert any("also served" in d for d in details(report, "INV-1"))
+
+
+def test_a_plan_naming_an_order_the_problem_lacks_is_refused_not_reported():
+    """Characterises what happens today, which is not what INV-1 intends.
+
+    `_check_coverage` records "served an order the problem does not contain",
+    but `_check_route` then asks the problem for that order and the lookup
+    raises, so the caller sees a ValidationError and never the report. The
+    INV-1 message for this case is unreachable through `verify()`. Pinned so
+    the refusal is at least deliberate; making it a reported violation is a
+    behaviour change tracked in docs/planning/VRP_CODE_HEALTH_PLAN.md.
+    """
+    solution = legal_solution()
+    route = solution.routes[0]
+    stranger = replace(route.steps[1], order_id="ZZ")
+    steps = route.steps[:1] + (stranger,) + route.steps[1:]
+    with pytest.raises(ValidationError, match="ZZ"):
+        verify(problem(), replace(solution, routes=(replace(route, steps=steps),)))
+
+
+def test_inv3_catches_service_before_arrival_even_when_departure_is_consistent():
+    solution = legal_solution()
+    route = solution.routes[0]
+    # start_service 200 is before arrival 300; departure 320 = 200 + 120 keeps
+    # the departure check quiet, so only the arrival check can speak.
+    broken = replace(route.steps[1], start_service=200, departure=320)
+    steps = route.steps[:1] + (broken,) + route.steps[2:]
+    report = verify(problem(), replace(solution, routes=(replace(route, steps=steps),)))
+    assert any("before" in d and "arrival" in d for d in details(report, "INV-3"))
+    assert not any("does not equal" in d for d in details(report, "INV-3"))
+
+
+def test_inv3_catches_a_departure_that_is_not_start_plus_service():
+    solution = legal_solution()
+    route = solution.routes[0]
+    broken = replace(route.steps[1], departure=500)      # 300 + 120 is 420
+    steps = route.steps[:1] + (broken,) + route.steps[2:]
+    report = verify(problem(), replace(solution, routes=(replace(route, steps=steps),)))
+    assert any("does not equal" in d for d in details(report, "INV-3"))
+    assert not any("before" in d for d in details(report, "INV-3"))
+
+
+def test_inv6_catches_a_route_further_than_the_vehicle_allows():
+    report = verify(problem(max_distance=10_000), legal_solution())  # drives 28000
+    assert any("max_distance" in d for d in details(report, "INV-6"))
+    assert not any("max_duration" in d for d in details(report, "INV-6"))

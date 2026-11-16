@@ -182,6 +182,28 @@ green, and `tests/vrp` green including `test_evaluator_verifier_agreement.py`.
 
 ## Phase 2: make each verifier checker readable whole
 
+**Done 2026-11-16.** Before the split, every `report.fail` site in the three
+checkers was neutralised in turn to see whether a test noticed: 19 of 25 did.
+Two INV-3 sites masked each other (a bad `start_service` also makes a bad
+departure, and the test asserted only on the code), one INV-1 site, one INV-6
+site and one PIN_DEPOT site had no test at all. Five tests were added, each
+asserting on the detail text so sibling checks cannot cover for one another.
+The sixth site is unreachable, see the finding below. Then the split: INV-3 to
+INV-6 as four functions over one break-collapsing `_legs` walk, INV-8 as a
+dispatch table of eight rules over a `_Placement`, INV-1 and INV-2 as their
+own functions. Every message byte-identical, every invariant emitted from one
+function, 1,442 tests green, six errors out of the baseline.
+
+**Finding.** A plan that names an order the problem does not contain never
+gets the INV-1 verdict `_check_coverage` records for it: `_check_route` then
+asks the problem for that order and the lookup raises `ValidationError`, so
+`verify()` raises instead of returning the report. Pinned as a refusal in
+`test_a_plan_naming_an_order_the_problem_lacks_is_refused_not_reported`.
+Turning it into a reported violation is a behaviour change: the route
+checkers would have to tolerate an unknown order id. Worth doing, not here.
+
+The paragraphs below are kept as proposed.
+
 The verifier is INV-1 to INV-9 made executable, and the SDD calls INV-9 "the
 single most valuable test in the system". Its checkers should each state one
 invariant.

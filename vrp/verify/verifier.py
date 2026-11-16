@@ -31,12 +31,15 @@ its driving hours is caught rather than confirmed.
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from itertools import pairwise
 
 from vrp.battery import FULL_PPT, charge_seconds, consumed_ppt
 from vrp.hos.rules import Activity, rules_for
 from vrp.model import (
+    Lock,
     Problem,
     Route,
     Solution,
@@ -331,6 +334,29 @@ def _check_inventory(problem: Problem, solution: Solution,
                             f"from {held} in stock")
 
 
+@dataclass(frozen=True)
+class _Placement:
+    """Where the plan put everything, indexed the way locks ask about it."""
+    problem: Problem
+    solution: Solution
+    route_of: dict[str, str]
+    sequence: dict[str, list[str]]
+    deployed: frozenset[str]
+
+
+def _placement(problem: Problem, solution: Solution) -> _Placement:
+    route_of: dict[str, str] = {}
+    sequence: dict[str, list[str]] = {}
+    for route in solution.routes:
+        served = [step.order_id for step in route.steps if step.order_id]
+        sequence[route.vehicle_id] = served
+        for order_id in served:
+            route_of[order_id] = route.vehicle_id
+    deployed = frozenset(vehicle_id for vehicle_id, served in sequence.items()
+                         if served)
+    return _Placement(problem, solution, route_of, sequence, deployed)
+
+
 def _check_locks(problem: Problem, solution: Solution, report: Report) -> None:
     """INV-8: every lock in §6.6 satisfied exactly.
 
@@ -343,91 +369,110 @@ def _check_locks(problem: Problem, solution: Solution, report: Report) -> None:
     IIS requirement), are the rest of `T-29` and are not here -- so a violation
     reported by this function today is most likely the solver not knowing about
     locks at all, which is itself worth seeing.
+
+    One rule per lock kind, below, each returning what went wrong or None.
+    The model admits no other kinds, so the dispatch is total.
     """
     if not problem.locks:
         return
-
-    route_of: dict[str, str] = {}
-    sequence: dict[str, list[str]] = {}
-    for route in solution.routes:
-        served = [step.order_id for step in route.steps if step.order_id]
-        sequence[route.vehicle_id] = served
-        for order_id in served:
-            route_of[order_id] = route.vehicle_id
-    deployed = {vehicle_id for vehicle_id, served in sequence.items() if served}
-
+    placement = _placement(problem, solution)
     for lock in problem.locks:
-        _check_one_lock(problem, solution, lock, route_of, sequence,
-                        deployed, report)
+        detail = _LOCK_RULES[lock.kind](placement, lock)
+        if detail is not None:
+            report.fail("INV-8", f"{lock.kind}: {detail}",
+                        vehicle_id=lock.vehicle_id, order_id=lock.order_id)
 
 
-def _check_one_lock(problem: Problem, solution: Solution, lock, route_of: dict,
-                    sequence: dict, deployed: set, report: Report) -> None:
-    """One lock, one verdict. Split out so each kind reads as its own rule."""
-    def fail(detail: str) -> None:
-        report.fail("INV-8", f"{lock.kind}: {detail}",
-                    vehicle_id=lock.vehicle_id, order_id=lock.order_id)
+def _pin_order_to_vehicle(plan: _Placement, lock: Lock) -> str | None:
+    carrier = plan.route_of.get(lock.order_id)
+    if carrier != lock.vehicle_id:
+        return (f"{lock.order_id} is on {carrier or 'no route'}, "
+                f"not {lock.vehicle_id}")
+    return None
 
-    if lock.kind == "PIN_ORDER_TO_VEHICLE":
-        carrier = route_of.get(lock.order_id)
-        if carrier != lock.vehicle_id:
-            fail(f"{lock.order_id} is on {carrier or 'no route'}, "
-                 f"not {lock.vehicle_id}")
 
-    elif lock.kind == "FORBID_ORDER_ON_VEHICLE":
-        if route_of.get(lock.order_id) == lock.vehicle_id:
-            fail(f"{lock.order_id} is on {lock.vehicle_id}, which is forbidden")
+def _forbid_order_on_vehicle(plan: _Placement, lock: Lock) -> str | None:
+    if plan.route_of.get(lock.order_id) == lock.vehicle_id:
+        return f"{lock.order_id} is on {lock.vehicle_id}, which is forbidden"
+    return None
 
-    elif lock.kind == "FIX_ROUTE_PREFIX":
-        served = sequence.get(lock.vehicle_id, [])
-        wanted = list(lock.order_ids)
-        if served[:len(wanted)] != wanted:
-            fail(f"{lock.vehicle_id} begins {served[:len(wanted)]}, "
-                 f"not {wanted}")
 
-    elif lock.kind == "FIX_SEQUENCE":
-        served = sequence.get(lock.vehicle_id, [])
-        positions = [served.index(o) for o in lock.order_ids if o in served]
-        if positions != sorted(positions):
-            fail(f"{list(lock.order_ids)} are out of order on {lock.vehicle_id}")
+def _fix_route_prefix(plan: _Placement, lock: Lock) -> str | None:
+    served = plan.sequence.get(lock.vehicle_id, [])
+    wanted = list(lock.order_ids)
+    if served[:len(wanted)] != wanted:
+        return (f"{lock.vehicle_id} begins {served[:len(wanted)]}, "
+                f"not {wanted}")
+    return None
 
-    elif lock.kind == "FORCE_DEPLOY":
-        if lock.vehicle_id not in deployed:
-            fail(f"{lock.vehicle_id} was required to deploy and did not")
 
-    elif lock.kind == "FORBID_DEPLOY":
-        if lock.vehicle_id in deployed:
-            fail(f"{lock.vehicle_id} was forbidden to deploy and did")
+def _fix_sequence(plan: _Placement, lock: Lock) -> str | None:
+    served = plan.sequence.get(lock.vehicle_id, [])
+    positions = [served.index(o) for o in lock.order_ids if o in served]
+    if positions != sorted(positions):
+        return f"{list(lock.order_ids)} are out of order on {lock.vehicle_id}"
+    return None
 
-    elif lock.kind == "PIN_DEPOT":
-        carrier = route_of.get(lock.order_id)
-        if carrier is None:
-            fail(f"{lock.order_id} is unassigned, so no depot serves it")
-        else:
-            start = problem.vehicle(carrier).start_location_id
-            if start != lock.depot_id:
-                fail(f"{lock.order_id} is served from {start}, "
-                     f"not {lock.depot_id}")
 
-    elif lock.kind == "FREEZE_UNTIL":
-        # Everything happening before the horizon must already have been
-        # committed, which a plan expresses by locking it in place. Anything
-        # else inside the window is the optimiser rewriting the past.
-        pinned = {
-            order_id
-            for other in problem.locks
-            if other.kind in ("FIX_ROUTE_PREFIX", "FIX_SEQUENCE",
-                              "PIN_ORDER_TO_VEHICLE")
-            for order_id in ((other.order_id,) if other.order_id
-                             else other.order_ids)
-        }
-        early = [step.order_id for route in solution.routes
-                 for step in route.steps
-                 if step.order_id and step.start_service < lock.instant
-                 and step.order_id not in pinned]
-        if early:
-            fail(f"{len(early)} stop(s) are served before the freeze at "
-                 f"{lock.instant} without being pinned: {early[:3]}")
+def _force_deploy(plan: _Placement, lock: Lock) -> str | None:
+    if lock.vehicle_id not in plan.deployed:
+        return f"{lock.vehicle_id} was required to deploy and did not"
+    return None
+
+
+def _forbid_deploy(plan: _Placement, lock: Lock) -> str | None:
+    if lock.vehicle_id in plan.deployed:
+        return f"{lock.vehicle_id} was forbidden to deploy and did"
+    return None
+
+
+def _pin_depot(plan: _Placement, lock: Lock) -> str | None:
+    carrier = plan.route_of.get(lock.order_id)
+    if carrier is None:
+        return f"{lock.order_id} is unassigned, so no depot serves it"
+    start = plan.problem.vehicle(carrier).start_location_id
+    if start != lock.depot_id:
+        return f"{lock.order_id} is served from {start}, not {lock.depot_id}"
+    return None
+
+
+def _freeze_until(plan: _Placement, lock: Lock) -> str | None:
+    """Everything before the horizon must already have been committed.
+
+    A plan expresses that by locking it in place. Anything else inside the
+    window is the optimiser rewriting the past.
+    """
+    pinned = _pinned_orders(plan.problem.locks)
+    early = [step.order_id for route in plan.solution.routes
+             for step in route.steps
+             if step.order_id and step.start_service < lock.instant
+             and step.order_id not in pinned]
+    if early:
+        return (f"{len(early)} stop(s) are served before the freeze at "
+                f"{lock.instant} without being pinned: {early[:3]}")
+    return None
+
+
+def _pinned_orders(locks) -> set[str]:
+    """Orders some lock holds in place, which a freeze therefore permits."""
+    placing = ("FIX_ROUTE_PREFIX", "FIX_SEQUENCE", "PIN_ORDER_TO_VEHICLE")
+    pinned: set[str] = set()
+    for lock in locks:
+        if lock.kind in placing:
+            pinned.update((lock.order_id,) if lock.order_id else lock.order_ids)
+    return pinned
+
+
+_LOCK_RULES: dict[str, Callable[[_Placement, Lock], str | None]] = {
+    "PIN_ORDER_TO_VEHICLE": _pin_order_to_vehicle,
+    "FORBID_ORDER_ON_VEHICLE": _forbid_order_on_vehicle,
+    "FIX_ROUTE_PREFIX": _fix_route_prefix,
+    "FIX_SEQUENCE": _fix_sequence,
+    "FORCE_DEPLOY": _force_deploy,
+    "FORBID_DEPLOY": _forbid_deploy,
+    "PIN_DEPOT": _pin_depot,
+    "FREEZE_UNTIL": _freeze_until,
+}
 
 
 def _check_hours_of_service(problem: Problem, route, report: Report) -> None:
@@ -650,42 +695,59 @@ def _check_ride_times(problem: Problem, solution: Solution,
 
 def _check_coverage(problem: Problem, solution: Solution, report: Report) -> None:
     """INV-1: exactly once across routes ∪ unassigned. INV-2: shipment pairing."""
+    _check_each_order_once(problem, solution, report)
+    _check_shipment_pairs(problem, solution, report)
+
+
+def _check_each_order_once(problem: Problem, solution: Solution,
+                           report: Report) -> None:
+    """INV-1: every order is served exactly as often as expected or listed
+    unassigned, never both, and nothing unknown is served."""
     served = _served_orders(solution)
-    counts: dict[str, int] = {}
-    for order_id, _vehicle in served:
-        counts[order_id] = counts.get(order_id, 0) + 1
-
+    counts = Counter(order_id for order_id, _vehicle in served)
     unassigned = {entry["order_id"] for entry in solution.unassigned}
-
     for order in problem.orders:
-        appearances = counts.get(order.id, 0)
-        expected = 2 if order.kind == "SHIPMENT" else 1
-        if order.id in unassigned:
-            if appearances:
-                report.fail("INV-1", "listed unassigned but also served",
-                            order_id=order.id)
-            continue
-        if appearances == 0:
-            report.fail("INV-1", "neither served nor listed unassigned",
-                        order_id=order.id)
-        elif appearances != expected:
-            report.fail("INV-1", f"served {appearances} times, expected {expected}",
-                        order_id=order.id)
-
+        _check_order_count(order, counts.get(order.id, 0),
+                           order.id in unassigned, report)
     known = {order.id for order in problem.orders}
     for order_id, _vehicle in served:
         if order_id not in known:
             report.fail("INV-1", "served an order the problem does not contain",
                         order_id=order_id)
 
-    # INV-2: both ends of a shipment on one route, pickup strictly first.
+
+def _check_order_count(order, appearances: int, listed_unassigned: bool,
+                       report: Report) -> None:
+    """One order: served the expected number of times, or listed, never both."""
+    expected = 2 if order.kind == "SHIPMENT" else 1
+    if listed_unassigned:
+        if appearances:
+            report.fail("INV-1", "listed unassigned but also served",
+                        order_id=order.id)
+        return
+    if appearances == 0:
+        report.fail("INV-1", "neither served nor listed unassigned",
+                    order_id=order.id)
+    elif appearances != expected:
+        report.fail("INV-1", f"served {appearances} times, expected {expected}",
+                    order_id=order.id)
+
+
+def _ends_of(solution: Solution, order_id: str) -> list[tuple[str, int, str]]:
+    """Every (vehicle, position, step type) at which a plan touches an order."""
+    return [(route.vehicle_id, index, step.type)
+            for route in solution.routes
+            for index, step in enumerate(route.steps)
+            if step.order_id == order_id]
+
+
+def _check_shipment_pairs(problem: Problem, solution: Solution,
+                          report: Report) -> None:
+    """INV-2: both ends of a shipment on one route, pickup strictly first."""
     for order in problem.orders:
         if order.kind != "SHIPMENT":
             continue
-        positions = [(route.vehicle_id, index, step.type)
-                     for route in solution.routes
-                     for index, step in enumerate(route.steps)
-                     if step.order_id == order.id]
+        positions = _ends_of(solution, order.id)
         if len(positions) != 2:
             continue                                   # already reported by INV-1
         (vehicle_a, index_a, type_a), (vehicle_b, index_b, type_b) = positions
@@ -729,97 +791,111 @@ def _service_of(problem: Problem, step: Step, vehicle) -> int:
 
 def _check_route(problem: Problem, route, report: Report) -> None:
     """INV-3 timeline consistency, INV-4 travel, INV-5 load, INV-6 limits."""
-    vehicle = problem.vehicle(route.vehicle_id)
-    steps = route.steps
-    if not steps:
+    if not route.steps:
         return
+    vehicle = problem.vehicle(route.vehicle_id)
+    for step in route.steps:
+        _check_service_timing(problem, step, vehicle, report)
+        _check_load(step, vehicle, report)
+    _check_arrivals(problem, route, report)
+    _check_limits(problem, route, vehicle, report)
 
-    for step in steps:
-        # INV-3: arrival ≤ start_service, and service takes exactly as long as
-        # the problem says it does.
-        if step.arrival > step.start_service:
-            report.fail("INV-3", f"service starts {step.start_service} before "
-                                 f"arrival {step.arrival}",
-                        vehicle_id=route.vehicle_id, order_id=step.order_id)
-        expected_departure = step.start_service + _service_of(
-            problem, step, vehicle)
-        if step.order_id is not None and step.departure != expected_departure:
-            report.fail("INV-3", f"departure {step.departure} does not equal "
-                                 f"start_service + service ({expected_departure})",
-                        vehicle_id=route.vehicle_id, order_id=step.order_id)
 
-        windows = _windows_for(problem, step)
-        hard = [w for w in windows if w.hardness == "HARD"]
-        if hard and not any(w.contains(step.start_service) for w in hard):
-            report.fail("INV-3", f"service at {step.start_service} falls outside "
-                                 f"every hard window",
-                        vehicle_id=route.vehicle_id, order_id=step.order_id)
+def _check_service_timing(problem: Problem, step: Step, vehicle: Vehicle,
+                          report: Report) -> None:
+    """INV-3: arrival ≤ start_service, service takes exactly as long as the
+    problem says it does, and service falls inside a hard window."""
+    where = {"vehicle_id": vehicle.id, "order_id": step.order_id}
+    if step.arrival > step.start_service:
+        report.fail("INV-3", f"service starts {step.start_service} before "
+                             f"arrival {step.arrival}", **where)
+    expected_departure = step.start_service + _service_of(problem, step, vehicle)
+    if step.order_id is not None and step.departure != expected_departure:
+        report.fail("INV-3", f"departure {step.departure} does not equal "
+                             f"start_service + service ({expected_departure})",
+                    **where)
+    hard = [w for w in _windows_for(problem, step) if w.hardness == "HARD"]
+    if hard and not any(w.contains(step.start_service) for w in hard):
+        report.fail("INV-3", f"service at {step.start_service} falls outside "
+                             f"every hard window", **where)
 
-        # INV-5: load within capacity on every dimension, and never negative.
-        for dimension, amount in step.load_after.items():
-            if amount < 0:
-                report.fail("INV-5", f"load {dimension}={amount} is negative",
-                            vehicle_id=route.vehicle_id, order_id=step.order_id)
-            limit = vehicle.capacities.get(dimension)
-            if limit is not None and amount > limit:
-                report.fail("INV-5", f"load {dimension}={amount} exceeds "
-                                     f"capacity {limit}",
-                            vehicle_id=route.vehicle_id, order_id=step.order_id)
 
-    # INV-4: every arrival follows from the previous departure, the pinned
-    # matrix, and any breaks taken on the way. Recomputed here from the matrix,
-    # never taken from the solution.
-    #
-    # A break splits one leg into two, so BREAK steps are collapsed rather than
-    # treated as destinations: the invariant is over consecutive *stops*, with
-    # en-route break time added. Reading them as ordinary steps made every
-    # break-bearing route fail INV-4 twice -- once for the shortened leg into
-    # the break and once for the zero-length leg out of it.
-    matrix = problem.matrix
-    en_route_breaks = 0
+def _check_load(step: Step, vehicle: Vehicle, report: Report) -> None:
+    """INV-5: load within capacity on every dimension, and never negative."""
+    for dimension, amount in step.load_after.items():
+        if amount < 0:
+            report.fail("INV-5", f"load {dimension}={amount} is negative",
+                        vehicle_id=vehicle.id, order_id=step.order_id)
+        limit = vehicle.capacities.get(dimension)
+        if limit is not None and amount > limit:
+            report.fail("INV-5", f"load {dimension}={amount} exceeds "
+                                 f"capacity {limit}",
+                        vehicle_id=vehicle.id, order_id=step.order_id)
+
+
+def _legs(steps) -> Iterator[tuple[Step, Step, int]]:
+    """Consecutive stops, with the break time taken between them.
+
+    A break splits one leg into two, so BREAK steps are collapsed rather than
+    treated as destinations: INV-4 and INV-6 are over consecutive *stops*,
+    with en-route break time added. Reading breaks as ordinary steps made
+    every break-bearing route fail INV-4 twice -- once for the shortened leg
+    into the break and once for the zero-length leg out of it -- and would add
+    a spurious leg to and from the break's nominal location to INV-6's
+    distance.
+    """
+    breaks = 0
     previous = None
     for current in steps:
         if current.type == "BREAK":
-            en_route_breaks += current.departure - current.arrival
+            breaks += current.departure - current.arrival
             continue
-        if previous is None:
-            previous = current
-            continue
+        if previous is not None:
+            yield previous, current, breaks
+            breaks = 0
+        previous = current
+
+
+def _check_arrivals(problem: Problem, route, report: Report) -> None:
+    """INV-4: every arrival follows from the previous departure, the pinned
+    matrix, and any breaks taken on the way.
+
+    Recomputed here from the matrix, never taken from the solution.
+    """
+    for previous, current, breaks in _legs(route.steps):
         origin = problem.location(previous.location_id).matrix_index
         destination = problem.location(current.location_id).matrix_index
         expected = (previous.departure
                     + travel_between(problem, origin, destination,
                                      previous.departure)
-                    + en_route_breaks)
-        en_route_breaks = 0
+                    + breaks)
         if current.arrival != expected:
             report.fail("INV-4", f"arrival {current.arrival} at "
                                  f"{current.location_id} should be {expected} "
-                                 f"per matrix {matrix.version}",
+                                 f"per matrix {problem.matrix.version}",
                         vehicle_id=route.vehicle_id, order_id=current.order_id)
-        previous = current
 
-    # INV-6: duration, distance, and the shift window. Breaks are excluded from
-    # the distance walk for the same reason as INV-4 -- a break is a pause on an
-    # arc, not a place the vehicle drove to, and counting it as one would add a
-    # spurious leg to and from the break's nominal location.
-    driving_steps = [s for s in steps if s.type != "BREAK"]
+
+def _check_limits(problem: Problem, route, vehicle: Vehicle,
+                  report: Report) -> None:
+    """INV-6: duration, distance, and the shift window."""
+    steps = route.steps
     duration = steps[-1].arrival - steps[0].departure
     distance = sum(
-        matrix.distance(problem.location(a.location_id).matrix_index,
-                        problem.location(b.location_id).matrix_index)
-        for a, b in pairwise(driving_steps)
+        problem.matrix.distance(problem.location(a.location_id).matrix_index,
+                                problem.location(b.location_id).matrix_index)
+        for a, b, _breaks in _legs(steps)
     )
     if vehicle.max_duration is not None and duration > vehicle.max_duration:
         report.fail("INV-6", f"duration {duration} exceeds max_duration "
-                             f"{vehicle.max_duration}", vehicle_id=route.vehicle_id)
+                             f"{vehicle.max_duration}", vehicle_id=vehicle.id)
     if vehicle.max_distance is not None and distance > vehicle.max_distance:
         report.fail("INV-6", f"distance {distance} exceeds max_distance "
-                             f"{vehicle.max_distance}", vehicle_id=route.vehicle_id)
+                             f"{vehicle.max_distance}", vehicle_id=vehicle.id)
     if steps[0].departure < vehicle.shift.start or steps[-1].arrival > vehicle.shift.end:
         report.fail("INV-6", f"route spans {steps[0].departure}..{steps[-1].arrival}, "
                              f"outside shift {vehicle.shift.start}..{vehicle.shift.end}",
-                    vehicle_id=route.vehicle_id)
+                    vehicle_id=vehicle.id)
 
 
 def _check_objective(problem: Problem, solution: Solution, report: Report) -> None:

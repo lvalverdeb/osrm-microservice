@@ -234,3 +234,10 @@ def test_a_lock_naming_something_absent_is_refused_by_the_problem():
                       vehicle_id="V1"),))
     with pytest.raises(Exception, match="unknown vehicle"):
         problem((Lock(kind="FORCE_DEPLOY", vehicle_id="V9"),))
+
+
+def test_pin_depot_names_an_order_nobody_serves():
+    """Unassigned is not "served from the right depot": it is served from none."""
+    p = problem((Lock(kind="PIN_DEPOT", order_id="O1", depot_id="D"),))
+    report = verify(p, plan({"V1": ["O2"], "V2": ["O3"]}, p))
+    assert any("unassigned" in v for v in violations_of(report)), violations_of(report)
