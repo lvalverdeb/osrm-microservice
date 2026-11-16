@@ -132,6 +132,22 @@ before the commit and is kept as written.)
 
 ## Phase 1: give `compile_problem` a seam, then split along it
 
+**Done 2026-11-16.** The characterisation test is
+`tests/vrp/test_pyvrp_compile.py`: 258 cases over the fixture registry, the
+benchmark corpus and one hand-built instance for the branches neither reaches,
+every expectation derived from the `Problem` rather than the compiler. It was
+proven before the split by breaking the compiler four ways, each caught by
+the one test aimed at it. `compile_problem` is now 20 lines over eleven
+stage functions, `map_solution` 20 lines over a `_Walk` of the route being
+read back, and the full suite of 1,436 passed unchanged. Four errors left the
+baseline. One fact nobody had written down came out of the test: a vehicle
+with no distance cost compiles to PyVRP's default of 1, not 0.
+
+`map_solution` got no direct test of its own. Every solve-based test reads
+its output, the verifier agreement test judges it, and a direct test would
+need PyVRP solution objects that only a solve produces; the 1,436 are the
+characterisation. The paragraphs below are kept as proposed.
+
 **Order matters: the test comes first.** There is no direct test today, so a
 refactor would be checked only by the solver's end-to-end output, which is the
 weak oracle this plan exists to strengthen.
@@ -287,6 +303,12 @@ what they are for.
   the source was restored, and a test failed against a file `diff` called
   identical. Run perturbation checks with `python -B` and clear the module's
   `__pycache__` entry first.
+- **Shrinking the baseline from the wrong scan.** A scan run with the
+  pyproject baseline active omits the accepted findings from its output, so a
+  script that computes "fixed = accepted minus current" against it empties
+  the file. This happened once and was caught by the gate reporting 35 errors
+  with 0 hidden. Shrink from an unbaselined run: `spaghetti --no-pyproject
+  --package vrp=vrp --json`, then keep only the fingerprints still present.
 - **The baseline becoming a graveyard.** A baseline that only grows is worse
   than no gate because it looks like one. Phase 3 step 3 is the mitigation:
   the baseline shrinks or the plan has stalled, and either is visible.

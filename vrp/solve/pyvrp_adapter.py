@@ -21,7 +21,7 @@ docs/planning/VRP_TDD_EXAMPLES.md.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pyvrp import Model
 from pyvrp.stop import MaxIterations
@@ -31,6 +31,7 @@ from vrp.model import (
     Route,
     Solution,
     Step,
+    Vehicle,
     has_skills_for,
     may_enter,
     must_be_served,
@@ -445,20 +446,63 @@ def _dimensions(problem: Problem) -> tuple[str, ...]:
 
 
 def compile_problem(problem: Problem) -> _Compiled:
-    """Build the PyVRP model. Travel comes from the matrix, never the geometry."""
+    """Build the PyVRP model. Travel comes from the matrix, never the geometry.
+
+    Six stages, each a function below, in the order they depend on each other:
+    locations first so everything else addresses them by matrix index; depots
+    and then the open-route sink, so every vehicle has somewhere to end; the
+    orders; the eligibility profiles, before the fleet because a vehicle type
+    names the profile it routes on; the vehicle types; and the edges last,
+    because every profile needs its own set.
+
+    Args:
+        problem: The instance to compile. Must carry at least one vehicle.
+
+    Returns:
+        The model and the index maps needed to read a solution back.
+
+    Raises:
+        NotImplementedError: For a feature PyVRP cannot express as modelled.
+        ValueError: For an order released after its window closes.
+    """
     dimensions = _dimensions(problem)
     _single_profile(problem)
     bonuses = tier_bonuses(problem)
     model = Model()
+    handles = _add_locations(problem, model)
+    depots = _add_depots(problem, model, handles)
+    sink_handle, sink_depot = _add_open_route_sink(problem, model)
+    order_by_client, order_by_shipment = _add_orders(
+        problem, model, handles, dimensions, bonuses)
+    profiles = _eligibility_profiles(problem, model)
+    vehicle_ids = _add_vehicle_types(
+        problem, model, depots, sink_depot, profiles, dimensions)
+    _add_edges(problem, model, handles, profiles, sink_handle)
+    return _Compiled(model=model, dimensions=dimensions,
+                     order_by_client=order_by_client,
+                     order_by_shipment=order_by_shipment,
+                     vehicle_ids=vehicle_ids)
 
-    # One PyVRP location per domain location, in matrix-index order so the edge
-    # loop below can address them by index without a second mapping.
-    ordered = sorted(problem.locations, key=lambda location: location.matrix_index)
-    handles = [model.add_location(x=round(location.lon * 10_000),
-                                  y=round(location.lat * 10_000),
-                                  name=location.id)
-               for location in ordered]
 
+def _in_matrix_order(problem: Problem) -> list:
+    return sorted(problem.locations, key=lambda location: location.matrix_index)
+
+
+def _add_locations(problem: Problem, model: Model) -> list:
+    """One PyVRP location per domain location, addressable by matrix index.
+
+    Added in matrix-index order so the edge loop can address them by index
+    without a second mapping. Coordinates are for display only; travel comes
+    from the matrix.
+    """
+    return [model.add_location(x=round(location.lon * 10_000),
+                               y=round(location.lat * 10_000),
+                               name=location.id)
+            for location in _in_matrix_order(problem)]
+
+
+def _add_depots(problem: Problem, model: Model, handles: list) -> dict:
+    """Every place a vehicle starts, finishes a closed route, or reloads."""
     depot_ids = {vehicle.start_location_id for vehicle in problem.vehicles}
     depot_ids |= {vehicle.ends_at for vehicle in problem.vehicles
                   if not vehicle.open_route}
@@ -466,230 +510,279 @@ def compile_problem(problem: Problem) -> _Compiled:
     # nowhere to send the vehicle back to.
     depot_ids |= {name for vehicle in problem.vehicles
                   for name in vehicle.reload_locations}
-    depots = {
+    return {
         location.id: model.add_depot(location=handles[location.matrix_index],
-                                     tw_early=min(v.shift.start for v in problem.vehicles),
-                                     tw_late=max(v.shift.end for v in problem.vehicles),
+                                     tw_early=shift_start_of(problem),
+                                     tw_late=shift_end_of(problem),
                                      name=location.id)
-        for location in ordered if location.id in depot_ids
+        for location in _in_matrix_order(problem) if location.id in depot_ids
     }
 
-    # FR-08's "end-anywhere". PyVRP requires an end depot and accepts
-    # `end_depot=None` by silently closing the route -- measured, a 2 km
-    # one-way problem reports 4 km either way. A sink reachable from every
-    # location at zero cost is the construction that actually works.
-    open_sink = None
-    if any(vehicle.open_route for vehicle in problem.vehicles):
-        sink_handle = model.add_location(x=0, y=0, name="__open_route_sink__")
-        open_sink = model.add_depot(
-            location=sink_handle,
-            tw_early=min(v.shift.start for v in problem.vehicles),
-            tw_late=max(v.shift.end for v in problem.vehicles),
-            name="__open_route_sink__")
 
+def _add_open_route_sink(problem: Problem, model: Model) -> tuple:
+    """FR-08's "end-anywhere", as a location and a depot; (None, None) if unused.
+
+    PyVRP requires an end depot and accepts `end_depot=None` by silently
+    closing the route -- measured, a 2 km one-way problem reports 4 km either
+    way. A sink reachable from every location at zero cost is the construction
+    that actually works.
+    """
+    if not any(vehicle.open_route for vehicle in problem.vehicles):
+        return None, None
+    handle = model.add_location(x=0, y=0, name="__open_route_sink__")
+    depot = model.add_depot(location=handle,
+                            tw_early=shift_start_of(problem),
+                            tw_late=shift_end_of(problem),
+                            name="__open_route_sink__")
+    return handle, depot
+
+
+def _add_orders(problem: Problem, model: Model, handles: list,
+                dimensions: tuple[str, ...], bonuses: dict[int, int]) -> tuple[dict, dict]:
+    """Every order as clients or a shipment, and the two index maps back.
+
+    PyVRP numbers shipments in their own space, from zero, overlapping the
+    client indices, hence two maps: one would silently conflate them.
+    """
     order_by_client: dict[int, str] = {}
     order_by_shipment: dict[int, str] = {}
-    for index, order in enumerate(problem.orders):
+    for order in problem.orders:
         if order.kind == "SHIPMENT":
-            # FR-01: goods move from one place to another, so PyVRP models it
-            # as a pair with precedence and same-vehicle built in rather than
-            # as two clients we would then have to constrain ourselves.
-            if len(order.pickup.time_windows) > 1 or len(order.delivery.time_windows) > 1:
-                raise NotImplementedError(
-                    "a shipment end with several windows needs client groups, "
-                    "which add_shipment does not take")
-            collect = problem.location(order.pickup.location_id)
-            drop = problem.location(order.delivery.location_id)
-            model.add_shipment(
-                pickup_location=handles[collect.matrix_index],
-                delivery_location=handles[drop.matrix_index],
-                pickup_tw_early=order.pickup.time_windows[0].start
-                if order.pickup.time_windows else shift_start_of(problem),
-                pickup_tw_late=order.pickup.time_windows[0].end
-                if order.pickup.time_windows else shift_end_of(problem),
-                pickup_service_duration=service_time(
-                    order, problem.vehicles[0], collect),
-                delivery_tw_early=order.delivery.time_windows[0].start
-                if order.delivery.time_windows else shift_start_of(problem),
-                delivery_tw_late=delivery_deadline(problem, order),
-                delivery_service_duration=service_time(
-                    order, problem.vehicles[0], drop),
-                amount=[order.quantities.get(name, 0) for name in dimensions],
-                prize=order.prize + bonuses[precedence(order)],
-                required=must_be_served(order),
-                name=order.id,
-            )
+            _add_shipment(problem, model, order, handles, dimensions, bonuses)
             order_by_shipment[len(order_by_shipment)] = order.id
             continue
+        added = _add_job(problem, model, order, handles, dimensions, bonuses)
+        first = len(order_by_client)
+        order_by_client.update({first + i: order.id for i in range(added)})
+    return order_by_client, order_by_shipment
 
-        stop = order.delivery or order.pickup
-        location = problem.location(stop.location_id)
-        # §6.1's signed load: a quantity is applied at pickup and released at
-        # delivery, so which list it goes in is what makes the load profile
-        # rise or fall. A pickup-only order compiled as a delivery -- which is
-        # what happened before E-20 -- inverts the profile silently.
-        amounts = [order.quantities.get(name, 0) for name in dimensions]
-        delivered = amounts if order.delivery is not None else [0] * len(dimensions)
-        collected = amounts if order.delivery is None else [0] * len(dimensions)
-        shift_end = max(v.shift.end for v in problem.vehicles)
-        shift_start = min(v.shift.start for v in problem.vehicles)
-        windows = stop.time_windows or (None,)
 
-        # FR-04: several disjoint windows become several clients at the same
-        # place in one mutually-exclusive group, so exactly one is visited.
-        # PyVRP requires group members to be optional and the *group* to carry
-        # the requirement -- a required client inside a group is rejected.
-        group = (model.add_client_group(required=True)
-                 if len(windows) > 1 else None)
+def _add_shipment(problem: Problem, model: Model, order, handles: list,
+                  dimensions: tuple[str, ...], bonuses: dict[int, int]) -> None:
+    """FR-01: goods move from one place to another.
 
-        for window in windows:
-            early, late = _bounds(window, shift_start, shift_end)
-            if order.release_time > late:
-                # PyVRP raises "release_time must be <= tw_late" from deep
-                # inside Client(), naming no order. Our model accepts the
-                # combination -- it is infeasible, not invalid -- so it is
-                # `preflight()`'s RELEASE_AFTER_WINDOW to report, and the
-                # adapter's job is to say which order rather than die opaquely.
-                raise ValueError(
-                    f"order {order.id} is released at {order.release_time}, "
-                    f"after its window closes at {late}; run "
-                    f"vrp.diagnose.preflight() first -- this is "
-                    f"RELEASE_AFTER_WINDOW, not a malformed instance")
-            client = model.add_client(
-                location=handles[location.matrix_index],
-                delivery=delivered,
-                pickup=collected,
-                # FR-05, composed. PyVRP takes one service duration per
-                # client, so a fleet whose vehicles differ in handling speed
-                # cannot be expressed here -- see the note below.
-                service_duration=service_time(order, problem.vehicles[0],
-                                              location),
-                tw_early=early,
-                tw_late=late,
-                release_time=order.release_time,
-                prize=order.prize + bonuses[precedence(order)],
-                # FR-12 and FR-13 together. A prize makes an order declinable,
-                # but §4.1 defines tier 0 as must-serve, so a prize on a tier-0
-                # order must not quietly make it optional -- which is what
-                # `prize == 0` alone did.
-                required=(False if group is not None
-                          else must_be_served(order)),
-                group=group,
-                name=order.id,
-            )
-            order_by_client[len(order_by_client)] = order.id
-            del client
+    PyVRP models it as a pair with precedence and same-vehicle built in rather
+    than as two clients we would then have to constrain ourselves.
+    """
+    if len(order.pickup.time_windows) > 1 or len(order.delivery.time_windows) > 1:
+        raise NotImplementedError(
+            "a shipment end with several windows needs client groups, "
+            "which add_shipment does not take")
+    collect = problem.location(order.pickup.location_id)
+    drop = problem.location(order.delivery.location_id)
+    model.add_shipment(
+        pickup_location=handles[collect.matrix_index],
+        delivery_location=handles[drop.matrix_index],
+        pickup_tw_early=order.pickup.time_windows[0].start
+        if order.pickup.time_windows else shift_start_of(problem),
+        pickup_tw_late=order.pickup.time_windows[0].end
+        if order.pickup.time_windows else shift_end_of(problem),
+        pickup_service_duration=service_time(order, problem.vehicles[0], collect),
+        delivery_tw_early=order.delivery.time_windows[0].start
+        if order.delivery.time_windows else shift_start_of(problem),
+        delivery_tw_late=delivery_deadline(problem, order),
+        delivery_service_duration=service_time(order, problem.vehicles[0], drop),
+        amount=[order.quantities.get(name, 0) for name in dimensions],
+        prize=order.prize + bonuses[precedence(order)],
+        required=must_be_served(order),
+        name=order.id,
+    )
 
-    # Built before the fleet, because a vehicle type names the
-    # profile it routes on.
-    profiles = _eligibility_profiles(problem, model)
+
+def _add_job(problem: Problem, model: Model, order, handles: list,
+             dimensions: tuple[str, ...], bonuses: dict[int, int]) -> int:
+    """A pickup-only or delivery-only order, as one client per time window.
+
+    Returns:
+        How many clients were added, in PyVRP's insertion order.
+    """
+    stop = order.delivery or order.pickup
+    location = problem.location(stop.location_id)
+    # §6.1's signed load: a quantity is applied at pickup and released at
+    # delivery, so which list it goes in is what makes the load profile
+    # rise or fall. A pickup-only order compiled as a delivery -- which is
+    # what happened before E-20 -- inverts the profile silently.
+    amounts = [order.quantities.get(name, 0) for name in dimensions]
+    delivered = amounts if order.delivery is not None else [0] * len(dimensions)
+    collected = amounts if order.delivery is None else [0] * len(dimensions)
+    windows = stop.time_windows or (None,)
+
+    # FR-04: several disjoint windows become several clients at the same
+    # place in one mutually-exclusive group, so exactly one is visited.
+    # PyVRP requires group members to be optional and the *group* to carry
+    # the requirement -- a required client inside a group is rejected.
+    group = (model.add_client_group(required=True)
+             if len(windows) > 1 else None)
+
+    for window in windows:
+        early, late = _bounds(window, shift_start_of(problem), shift_end_of(problem))
+        _refuse_release_after_window(order, late)
+        model.add_client(
+            location=handles[location.matrix_index],
+            delivery=delivered,
+            pickup=collected,
+            # FR-05, composed. PyVRP takes one service duration per
+            # client, so a fleet whose vehicles differ in handling speed
+            # cannot be expressed here -- see the note below.
+            service_duration=service_time(order, problem.vehicles[0], location),
+            tw_early=early,
+            tw_late=late,
+            release_time=order.release_time,
+            prize=order.prize + bonuses[precedence(order)],
+            # FR-12 and FR-13 together. A prize makes an order declinable,
+            # but §4.1 defines tier 0 as must-serve, so a prize on a tier-0
+            # order must not quietly make it optional -- which is what
+            # `prize == 0` alone did.
+            required=(False if group is not None else must_be_served(order)),
+            group=group,
+            name=order.id,
+        )
+    return len(windows)
+
+
+def _refuse_release_after_window(order, late: int) -> None:
+    """Name the order, rather than let PyVRP die opaquely.
+
+    PyVRP raises "release_time must be <= tw_late" from deep inside Client(),
+    naming no order. Our model accepts the combination -- it is infeasible, not
+    invalid -- so it is `preflight()`'s RELEASE_AFTER_WINDOW to report, and the
+    adapter's job is to say which order.
+    """
+    if order.release_time > late:
+        raise ValueError(
+            f"order {order.id} is released at {order.release_time}, "
+            f"after its window closes at {late}; run "
+            f"vrp.diagnose.preflight() first -- this is "
+            f"RELEASE_AFTER_WINDOW, not a malformed instance")
+
+
+def _add_vehicle_types(problem: Problem, model: Model, depots: dict, sink_depot,
+                       profiles: dict, dimensions: tuple[str, ...]) -> list[str]:
+    """One vehicle type per vehicle, on the profile its restrictions put it on."""
     vehicle_ids: list[str] = []
     for vehicle in problem.vehicles:
-        # PyVRP spells the duration limit `shift_duration`, and both limits
-        # must be omitted rather than passed as None when unset.
-        limits = {}
-        if vehicle.max_duration is not None:
-            limits["shift_duration"] = vehicle.max_duration
-        if vehicle.max_distance is not None:
-            limits["max_distance"] = vehicle.max_distance
-        # FR-07: costs come from the vehicle. PyVRP names them differently and
-        # takes them natively, so this is wiring rather than modelling.
-        costs = {}
-        if vehicle.fixed_cost:
-            costs["fixed_cost"] = vehicle.fixed_cost
-        if vehicle.cost_per_metre:
-            costs["unit_distance_cost"] = vehicle.cost_per_metre
-        if vehicle.cost_per_second:
-            costs["unit_duration_cost"] = vehicle.cost_per_second
-        if vehicle.overtime_cost_per_second:
-            # Wired, and inert. PyVRP charges this only for duration beyond
-            # `shift_duration`, and only up to `max_overtime`, which defaults
-            # to zero and is never set here -- so no route may run long enough
-            # to owe any. Nor could one: `shift_duration` is `max_duration`,
-            # which `INV-6` makes a hard bound, so a route that exceeded it
-            # would be rejected by the verifier whatever it cost.
-            #
-            # Left wired rather than deleted because the cost is FR-07's and
-            # the field is real; what is missing is a *permitted* overtime
-            # band, which would mean teaching `INV-6` that `max_duration` is
-            # nominal rather than hard. That is a modelling decision, not
-            # wiring, and until it is made this line can only ever be a no-op.
-            # `test_overtime_cannot_occur_so_nothing_charges_it` pins that, so
-            # the field cannot be mistaken for a live one again.
-            costs["unit_overtime_cost"] = vehicle.overtime_cost_per_second
-
-        # FR-09: PyVRP models multi-trip natively as reload depots, so this is
-        # wiring. §6.8 forbids approximating it by chaining single-trip plans,
-        # which is what a hand-rolled version would end up doing.
-        if vehicle.max_reloads and vehicle.reload_locations:
-            limits["reload_depots"] = [
-                depots[name] for name in sorted(vehicle.reload_locations)
-                if name in depots]
-            limits["max_reloads"] = vehicle.max_reloads
-
         model.add_vehicle_type(
             profile=profiles[_eligibility_key(problem, vehicle)][0],
             num_available=1,
             capacity=[vehicle.capacities.get(name, 0) for name in dimensions],
             start_depot=depots[vehicle.start_location_id],
-            end_depot=open_sink if vehicle.open_route else depots[vehicle.ends_at],
+            end_depot=sink_depot if vehicle.open_route else depots[vehicle.ends_at],
             tw_early=vehicle.shift.start,
             tw_late=vehicle.shift.end,
             name=vehicle.id,
-            **costs,
-            **limits,
+            **_vehicle_costs(vehicle),
+            **_vehicle_limits(vehicle, depots),
         )
         vehicle_ids.append(vehicle.id)
+    return vehicle_ids
 
+
+def _vehicle_costs(vehicle) -> dict:
+    """FR-07: costs come from the vehicle.
+
+    PyVRP names them differently and takes them natively, so this is wiring
+    rather than modelling. Each is passed only when set: PyVRP's own default
+    stands otherwise, and for distance that default is 1, not 0.
+    """
+    costs = {}
+    if vehicle.fixed_cost:
+        costs["fixed_cost"] = vehicle.fixed_cost
+    if vehicle.cost_per_metre:
+        costs["unit_distance_cost"] = vehicle.cost_per_metre
+    if vehicle.cost_per_second:
+        costs["unit_duration_cost"] = vehicle.cost_per_second
+    if vehicle.overtime_cost_per_second:
+        # Wired, and inert. PyVRP charges this only for duration beyond
+        # `shift_duration`, and only up to `max_overtime`, which defaults
+        # to zero and is never set here -- so no route may run long enough
+        # to owe any. Nor could one: `shift_duration` is `max_duration`,
+        # which `INV-6` makes a hard bound, so a route that exceeded it
+        # would be rejected by the verifier whatever it cost.
+        #
+        # Left wired rather than deleted because the cost is FR-07's and
+        # the field is real; what is missing is a *permitted* overtime
+        # band, which would mean teaching `INV-6` that `max_duration` is
+        # nominal rather than hard. That is a modelling decision, not
+        # wiring, and until it is made this line can only ever be a no-op.
+        # `test_overtime_cannot_occur_so_nothing_charges_it` pins that, so
+        # the field cannot be mistaken for a live one again.
+        costs["unit_overtime_cost"] = vehicle.overtime_cost_per_second
+    return costs
+
+
+def _vehicle_limits(vehicle, depots: dict) -> dict:
+    """Duration, distance and reload limits, each omitted rather than None.
+
+    PyVRP spells the duration limit `shift_duration`, and both limits must be
+    omitted rather than passed as None when unset.
+    """
+    limits = {}
+    if vehicle.max_duration is not None:
+        limits["shift_duration"] = vehicle.max_duration
+    if vehicle.max_distance is not None:
+        limits["max_distance"] = vehicle.max_distance
+    # FR-09: PyVRP models multi-trip natively as reload depots, so this is
+    # wiring. §6.8 forbids approximating it by chaining single-trip plans,
+    # which is what a hand-rolled version would end up doing.
+    if vehicle.max_reloads and vehicle.reload_locations:
+        limits["reload_depots"] = [
+            depots[name] for name in sorted(vehicle.reload_locations)
+            if name in depots]
+        limits["max_reloads"] = vehicle.max_reloads
+    return limits
+
+
+def _add_edges(problem: Problem, model: Model, handles: list, profiles: dict,
+               sink_handle) -> None:
+    """The matrix, once per profile, minus what that profile may not enter.
+
+    FR-10 and FR-11 are eligibility, and eligibility is a property of the
+    (vehicle, place) pair rather than of the plan. PyVRP expresses it with
+    profiles: a vehicle type routes on its own edge set, and a place it may
+    not enter simply has no edge into it. Omitting the edge is the library's
+    own "unconnected" marker, not a large finite cost the search can trade
+    against -- the same distinction MTX-5 makes for unreachable arcs.
+
+    Before this, `add_vehicle_type` carried capacity, depots, shifts and
+    costs and nothing that made a client ineligible, so the search assigned
+    gas work to an electricity-only crew and the verifier rejected the plan
+    afterwards. Detecting a plan you had no way to avoid building is not
+    enforcement.
+    """
     matrix = problem.matrix
-    # FR-10 and FR-11 are eligibility, and eligibility is a property of the
-    # (vehicle, place) pair rather than of the plan. PyVRP expresses it with
-    # profiles: a vehicle type routes on its own edge set, and a place it may
-    # not enter simply has no edge into it. Omitting the edge is the library's
-    # own "unconnected" marker, not a large finite cost the search can trade
-    # against -- the same distinction MTX-5 makes for unreachable arcs.
-    #
-    # Before this, `add_vehicle_type` carried capacity, depots, shifts and
-    # costs and nothing that made a client ineligible, so the search assigned
-    # gas work to an electricity-only crew and the verifier rejected the plan
-    # afterwards. Detecting a plan you had no way to avoid building is not
-    # enforcement.
+    ordered = _in_matrix_order(problem)
     for profile, forbidden in profiles.values():
         for origin in ordered:
             for destination in ordered:
-                if origin.matrix_index == destination.matrix_index:
-                    continue
-                if destination.matrix_index in forbidden:
-                    # Not reachable *for this profile*. Edges out of a
-                    # forbidden place are harmless once nothing can arrive.
-                    continue
-                if not matrix.is_reachable(origin.matrix_index,
-                                           destination.matrix_index):
-                    # MTX-5: an unreachable pair is a hard-infeasible arc, so
-                    # the edge is absent. Absent is not forbidden -- PyVRP
-                    # routes through a missing edge and reports INFEASIBLE --
-                    # which is why `_refuse_unreachable` runs before any of
-                    # this. Skipping here keeps a phantom cost out of the
-                    # model for the instances that do get built.
-                    continue
-                model.add_edge(
-                    handles[origin.matrix_index],
-                    handles[destination.matrix_index],
-                    distance=matrix.distance(origin.matrix_index,
-                                             destination.matrix_index),
-                    duration=matrix.duration(origin.matrix_index,
-                                             destination.matrix_index),
-                    profile=profile,
-                )
-        if open_sink is not None:
-            for origin in ordered:
+                if _routable(matrix, origin, destination, forbidden):
+                    model.add_edge(
+                        handles[origin.matrix_index],
+                        handles[destination.matrix_index],
+                        distance=matrix.distance(origin.matrix_index,
+                                                 destination.matrix_index),
+                        duration=matrix.duration(origin.matrix_index,
+                                                 destination.matrix_index),
+                        profile=profile,
+                    )
+            if sink_handle is not None:
                 model.add_edge(handles[origin.matrix_index], sink_handle,
                                distance=0, duration=0, profile=profile)
 
-    return _Compiled(model=model, dimensions=dimensions,
-                     order_by_client=order_by_client,
-                     order_by_shipment=order_by_shipment,
-                     vehicle_ids=vehicle_ids)
+
+def _routable(matrix, origin, destination, forbidden: frozenset[int]) -> bool:
+    """Whether this profile gets an edge from origin to destination."""
+    if origin.matrix_index == destination.matrix_index:
+        return False
+    if destination.matrix_index in forbidden:
+        # Not reachable *for this profile*. Edges out of a forbidden place
+        # are harmless once nothing can arrive.
+        return False
+    # MTX-5: an unreachable pair is a hard-infeasible arc, so the edge is
+    # absent. Absent is not forbidden -- PyVRP routes through a missing edge
+    # and reports INFEASIBLE -- which is why `_refuse_unreachable` runs
+    # before any of this. Skipping here keeps a phantom cost out of the model
+    # for the instances that do get built.
+    return matrix.is_reachable(origin.matrix_index, destination.matrix_index)
 
 
 def map_solution(problem: Problem, compiled: _Compiled, best,
@@ -703,123 +796,11 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
     units=48 exceeds capacity 12` -- which is precisely the job it exists to
     do, but the adapter should not be the one lying.
     """
-    dimensions = compiled.dimensions
-    index_to_location = {location.matrix_index: location
-                         for location in problem.locations}
-    routes: list[Route] = []
     served: set[str] = set()
-
-    for route in best.routes():
-        vehicle_id = compiled.vehicle_ids[route.vehicle_type()]
-        vehicle = problem.vehicle(vehicle_id)
-        # Load is reconstructed rather than read back: PyVRP reports a route
-        # total, and INV-5 is about the load carried at each step.
-        # The vehicle leaves the depot carrying everything it will drop, and
-        # nothing it will collect. Reconstructed per dimension rather than read
-        # back: PyVRP reports a route total, and INV-5 is about the load at
-        # each step -- which for a route that both drops and collects is a
-        # different number (§6.1's peak, not the total).
-        # Only job deliveries are loaded at the depot, and -- with multi-trip
-        # (§6.8) -- only the ones for the *current* trip. Summing the whole
-        # route had a 100 kg van leaving the depot carrying 180 kg of a
-        # three-trip day, which INV-5 rightly rejected.
-        #
-        # Shipments are excluded by `is_client()` alone: a shipment activity is
-        # never a client. An explicit `kind == "JOB"` test alongside it was
-        # unfalsifiable, which is the signature of a guard that reads as
-        # protection and provides none.
-        activities = list(route)
-        # From 1, not 0: position 0 is the START depot itself, and a scan
-        # beginning there stops on its own boundary and loads nothing.
-        on_board = _trip_load(problem, compiled, activities, 1, dimensions)
-
-        steps: list[Step] = []
-        for position, activity in enumerate(activities):
-            if activity.is_depot():
-                # A depot visit in the middle of a route is a reload, not an
-                # end (§6.8). Mapping every one after the first as END gave a
-                # multi-trip route three ENDs, which no invariant expected and
-                # which hid the reload from INV-11 entirely.
-                last = position == len(activities) - 1
-                kind = "START" if not steps else ("END" if last else "RELOAD")
-                if kind == "RELOAD":
-                    # Restocked for the next trip only, which is what makes
-                    # multi-trip legal at all: the van never holds more than one
-                    # trip's worth.
-                    on_board.update(_trip_load(problem, compiled, activities,
-                                               position + 1, dimensions))
-                    steps.append(Step(
-                        type="RELOAD", location_id=vehicle.reload_locations and
-                        next(iter(sorted(vehicle.reload_locations))) or
-                        vehicle.start_location_id,
-                        arrival=activity.start_time,
-                        start_service=activity.start_time,
-                        departure=activity.end_time,
-                        load_after=dict(on_board)))
-                    continue
-                if kind == "END" and problem.vehicle(vehicle_id).open_route:
-                    # The sink is a modelling device, not a place. An open
-                    # route ends where it last stopped, which is the step
-                    # already recorded -- so the END carries that location and
-                    # the zero-cost arc to the sink never appears in the plan.
-                    steps.append(Step(type="END", location_id=steps[-1].location_id,
-                                      arrival=steps[-1].departure,
-                                      start_service=steps[-1].departure,
-                                      departure=steps[-1].departure,
-                                      load_after=dict(steps[-1].load_after)))
-                    continue
-                location = index_to_location[
-                    problem.location(
-                        _depot_location_id(problem, route, activity)).matrix_index]
-                steps.append(Step(type=kind, location_id=location.id,
-                                  arrival=activity.start_time,
-                                  start_service=activity.start_time,
-                                  departure=activity.end_time,
-                                  load_after=dict(on_board)))
-                continue
-
-            # Which index space this activity belongs to decides which order
-            # it names. PyVRP numbers clients and shipments separately from
-            # zero, so reading `idx` without checking would map shipment 0 onto
-            # client 0 and report a well-formed plan naming the wrong stops.
-            if activity.is_shipment():
-                order_id = compiled.order_by_shipment[activity.idx]
-                order = problem.order(order_id)
-                collecting = activity.is_pickup()
-                stop = order.pickup if collecting else order.delivery
-                kind = "PICKUP" if collecting else "DELIVERY"
-            else:
-                order_id = compiled.order_by_client[activity.idx]
-                order = problem.order(order_id)
-                stop = order.delivery or order.pickup
-                collecting = order.delivery is None
-                kind = "DELIVERY" if order.delivery is not None else "PICKUP"
-
-            served.add(order_id)
-            for name in dimensions:
-                quantity = order.quantities.get(name, 0)
-                on_board[name] += quantity if collecting else -quantity
-            steps.append(Step(
-                type=kind,
-                location_id=stop.location_id, order_id=order_id,
-                # `start_time` is when service begins; arrival is that minus any
-                # wait. PyVRP reports the wait separately, so this reconstructs
-                # the arrival it implies rather than inventing one.
-                arrival=activity.start_time - activity.wait_duration,
-                start_service=activity.start_time,
-                departure=activity.end_time,
-                load_after=dict(on_board),
-            ))
-        routes.append(Route(vehicle_id=vehicle_id, steps=tuple(steps)))
-
-    unassigned = tuple(
-        {"order_id": order.id, "reason_code": "NOT_PLACED",
-         "explanation": "the solver could not place this order within the "
-                        "fleet's capacity and time constraints"}
-        for order in problem.orders if order.id not in served
-    )
-    return Solution(problem_id=problem.id, routes=tuple(routes),
-                    unassigned=unassigned,
+    routes = tuple(_map_route(problem, compiled, route, served)
+                   for route in best.routes())
+    return Solution(problem_id=problem.id, routes=routes,
+                    unassigned=_unassigned(problem, served),
                     # INV-9: the solver's *own* distance, taken from PyVRP's
                     # accounting over its compiled model rather than recomputed
                     # from `problem.matrix`. Recomputing it here would hand the
@@ -836,6 +817,148 @@ def map_solution(problem: Problem, compiled: _Compiled, best,
                     # and the matrix is the only thing that does.
                     degraded=problem.matrix.degraded,
                     solver=dict(solver or {}) or None)
+
+
+@dataclass
+class _Walk:
+    """One PyVRP route being read back, and what the vehicle holds as it goes."""
+    problem: Problem
+    compiled: _Compiled
+    route: object
+    vehicle: Vehicle
+    activities: list
+    steps: list[Step] = field(default_factory=list)
+    on_board: dict[str, int] = field(default_factory=dict)
+
+
+def _map_route(problem: Problem, compiled: _Compiled, route,
+               served: set[str]) -> Route:
+    """One PyVRP route as ours, recording which orders it served."""
+    walk = _Walk(problem=problem, compiled=compiled, route=route,
+                 vehicle=problem.vehicle(compiled.vehicle_ids[route.vehicle_type()]),
+                 activities=list(route))
+    # Load is reconstructed rather than read back: PyVRP reports a route
+    # total, and INV-5 is about the load carried at each step.
+    # The vehicle leaves the depot carrying everything it will drop, and
+    # nothing it will collect. Reconstructed per dimension rather than read
+    # back: PyVRP reports a route total, and INV-5 is about the load at
+    # each step -- which for a route that both drops and collects is a
+    # different number (§6.1's peak, not the total).
+    # Only job deliveries are loaded at the depot, and -- with multi-trip
+    # (§6.8) -- only the ones for the *current* trip. Summing the whole
+    # route had a 100 kg van leaving the depot carrying 180 kg of a
+    # three-trip day, which INV-5 rightly rejected.
+    #
+    # Shipments are excluded by `is_client()` alone: a shipment activity is
+    # never a client. An explicit `kind == "JOB"` test alongside it was
+    # unfalsifiable, which is the signature of a guard that reads as
+    # protection and provides none.
+    #
+    # From 1, not 0: position 0 is the START depot itself, and a scan
+    # beginning there stops on its own boundary and loads nothing.
+    walk.on_board = _trip_load(problem, compiled, walk.activities, 1,
+                               compiled.dimensions)
+    for position, activity in enumerate(walk.activities):
+        if activity.is_depot():
+            walk.steps.append(_depot_step(walk, position))
+        else:
+            step = _stop_step(walk, activity)
+            served.add(step.order_id)
+            walk.steps.append(step)
+    return Route(vehicle_id=walk.vehicle.id, steps=tuple(walk.steps))
+
+
+def _depot_step(walk: _Walk, position: int) -> Step:
+    """A depot visit is a START, an END, or -- in the middle -- a RELOAD.
+
+    §6.8. Mapping every depot after the first as END gave a multi-trip route
+    three ENDs, which no invariant expected and which hid the reload from
+    INV-11 entirely.
+    """
+    activity = walk.activities[position]
+    last = position == len(walk.activities) - 1
+    kind = "START" if not walk.steps else ("END" if last else "RELOAD")
+    if kind == "RELOAD":
+        return _reload_step(walk, position)
+    if kind == "END" and walk.vehicle.open_route:
+        return _open_route_end(walk)
+    return Step(type=kind,
+                location_id=_depot_location_id(walk.problem, walk.route, activity),
+                arrival=activity.start_time,
+                start_service=activity.start_time,
+                departure=activity.end_time,
+                load_after=dict(walk.on_board))
+
+
+def _reload_step(walk: _Walk, position: int) -> Step:
+    """Restocked for the next trip only.
+
+    Which is what makes multi-trip legal at all: the van never holds more than
+    one trip's worth.
+    """
+    activity = walk.activities[position]
+    walk.on_board.update(_trip_load(walk.problem, walk.compiled, walk.activities,
+                                    position + 1, walk.compiled.dimensions))
+    reloads = walk.vehicle.reload_locations
+    return Step(type="RELOAD",
+                location_id=(reloads and next(iter(sorted(reloads)))
+                             or walk.vehicle.start_location_id),
+                arrival=activity.start_time,
+                start_service=activity.start_time,
+                departure=activity.end_time,
+                load_after=dict(walk.on_board))
+
+
+def _open_route_end(walk: _Walk) -> Step:
+    """An open route ends where it last stopped.
+
+    The sink is a modelling device, not a place. The END carries the last
+    recorded stop's location and the zero-cost arc to the sink never appears
+    in the plan.
+    """
+    last = walk.steps[-1]
+    return Step(type="END", location_id=last.location_id,
+                arrival=last.departure, start_service=last.departure,
+                departure=last.departure, load_after=dict(last.load_after))
+
+
+def _stop_step(walk: _Walk, activity) -> Step:
+    """A pickup or delivery, with the load it leaves on board."""
+    # Which index space this activity belongs to decides which order
+    # it names. PyVRP numbers clients and shipments separately from
+    # zero, so reading `idx` without checking would map shipment 0 onto
+    # client 0 and report a well-formed plan naming the wrong stops.
+    if activity.is_shipment():
+        order = walk.problem.order(walk.compiled.order_by_shipment[activity.idx])
+        collecting = activity.is_pickup()
+        stop = order.pickup if collecting else order.delivery
+    else:
+        order = walk.problem.order(walk.compiled.order_by_client[activity.idx])
+        collecting = order.delivery is None
+        stop = order.delivery or order.pickup
+    for name in walk.compiled.dimensions:
+        quantity = order.quantities.get(name, 0)
+        walk.on_board[name] += quantity if collecting else -quantity
+    return Step(
+        type="PICKUP" if collecting else "DELIVERY",
+        location_id=stop.location_id, order_id=order.id,
+        # `start_time` is when service begins; arrival is that minus any
+        # wait. PyVRP reports the wait separately, so this reconstructs
+        # the arrival it implies rather than inventing one.
+        arrival=activity.start_time - activity.wait_duration,
+        start_service=activity.start_time,
+        departure=activity.end_time,
+        load_after=dict(walk.on_board),
+    )
+
+
+def _unassigned(problem: Problem, served: set[str]) -> tuple[dict, ...]:
+    return tuple(
+        {"order_id": order.id, "reason_code": "NOT_PLACED",
+         "explanation": "the solver could not place this order within the "
+                        "fleet's capacity and time constraints"}
+        for order in problem.orders if order.id not in served
+    )
 
 
 def _trip_load(problem: Problem, compiled: _Compiled, activities: list,
